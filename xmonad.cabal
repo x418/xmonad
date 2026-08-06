@@ -54,6 +54,14 @@ flag pedantic
   default:     False
   manual:      True
 
+flag river
+  description: Build against river/Wayland instead of X11.
+  default:     False
+  manual:      True
+  -- 'manual' matters: without it the solver is free to flip this to resolve a
+  -- build plan, and "my X11 build silently became a Wayland build because
+  -- libX11 was missing" is a bad afternoon.
+
 library
   exposed-modules: XMonad
                    XMonad.Config
@@ -64,9 +72,7 @@ library
                    XMonad.Operations
                    XMonad.StackSet
   other-modules:   Paths_xmonad
-  hs-source-dirs:  src
   build-depends:   base                  >= 4.12 && < 5
-                 , X11                   >= 1.10 && < 1.11
                  , containers
                  , data-default-class
                  , directory
@@ -77,6 +83,39 @@ library
                  , time
                  , transformers          >= 0.3
                  , unix
+
+  -- The backend is selected by source-directory precedence, not by #ifdef.
+  -- Under -f river, cabal searches src-river before src, so
+  -- src-river/XMonad/Core.hs shadows src/XMonad/Core.hs.  Nothing under src/
+  -- is edited to accommodate river; tests/check-x11-source.sh enforces that
+  -- against the SHA in tests/upstream-base.sha.
+  --
+  -- XMonad.StackSet, XMonad.Layout and XMonad.ManageHook are *not* shadowed.
+  -- They are shared by both builds, which is why src-river supplies
+  -- Graphics.X11* modules: those two import Rectangle, Event, getClassHint
+  -- and friends directly, and contrib imports Graphics.X11 as well.
+  if flag(river)
+    hs-source-dirs:  src-river src
+    exposed-modules: Graphics.X11
+                     Graphics.X11.Types
+                     Graphics.X11.Xinerama
+                     Graphics.X11.Xlib
+                     Graphics.X11.Xlib.Atom
+                     Graphics.X11.Xlib.Extras
+                     Graphics.X11.Xlib.Types
+                     Graphics.X11.Xrandr
+    other-modules:   XMonad.River.Connection
+                     XMonad.River.Protocol.WindowManagement
+                     XMonad.River.Protocol.XkbBindings
+                     XMonad.River.Wire
+                     XMonad.River.WM
+    build-depends:   bytestring
+                   , network
+                   , store-core
+  else
+    hs-source-dirs:  src
+    build-depends:   X11                   >= 1.10 && < 1.11
+
   ghc-options:     -funbox-strict-fields -Wall -Wno-unused-do-bind -Wincomplete-patterns -Wincomplete-uni-patterns
   if impl(ghc > 8.8.4)
     ghc-options:   -Wunused-packages
@@ -130,9 +169,13 @@ test-suite properties
   build-depends:  base
                 , QuickCheck >= 2
                 , quickcheck-classes >= 0.4.3
-                , X11
                 , containers
                 , xmonad
+  -- The test-suite uses X11 only for Rectangle and Dimension.  Under -f river
+  -- those come from the compat modules the library itself exposes, so the
+  -- dependency must not be pulled in.
+  if !flag(river)
+    build-depends: X11
   default-language: Haskell2010
 
   ghc-options:     -Wno-incomplete-patterns -Wno-incomplete-uni-patterns

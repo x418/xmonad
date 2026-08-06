@@ -1,10 +1,7 @@
-resolver: lts-21.12
+resolver: lts-24.53
 
 packages:
 - ./
-
-extra-deps:
-- X11-1.10
 
 nix:
   packages:

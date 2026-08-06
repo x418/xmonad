@@ -1,0 +1,12 @@
+# The commit whose sources the X11 build must reproduce byte for byte.
+#
+# Everything the library compiles with the river flag *off* — src/ and the
+# cabal file's shared stanza — is checked against this tree by
+# tests/check-x11-source.sh.  The river backend is not allowed to perturb the
+# X11 build, and a fork whose whole purpose is to track upstream cannot afford
+# to find that out by bisecting later.
+#
+# Changing the X11 build is not forbidden, only unreviewable-by-accident.  When
+# you do mean to change it, update this SHA in the same commit; the diff of
+# this file is the signal that the X11 build moved on purpose.
+fa3926efabf5dfe39de553a4d89a43296ed7c996

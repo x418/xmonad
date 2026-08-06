@@ -1,0 +1,1458 @@
+XMonad | _xSetErrorHandler :: FunPtr CXErrorHandler -> IO (FunPtr CXErrorHandler)
+XMonad | aRC :: Atom
+XMonad | aTOM :: Atom
+XMonad | activateScreenSaver :: Display -> IO ()
+XMonad | addToSaveSet :: Display -> Window -> IO ()
+XMonad | allHintsBitmask :: CLong
+XMonad | allPlanes_aux :: Pixel
+XMonad | allocAll :: ColormapAlloc
+XMonad | allocColor :: Display -> Colormap -> Color -> IO Color
+XMonad | allocNamedColor :: Display -> Colormap -> String -> IO (Color, Color)
+XMonad | allocNone :: ColormapAlloc
+XMonad | allocaSetWindowAttributes :: (Ptr SetWindowAttributes -> IO a) -> IO a
+XMonad | allocaXEvent :: (XEventPtr -> IO a) -> IO a
+XMonad | allowEvents :: Display -> AllowEvents -> Time -> IO ()
+XMonad | allowExposures :: AllowExposuresMode
+XMonad | alreadyGrabbed :: GrabStatus
+XMonad | always :: BackingStore
+XMonad | anyButton :: Button
+XMonad | anyKey :: KeyCode
+XMonad | anyModifier :: Modifier
+XMonad | anyPropertyType :: Atom
+XMonad | arcChord :: ArcMode
+XMonad | arcPieSlice :: ArcMode
+XMonad | asKeyEvent :: XEventPtr -> XKeyEventPtr
+XMonad | ascentFromFontStruct :: FontStruct -> Int32
+XMonad | asyncBoth :: AllowEvents
+XMonad | asyncKeyboard :: AllowEvents
+XMonad | asyncPointer :: AllowEvents
+XMonad | autoRepeatOff :: Display -> IO ()
+XMonad | autoRepeatOn :: Display -> IO ()
+XMonad | bITMAP :: Atom
+XMonad | badAccess :: ErrorCode
+XMonad | badAlloc :: ErrorCode
+XMonad | badAtom :: ErrorCode
+XMonad | badColor :: ErrorCode
+XMonad | badCursor :: ErrorCode
+XMonad | badDrawable :: ErrorCode
+XMonad | badFont :: ErrorCode
+XMonad | badGC :: ErrorCode
+XMonad | badIDChoice :: ErrorCode
+XMonad | badImplementation :: ErrorCode
+XMonad | badLength :: ErrorCode
+XMonad | badMatch :: ErrorCode
+XMonad | badName :: ErrorCode
+XMonad | badPixmap :: ErrorCode
+XMonad | badRequest :: ErrorCode
+XMonad | badValue :: ErrorCode
+XMonad | badWindow :: ErrorCode
+XMonad | bell :: Display -> CInt -> IO ()
+XMonad | bitmapBitOrder :: Display -> ByteOrder
+XMonad | bitmapPad :: Display -> CInt
+XMonad | bitmapUnit :: Display -> CInt
+XMonad | blackPixel :: Display -> ScreenNumber -> Pixel
+XMonad | blackPixelOfScreen :: Screen -> Pixel
+XMonad | button1 :: Button
+XMonad | button1Mask :: ButtonMask
+XMonad | button1MotionMask :: EventMask
+XMonad | button2 :: Button
+XMonad | button2Mask :: ButtonMask
+XMonad | button2MotionMask :: EventMask
+XMonad | button3 :: Button
+XMonad | button3Mask :: ButtonMask
+XMonad | button3MotionMask :: EventMask
+XMonad | button4 :: Button
+XMonad | button4Mask :: ButtonMask
+XMonad | button4MotionMask :: EventMask
+XMonad | button5 :: Button
+XMonad | button5Mask :: ButtonMask
+XMonad | button5MotionMask :: EventMask
+XMonad | buttonMotionMask :: EventMask
+XMonad | buttonPress :: EventType
+XMonad | buttonPressMask :: EventMask
+XMonad | buttonRelease :: EventType
+XMonad | buttonReleaseMask :: EventMask
+XMonad | cAP_HEIGHT :: Atom
+XMonad | cARDINAL :: Atom
+XMonad | cOLORMAP :: Atom
+XMonad | cOPYRIGHT :: Atom
+XMonad | cURSOR :: Atom
+XMonad | cUT_BUFFER0 :: Atom
+XMonad | cUT_BUFFER1 :: Atom
+XMonad | cUT_BUFFER2 :: Atom
+XMonad | cUT_BUFFER3 :: Atom
+XMonad | cUT_BUFFER4 :: Atom
+XMonad | cUT_BUFFER5 :: Atom
+XMonad | cUT_BUFFER6 :: Atom
+XMonad | cUT_BUFFER7 :: Atom
+XMonad | cWBackPixel :: AttributeMask
+XMonad | cWBackPixmap :: AttributeMask
+XMonad | cWBackingPixel :: AttributeMask
+XMonad | cWBackingPlanes :: AttributeMask
+XMonad | cWBackingStore :: AttributeMask
+XMonad | cWBitGravity :: AttributeMask
+XMonad | cWBorderPixel :: AttributeMask
+XMonad | cWBorderPixmap :: AttributeMask
+XMonad | cWColormap :: AttributeMask
+XMonad | cWCursor :: AttributeMask
+XMonad | cWDontPropagate :: AttributeMask
+XMonad | cWEventMask :: AttributeMask
+XMonad | cWHeight :: AttributeMask
+XMonad | cWOverrideRedirect :: AttributeMask
+XMonad | cWSaveUnder :: AttributeMask
+XMonad | cWWidth :: AttributeMask
+XMonad | cWWinGravity :: AttributeMask
+XMonad | cWX :: AttributeMask
+XMonad | cWY :: AttributeMask
+XMonad | capButt :: CapStyle
+XMonad | capNotLast :: CapStyle
+XMonad | capProjecting :: CapStyle
+XMonad | capRound :: CapStyle
+XMonad | cellsOfScreen :: Screen -> CInt
+XMonad | centerGravity :: BitGravity
+XMonad | changeProperty16 :: Display -> Window -> Atom -> Atom -> CInt -> [CShort] -> IO ()
+XMonad | changeProperty32 :: Display -> Window -> Atom -> Atom -> CInt -> [CLong] -> IO ()
+XMonad | changeProperty8 :: Display -> Window -> Atom -> Atom -> CInt -> [CChar] -> IO ()
+XMonad | changeSaveSet :: Display -> Window -> ChangeSaveSetMode -> IO ()
+XMonad | changeWindowAttributes :: Display -> Window -> AttributeMask -> Ptr SetWindowAttributes -> IO ()
+XMonad | checkMaskEvent :: Display -> EventMask -> XEventPtr -> IO Bool
+XMonad | checkTypedEvent :: Display -> EventType -> XEventPtr -> IO Bool
+XMonad | checkTypedWindowEvent :: Display -> Window -> EventType -> XEventPtr -> IO Bool
+XMonad | checkWindowEvent :: Display -> Window -> EventMask -> XEventPtr -> IO Bool
+XMonad | circulateNotify :: EventType
+XMonad | circulateRequest :: EventType
+XMonad | circulateSubwindows :: Display -> Window -> CirculationDirection -> IO ()
+XMonad | circulateSubwindowsDown :: Display -> Window -> IO ()
+XMonad | circulateSubwindowsUp :: Display -> Window -> IO ()
+XMonad | clearArea :: Display -> Window -> Position -> Position -> Dimension -> Dimension -> Bool -> IO ()
+XMonad | clearWindow :: Display -> Window -> IO ()
+XMonad | clientMessage :: EventType
+XMonad | clipBox :: Region -> IO (Rectangle, CInt)
+XMonad | clipByChildren :: SubWindowMode
+XMonad | closeDisplay :: Display -> IO ()
+XMonad | colormapChangeMask :: EventMask
+XMonad | colormapInstalled :: ColormapNotification
+XMonad | colormapNotify :: EventType
+XMonad | colormapUninstalled :: ColormapNotification
+XMonad | complex :: PolygonShape
+XMonad | configureNotify :: EventType
+XMonad | configureRequest :: EventType
+XMonad | configureWindow :: Display -> Window -> CULong -> WindowChanges -> IO ()
+XMonad | connectionNumber :: Display -> CInt
+XMonad | controlMapIndex :: Modifier
+XMonad | controlMask :: KeyMask
+XMonad | convex :: PolygonShape
+XMonad | coordModeOrigin :: CoordinateMode
+XMonad | coordModePrevious :: CoordinateMode
+XMonad | copyArea :: Display -> Drawable -> Drawable -> GC -> Position -> Position -> Dimension -> Dimension -> Position -> Position -> IO ()
+XMonad | copyColormapAndFree :: Display -> Colormap -> IO Colormap
+XMonad | copyFromParent :: WindowClass
+XMonad | copyGC :: Display -> GC -> Mask -> GC -> IO ()
+XMonad | copyPlane :: Display -> Drawable -> Drawable -> GC -> Position -> Position -> Dimension -> Dimension -> Position -> Position -> Pixel -> IO ()
+XMonad | createColormap :: Display -> Window -> Visual -> ColormapAlloc -> IO Colormap
+XMonad | createFontCursor :: Display -> Glyph -> IO Cursor
+XMonad | createFontSet :: Display -> String -> IO ([String], String, FontSet)
+XMonad | createGC :: Display -> Drawable -> IO GC
+XMonad | createGlyphCursor :: Display -> Font -> Font -> Glyph -> Glyph -> Color -> Color -> IO Cursor
+XMonad | createImage :: Display -> Visual -> CInt -> ImageFormat -> CInt -> Ptr CChar -> Dimension -> Dimension -> CInt -> CInt -> IO Image
+XMonad | createNotify :: EventType
+XMonad | createPixmap :: Display -> Drawable -> Dimension -> Dimension -> CInt -> IO Pixmap
+XMonad | createPixmapCursor :: Display -> Pixmap -> Pixmap -> Color -> Color -> Dimension -> Dimension -> IO Cursor
+XMonad | createRegion :: IO Region
+XMonad | createSimpleWindow :: Display -> Window -> Position -> Position -> Dimension -> Dimension -> CInt -> Pixel -> Pixel -> IO Window
+XMonad | createWindow :: Display -> Window -> Position -> Position -> Dimension -> Dimension -> CInt -> CInt -> WindowClass -> Visual -> AttributeMask -> Ptr SetWindowAttributes -> IO Window
+XMonad | currentTime :: Time
+XMonad | cursorShape :: QueryBestSizeClass
+XMonad | dRAWABLE :: Atom
+XMonad | data Arc = Arc {arc_x :: Position, arc_y :: Position, arc_width :: Dimension, arc_height :: Dimension, arc_angle1 :: Angle, arc_angle2 :: Angle}
+XMonad | data ClassHint = ClassHint {resName :: String, resClass :: String}
+XMonad | data Color = Color {color_pixel :: Pixel, color_red :: Word16, color_green :: Word16, color_blue :: Word16, color_flags :: Word8}
+XMonad | data ErrorEvent = ErrorEvent {ev_type :: ! CInt, ev_display :: Display, ev_serialnum :: ! CULong, ev_error_code :: ! CUChar, ev_request_code :: ! CUChar, ev_minor_code :: ! CUChar, ev_resourceid :: XID}
+XMonad | data Event = AnyEvent {ev_event_type :: EventType, ev_serial :: ! CULong, ev_send_event :: !Bool, ev_event_display :: Display, ev_window :: Window} | ConfigureRequestEvent {ev_event_type :: EventType, ev_serial :: ! CULong, ev_send_event :: !Bool, ev_event_display :: Display, ev_parent :: Window, ev_window :: Window, ev_x :: ! CInt, ev_y :: ! CInt, ev_width :: ! CInt, ev_height :: ! CInt, ev_border_width :: ! CInt, ev_above :: Window, ev_detail :: ! NotifyDetail, ev_value_mask :: ! CULong} | ConfigureEvent {ev_event_type :: EventType, ev_serial :: ! CULong, ev_send_event :: !Bool, ev_event_display :: Display, ev_event :: Window, ev_window :: Window, ev_x :: ! CInt, ev_y :: ! CInt, ev_width :: ! CInt, ev_height :: ! CInt, ev_border_width :: ! CInt, ev_above :: Window, ev_override_redirect :: !Bool} | MapRequestEvent {ev_event_type :: EventType, ev_serial :: ! CULong, ev_send_event :: !Bool, ev_event_display :: Display, ev_parent :: Window, ev_window :: Window} | KeyEvent {ev_event_type :: EventType, ev_serial :: ! CULong, ev_send_event :: !Bool, ev_event_display :: Display, ev_window :: Window, ev_root :: Window, ev_subwindow :: Window, ev_time :: Time, ev_x :: ! CInt, ev_y :: ! CInt, ev_x_root :: ! CInt, ev_y_root :: ! CInt, ev_state :: ! KeyMask, ev_keycode :: KeyCode, ev_same_screen :: !Bool} | ButtonEvent {ev_event_type :: EventType, ev_serial :: ! CULong, ev_send_event :: !Bool, ev_event_display :: Display, ev_window :: Window, ev_root :: Window, ev_subwindow :: Window, ev_time :: Time, ev_x :: ! CInt, ev_y :: ! CInt, ev_x_root :: ! CInt, ev_y_root :: ! CInt, ev_state :: ! KeyMask, ev_button :: Button, ev_same_screen :: !Bool} | MotionEvent {ev_event_type :: EventType, ev_serial :: ! CULong, ev_send_event :: !Bool, ev_event_display :: Display, ev_x :: ! CInt, ev_y :: ! CInt, ev_window :: Window} | DestroyWindowEvent {ev_event_type :: EventType, ev_serial :: ! CULong, ev_send_event :: !Bool, ev_event_display :: Display, ev_event :: Window, ev_window :: Window} | UnmapEvent {ev_event_type :: EventType, ev_serial :: ! CULong, ev_send_event :: !Bool, ev_event_display :: Display, ev_event :: Window, ev_window :: Window, ev_from_configure :: !Bool} | MapNotifyEvent {ev_event_type :: EventType, ev_serial :: ! CULong, ev_send_event :: !Bool, ev_event_display :: Display, ev_event :: Window, ev_window :: Window, ev_override_redirect :: !Bool} | MappingNotifyEvent {ev_event_type :: EventType, ev_serial :: ! CULong, ev_send_event :: !Bool, ev_event_display :: Display, ev_window :: Window, ev_request :: ! MappingRequest, ev_first_keycode :: KeyCode, ev_count :: ! CInt} | CrossingEvent {ev_event_type :: EventType, ev_serial :: ! CULong, ev_send_event :: !Bool, ev_event_display :: Display, ev_window :: Window, ev_root :: Window, ev_subwindow :: Window, ev_time :: Time, ev_x :: ! CInt, ev_y :: ! CInt, ev_x_root :: ! CInt, ev_y_root :: ! CInt, ev_mode :: ! NotifyMode, ev_detail :: ! NotifyDetail, ev_same_screen :: !Bool, ev_focus :: !Bool, ev_state :: ! Modifier} | SelectionRequest {ev_event_type :: EventType, ev_serial :: ! CULong, ev_send_event :: !Bool, ev_event_display :: Display, ev_owner :: Window, ev_requestor :: Window, ev_selection :: Atom, ev_target :: Atom, ev_property :: Atom, ev_time :: Time} | SelectionClear {ev_event_type :: EventType, ev_serial :: ! CULong, ev_send_event :: !Bool, ev_event_display :: Display, ev_window :: Window, ev_selection :: Atom, ev_time :: Time} | PropertyEvent {ev_event_type :: EventType, ev_serial :: ! CULong, ev_send_event :: !Bool, ev_event_display :: Display, ev_window :: Window, ev_atom :: Atom, ev_time :: Time, ev_propstate :: ! CInt} | ExposeEvent {ev_event_type :: EventType, ev_serial :: ! CULong, ev_send_event :: !Bool, ev_event_display :: Display, ev_window :: Window, ev_x :: ! CInt, ev_y :: ! CInt, ev_width :: ! CInt, ev_height :: ! CInt, ev_count :: ! CInt} | FocusChangeEvent {ev_event_type :: EventType, ev_serial :: ! CULong, ev_send_event :: !Bool, ev_event_display :: Display, ev_window :: Window, ev_mode :: ! NotifyMode, ev_detail :: ! NotifyDetail} | ClientMessageEvent {ev_event_type :: EventType, ev_serial :: ! CULong, ev_send_event :: !Bool, ev_event_display :: Display, ev_window :: Window, ev_message_type :: Atom, ev_data :: ![CInt]} | RRScreenChangeNotifyEvent {ev_event_type :: EventType, ev_serial :: ! CULong, ev_send_event :: !Bool, ev_event_display :: Display, ev_window :: Window, ev_root :: Window, ev_timestamp :: Time, ev_config_timestamp :: Time, ev_size_index :: SizeID, ev_subpixel_order :: SubpixelOrder, ev_rotation :: Rotation, ev_width :: ! CInt, ev_height :: ! CInt, ev_mwidth :: ! CInt, ev_mheight :: ! CInt} | RRNotifyEvent {ev_event_type :: EventType, ev_serial :: ! CULong, ev_send_event :: !Bool, ev_event_display :: Display, ev_window :: Window, ev_subtype :: ! CInt} | RRCrtcChangeNotifyEvent {ev_event_type :: EventType, ev_serial :: ! CULong, ev_send_event :: !Bool, ev_event_display :: Display, ev_window :: Window, ev_subtype :: ! CInt, ev_crtc :: RRCrtc, ev_rr_mode :: RRMode, ev_rotation :: Rotation, ev_x :: ! CInt, ev_y :: ! CInt, ev_rr_width :: ! CUInt, ev_rr_height :: ! CUInt} | RROutputChangeNotifyEvent {ev_event_type :: EventType, ev_serial :: ! CULong, ev_send_event :: !Bool, ev_event_display :: Display, ev_window :: Window, ev_subtype :: ! CInt, ev_output :: RROutput, ev_crtc :: RRCrtc, ev_rr_mode :: RRMode, ev_rotation :: Rotation, ev_connection :: Connection, ev_subpixel_order :: SubpixelOrder} | RROutputPropertyNotifyEvent {ev_event_type :: EventType, ev_serial :: ! CULong, ev_send_event :: !Bool, ev_event_display :: Display, ev_window :: Window, ev_subtype :: ! CInt, ev_output :: RROutput, ev_property :: Atom, ev_timestamp :: Time, ev_rr_state :: ! CInt} | ScreenSaverNotifyEvent {ev_event_type :: EventType, ev_serial :: ! CULong, ev_send_event :: !Bool, ev_event_display :: Display, ev_window :: Window, ev_root :: Window, ev_ss_state :: !XScreenSaverState, ev_ss_kind :: !XScreenSaverKind, ev_forced :: !Bool, ev_time :: Time}
+XMonad | data Point = Point {pt_x :: Position, pt_y :: Position}
+XMonad | data Rectangle = Rectangle {rect_x :: Position, rect_y :: Position, rect_width :: Dimension, rect_height :: Dimension}
+XMonad | data Segment = Segment {seg_x1 :: Position, seg_y1 :: Position, seg_x2 :: Position, seg_y2 :: Position}
+XMonad | data SizeHints = SizeHints {sh_min_size :: Maybe (Dimension, Dimension), sh_max_size :: Maybe (Dimension, Dimension), sh_resize_inc :: Maybe (Dimension, Dimension), sh_aspect :: Maybe ((Dimension, Dimension), (Dimension, Dimension)), sh_base_size :: Maybe (Dimension, Dimension), sh_win_gravity :: Maybe BitGravity}
+XMonad | data TextProperty = TextProperty {tp_value :: CString, tp_encoding :: Atom, tp_format :: CInt, tp_nitems :: Word64}
+XMonad | data VisualInfo = VisualInfo {visualInfo_visual :: Visual, visualInfo_visualID :: VisualID, visualInfo_screen :: ScreenNumber, visualInfo_depth :: CInt, visualInfo_class :: CInt, visualInfo_redMask :: CULong, visualInfo_greenMask :: CULong, visualInfo_blueMask :: CULong, visualInfo_colormapSize :: CInt, visualInfo_bitsPerRGB :: CInt}
+XMonad | data WMHints = WMHints {wmh_flags :: CLong, wmh_input :: Bool, wmh_initial_state :: CInt, wmh_icon_pixmap :: Pixmap, wmh_icon_window :: Window, wmh_icon_x :: CInt, wmh_icon_y :: CInt, wmh_icon_mask :: Pixmap, wmh_window_group :: XID}
+XMonad | data WindowAttributes = WindowAttributes {wa_x :: CInt, wa_y :: CInt, wa_width :: CInt, wa_height :: CInt, wa_border_width :: CInt, wa_colormap :: Colormap, wa_map_installed :: Bool, wa_map_state :: CInt, wa_all_event_masks :: EventMask, wa_your_event_mask :: EventMask, wa_do_not_propagate_mask :: EventMask, wa_override_redirect :: Bool}
+XMonad | data WindowChanges = WindowChanges {wc_x :: CInt, wc_y :: CInt, wc_width :: CInt, wc_height :: CInt, wc_border_width :: CInt, wc_sibling :: Window, wc_stack_mode :: CInt}
+XMonad | defaultBlanking :: PreferBlankingMode
+XMonad | defaultColormap :: Display -> ScreenNumber -> Colormap
+XMonad | defaultColormapOfScreen :: Screen -> Colormap
+XMonad | defaultDepth :: Display -> ScreenNumber -> CInt
+XMonad | defaultDepthOfScreen :: Screen -> CInt
+XMonad | defaultExposures :: AllowExposuresMode
+XMonad | defaultGC :: Display -> ScreenNumber -> GC
+XMonad | defaultGCOfScreen :: Screen -> GC
+XMonad | defaultRootWindow :: Display -> Window
+XMonad | defaultScreen :: Display -> ScreenNumber
+XMonad | defaultScreenOfDisplay :: Display -> Screen
+XMonad | defaultVisual :: Display -> ScreenNumber -> Visual
+XMonad | defaultVisualOfScreen :: Screen -> Visual
+XMonad | defineCursor :: Display -> Window -> Cursor -> IO ()
+XMonad | deleteProperty :: Display -> Window -> Atom -> IO ()
+XMonad | descentFromFontStruct :: FontStruct -> Int32
+XMonad | destroyAll :: CloseDownMode
+XMonad | destroyImage :: Image -> IO ()
+XMonad | destroyNotify :: EventType
+XMonad | destroySubwindows :: Display -> Window -> IO ()
+XMonad | destroyWindow :: Display -> Window -> IO ()
+XMonad | displayCells :: Display -> ScreenNumber -> CInt
+XMonad | displayHeight :: Display -> ScreenNumber -> CInt
+XMonad | displayHeightMM :: Display -> ScreenNumber -> CInt
+XMonad | displayKeycodes :: Display -> (CInt, CInt)
+XMonad | displayMotionBufferSize :: Display -> CInt
+XMonad | displayName :: String -> String
+XMonad | displayOfScreen :: Screen -> Display
+XMonad | displayPlanes :: Display -> ScreenNumber -> CInt
+XMonad | displayString :: Display -> String
+XMonad | displayWidth :: Display -> ScreenNumber -> CInt
+XMonad | displayWidthMM :: Display -> ScreenNumber -> CInt
+XMonad | doBlue :: Word8
+XMonad | doGreen :: Word8
+XMonad | doRed :: Word8
+XMonad | doesBackingStore :: Screen -> Bool
+XMonad | doesSaveUnders :: Screen -> Bool
+XMonad | dontAllowExposures :: AllowExposuresMode
+XMonad | dontPreferBlanking :: PreferBlankingMode
+XMonad | drawArc :: Display -> Drawable -> GC -> Position -> Position -> Dimension -> Dimension -> Angle -> Angle -> IO ()
+XMonad | drawArcs :: Display -> Drawable -> GC -> [Arc] -> IO ()
+XMonad | drawImageString :: Display -> Drawable -> GC -> Position -> Position -> String -> IO ()
+XMonad | drawLine :: Display -> Drawable -> GC -> Position -> Position -> Position -> Position -> IO ()
+XMonad | drawLines :: Display -> Drawable -> GC -> [Point] -> CoordinateMode -> IO ()
+XMonad | drawPoint :: Display -> Drawable -> GC -> Position -> Position -> IO ()
+XMonad | drawPoints :: Display -> Drawable -> GC -> [Point] -> CoordinateMode -> IO ()
+XMonad | drawRectangle :: Display -> Drawable -> GC -> Position -> Position -> Dimension -> Dimension -> IO ()
+XMonad | drawRectangles :: Display -> Drawable -> GC -> [Rectangle] -> IO ()
+XMonad | drawSegments :: Display -> Drawable -> GC -> [Segment] -> IO ()
+XMonad | drawString :: Display -> Drawable -> GC -> Position -> Position -> String -> IO ()
+XMonad | eND_SPACE :: Atom
+XMonad | eastGravity :: BitGravity
+XMonad | emptyRegion :: Region -> IO Bool
+XMonad | enterNotify :: EventType
+XMonad | enterWindowMask :: EventMask
+XMonad | equalRegion :: Region -> Region -> IO Bool
+XMonad | evenOddRule :: FillRule
+XMonad | eventMaskOfScreen :: Screen -> EventMask
+XMonad | eventName :: Event -> String
+XMonad | eventTable :: [(EventType, String)]
+XMonad | eventsQueued :: Display -> QueuedMode -> IO CInt
+XMonad | expose :: EventType
+XMonad | exposureMask :: EventMask
+XMonad | fAMILY_NAME :: Atom
+XMonad | fONT :: Atom
+XMonad | fONT_NAME :: Atom
+XMonad | fULL_NAME :: Atom
+XMonad | familyChaos :: Protocol
+XMonad | familyDECnet :: Protocol
+XMonad | familyInternet :: Protocol
+XMonad | fetchBuffer :: Display -> CInt -> IO String
+XMonad | fetchBytes :: Display -> IO String
+XMonad | fetchName :: Display -> Window -> IO (Maybe String)
+XMonad | fillArc :: Display -> Drawable -> GC -> Position -> Position -> Dimension -> Dimension -> Angle -> Angle -> IO ()
+XMonad | fillArcs :: Display -> Drawable -> GC -> [Arc] -> IO ()
+XMonad | fillOpaqueStippled :: FillStyle
+XMonad | fillPolygon :: Display -> Drawable -> GC -> [Point] -> PolygonShape -> CoordinateMode -> IO ()
+XMonad | fillRectangle :: Display -> Drawable -> GC -> Position -> Position -> Dimension -> Dimension -> IO ()
+XMonad | fillRectangles :: Display -> Drawable -> GC -> [Rectangle] -> IO ()
+XMonad | fillSolid :: FillStyle
+XMonad | fillStippled :: FillStyle
+XMonad | fillTiled :: FillStyle
+XMonad | firstExtensionError :: ErrorCode
+XMonad | flush :: Display -> IO ()
+XMonad | flushGC :: Display -> GC -> IO ()
+XMonad | focusChangeMask :: EventMask
+XMonad | focusIn :: EventType
+XMonad | focusOut :: EventType
+XMonad | fontFromFontStruct :: FontStruct -> Font
+XMonad | fontFromGC :: Display -> GC -> IO Font
+XMonad | fontLeftToRight :: FontDirection
+XMonad | fontRightToLeft :: FontDirection
+XMonad | forceScreenSaver :: Display -> ScreenSaverMode -> IO ()
+XMonad | forgetGravity :: BitGravity
+XMonad | freeColormap :: Display -> Colormap -> IO ()
+XMonad | freeColors :: Display -> Colormap -> [Pixel] -> Pixel -> IO ()
+XMonad | freeCursor :: Display -> Font -> IO ()
+XMonad | freeFont :: Display -> FontStruct -> IO ()
+XMonad | freeFontSet :: Display -> FontSet -> IO ()
+XMonad | freeGC :: Display -> GC -> IO ()
+XMonad | freePixmap :: Display -> Pixmap -> IO ()
+XMonad | freeStringList :: Ptr CString -> IO ()
+XMonad | gCArcMode :: GCMask
+XMonad | gCBackground :: GCMask
+XMonad | gCCapStyle :: GCMask
+XMonad | gCClipMask :: GCMask
+XMonad | gCClipXOrigin :: GCMask
+XMonad | gCClipYOrigin :: GCMask
+XMonad | gCDashList :: GCMask
+XMonad | gCDashOffset :: GCMask
+XMonad | gCFillRule :: GCMask
+XMonad | gCFillStyle :: GCMask
+XMonad | gCFont :: GCMask
+XMonad | gCForeground :: GCMask
+XMonad | gCFunction :: GCMask
+XMonad | gCGraphicsExposures :: GCMask
+XMonad | gCJoinStyle :: GCMask
+XMonad | gCLastBit :: GCMask
+XMonad | gCLineStyle :: GCMask
+XMonad | gCLineWidth :: GCMask
+XMonad | gCPlaneMask :: GCMask
+XMonad | gCStipple :: GCMask
+XMonad | gCSubwindowMode :: GCMask
+XMonad | gCTile :: GCMask
+XMonad | gCTileStipXOrigin :: GCMask
+XMonad | gCTileStipYOrigin :: GCMask
+XMonad | gContextFromGC :: GC -> GContext
+XMonad | gXand :: GXFunction
+XMonad | gXandInverted :: GXFunction
+XMonad | gXandReverse :: GXFunction
+XMonad | gXclear :: GXFunction
+XMonad | gXcopy :: GXFunction
+XMonad | gXcopyInverted :: GXFunction
+XMonad | gXequiv :: GXFunction
+XMonad | gXinvert :: GXFunction
+XMonad | gXnand :: GXFunction
+XMonad | gXnoop :: GXFunction
+XMonad | gXnor :: GXFunction
+XMonad | gXor :: GXFunction
+XMonad | gXorInverted :: GXFunction
+XMonad | gXorReverse :: GXFunction
+XMonad | gXset :: GXFunction
+XMonad | gXxor :: GXFunction
+XMonad | geometry :: Display -> CInt -> String -> String -> Dimension -> Dimension -> Dimension -> CInt -> CInt -> IO (CInt, Position, Position, Dimension, Dimension)
+XMonad | getAtomName :: Display -> Atom -> IO (Maybe String)
+XMonad | getAtomNames :: Display -> [Atom] -> IO [String]
+XMonad | getClassHint :: Display -> Window -> IO ClassHint
+XMonad | getCommand :: Display -> Window -> IO [String]
+XMonad | getErrorEvent :: XErrorEventPtr -> IO ErrorEvent
+XMonad | getEvent :: XEventPtr -> IO Event
+XMonad | getGeometry :: Display -> Drawable -> IO (Window, Position, Position, Dimension, Dimension, Dimension, CInt)
+XMonad | getIconName :: Display -> Window -> IO String
+XMonad | getImage :: Display -> Drawable -> CInt -> CInt -> CUInt -> CUInt -> CULong -> ImageFormat -> IO Image
+XMonad | getInputFocus :: Display -> IO (Window, FocusMode)
+XMonad | getModifierMapping :: Display -> IO [(Modifier, [KeyCode])]
+XMonad | getPixel :: Image -> CInt -> CInt -> CULong
+XMonad | getPointerControl :: Display -> IO (CInt, CInt, CInt)
+XMonad | getScreenSaver :: Display -> IO (CInt, CInt, PreferBlankingMode, AllowExposuresMode)
+XMonad | getTextProperty :: Display -> Window -> Atom -> IO TextProperty
+XMonad | getTransientForHint :: Display -> Window -> IO (Maybe Window)
+XMonad | getVisualInfo :: Display -> VisualInfoMask -> VisualInfo -> IO [VisualInfo]
+XMonad | getWMHints :: Display -> Window -> IO WMHints
+XMonad | getWMNormalHints :: Display -> Window -> IO SizeHints
+XMonad | getWMProtocols :: Display -> Window -> IO [Atom]
+XMonad | getWindowAttributes :: Display -> Window -> IO WindowAttributes
+XMonad | getWindowProperty16 :: Display -> Atom -> Window -> IO (Maybe [CShort])
+XMonad | getWindowProperty32 :: Display -> Atom -> Window -> IO (Maybe [CLong])
+XMonad | getWindowProperty8 :: Display -> Atom -> Window -> IO (Maybe [CChar])
+XMonad | getXErrorHandler :: FunPtr CXErrorHandler -> CXErrorHandler
+XMonad | get_ButtonEvent :: XEventPtr -> IO XButtonEvent
+XMonad | get_ConfigureEvent :: XEventPtr -> IO XConfigureEvent
+XMonad | get_EventType :: XEventPtr -> IO EventType
+XMonad | get_ExposeEvent :: XEventPtr -> IO XExposeEvent
+XMonad | get_KeyEvent :: XEventPtr -> IO XKeyEvent
+XMonad | get_MotionEvent :: XEventPtr -> IO XMotionEvent
+XMonad | get_Window :: XEventPtr -> IO Window
+XMonad | gettimeofday_in_milliseconds :: IO Integer
+XMonad | grabButton :: Display -> Button -> ButtonMask -> Window -> Bool -> EventMask -> GrabMode -> GrabMode -> Window -> Cursor -> IO ()
+XMonad | grabFrozen :: GrabStatus
+XMonad | grabInvalidTime :: GrabStatus
+XMonad | grabKey :: Display -> KeyCode -> KeyMask -> Window -> Bool -> GrabMode -> GrabMode -> IO ()
+XMonad | grabKeyboard :: Display -> Window -> Bool -> GrabMode -> GrabMode -> Time -> IO GrabStatus
+XMonad | grabModeAsync :: GrabMode
+XMonad | grabModeSync :: GrabMode
+XMonad | grabNotViewable :: GrabStatus
+XMonad | grabPointer :: Display -> Window -> Bool -> EventMask -> GrabMode -> GrabMode -> Window -> Cursor -> Time -> IO GrabStatus
+XMonad | grabServer :: Display -> IO ()
+XMonad | grabSuccess :: GrabStatus
+XMonad | graphicsExpose :: EventType
+XMonad | gravityNotify :: EventType
+XMonad | heightMMOfScreen :: Screen -> Dimension
+XMonad | heightOfScreen :: Screen -> Dimension
+XMonad | iNTEGER :: Atom
+XMonad | iTALIC_ANGLE :: Atom
+XMonad | iconMaskHintBit :: Int
+XMonad | iconPixmapHintBit :: Int
+XMonad | iconPositionHintBit :: Int
+XMonad | iconWindowHintBit :: Int
+XMonad | iconicState :: Int
+XMonad | iconifyWindow :: Display -> Window -> ScreenNumber -> IO ()
+XMonad | imageByteOrder :: Display -> CInt
+XMonad | includeInferiors :: SubWindowMode
+XMonad | initThreads :: IO Status
+XMonad | inputHintBit :: Int
+XMonad | inputOnly :: WindowClass
+XMonad | inputOutput :: WindowClass
+XMonad | installColormap :: Display -> Colormap -> IO ()
+XMonad | internAtom :: Display -> String -> Bool -> IO Atom
+XMonad | intersectRegion :: Region -> Region -> Region -> IO CInt
+XMonad | isCursorKey :: KeySym -> Bool
+XMonad | isFunctionKey :: KeySym -> Bool
+XMonad | isKeypadKey :: KeySym -> Bool
+XMonad | isMiscFunctionKey :: KeySym -> Bool
+XMonad | isModifierKey :: KeySym -> Bool
+XMonad | isPFKey :: KeySym -> Bool
+XMonad | isPrivateKeypadKey :: KeySym -> Bool
+XMonad | joinBevel :: JoinStyle
+XMonad | joinMiter :: JoinStyle
+XMonad | joinRound :: JoinStyle
+XMonad | keyPress :: EventType
+XMonad | keyPressMask :: EventMask
+XMonad | keyRelease :: EventType
+XMonad | keyReleaseMask :: EventMask
+XMonad | keycodeToKeysym :: Display -> KeyCode -> CInt -> IO KeySym
+XMonad | keymapNotify :: EventType
+XMonad | keymapStateMask :: EventMask
+XMonad | keysymToKeycode :: Display -> KeySym -> IO KeyCode
+XMonad | keysymToString :: KeySym -> String
+XMonad | killClient :: Display -> Window -> IO CInt
+XMonad | lASTEvent :: EventType
+XMonad | lAST_PREDEFINED :: Atom
+XMonad | lSBFirst :: ByteOrder
+XMonad | lastExtensionError :: ErrorCode
+XMonad | lastKnownRequestProcessed :: Display -> IO CInt
+XMonad | leaveNotify :: EventType
+XMonad | leaveWindowMask :: EventMask
+XMonad | lineDoubleDash :: LineStyle
+XMonad | lineOnOffDash :: LineStyle
+XMonad | lineSolid :: LineStyle
+XMonad | loadQueryFont :: Display -> String -> IO FontStruct
+XMonad | lockDisplay :: Display -> IO ()
+XMonad | lockMapIndex :: Modifier
+XMonad | lockMask :: KeyMask
+XMonad | lookupColor :: Display -> Colormap -> String -> IO (Color, Color)
+XMonad | lookupKeysym :: XKeyEventPtr -> CInt -> IO KeySym
+XMonad | lookupString :: XKeyEventPtr -> IO (Maybe KeySym, String)
+XMonad | lowerHighest :: CirculationDirection
+XMonad | lowerWindow :: Display -> Window -> IO ()
+XMonad | mAX_SPACE :: Atom
+XMonad | mIN_SPACE :: Atom
+XMonad | mSBFirst :: ByteOrder
+XMonad | mapNotify :: EventType
+XMonad | mapRaised :: Display -> Window -> IO CInt
+XMonad | mapRequest :: EventType
+XMonad | mapSubwindows :: Display -> Window -> IO ()
+XMonad | mapWindow :: Display -> Window -> IO ()
+XMonad | mappingKeyboard :: MappingRequest
+XMonad | mappingModifier :: MappingRequest
+XMonad | mappingNotify :: EventType
+XMonad | mappingPointer :: MappingRequest
+XMonad | maskEvent :: Display -> EventMask -> XEventPtr -> IO ()
+XMonad | matchVisualInfo :: Display -> ScreenNumber -> CInt -> CInt -> IO (Maybe VisualInfo)
+XMonad | maxCmapsOfScreen :: Screen -> CInt
+XMonad | maxRequestSize :: Display -> CInt
+XMonad | minCmapsOfScreen :: Screen -> CInt
+XMonad | mkXErrorHandler :: CXErrorHandler -> IO (FunPtr CXErrorHandler)
+XMonad | mod1MapIndex :: Modifier
+XMonad | mod1Mask :: KeyMask
+XMonad | mod2MapIndex :: Modifier
+XMonad | mod2Mask :: KeyMask
+XMonad | mod3MapIndex :: Modifier
+XMonad | mod3Mask :: KeyMask
+XMonad | mod4MapIndex :: Modifier
+XMonad | mod4Mask :: KeyMask
+XMonad | mod5MapIndex :: Modifier
+XMonad | mod5Mask :: KeyMask
+XMonad | motionNotify :: EventType
+XMonad | moveResizeWindow :: Display -> Window -> Position -> Position -> Dimension -> Dimension -> IO ()
+XMonad | moveWindow :: Display -> Window -> Position -> Position -> IO ()
+XMonad | nORM_SPACE :: Atom
+XMonad | nOTICE :: Atom
+XMonad | newtype Display = Display (Ptr Display)
+XMonad | newtype FontSet = FontSet (Ptr FontSet)
+XMonad | newtype FontStruct = FontStruct (Ptr FontStruct)
+XMonad | newtype GC = GC (Ptr GC)
+XMonad | newtype Image = Image (Ptr Image)
+XMonad | newtype Region = Region (ForeignPtr Region)
+XMonad | newtype Screen = Screen (Ptr Screen)
+XMonad | newtype SetWindowAttributes = SetWindowAttributes (Ptr SetWindowAttributes)
+XMonad | newtype Visual = Visual (Ptr Visual)
+XMonad | newtype XEvent = XEvent XEventPtr
+XMonad | nextEvent :: Display -> XEventPtr -> IO ()
+XMonad | noEventMask :: EventMask
+XMonad | noExpose :: EventType
+XMonad | noModMask :: KeyMask
+XMonad | noOp :: Display -> IO ()
+XMonad | noSymbol :: KeySym
+XMonad | nonconvex :: PolygonShape
+XMonad | none :: XID
+XMonad | normalState :: Int
+XMonad | northEastGravity :: BitGravity
+XMonad | northGravity :: BitGravity
+XMonad | northWestGravity :: BitGravity
+XMonad | notUseful :: BackingStore
+XMonad | notifyAncestor :: NotifyDetail
+XMonad | notifyDetailNone :: NotifyDetail
+XMonad | notifyGrab :: NotifyMode
+XMonad | notifyHint :: NotifyMode
+XMonad | notifyInferior :: NotifyDetail
+XMonad | notifyNonlinear :: NotifyDetail
+XMonad | notifyNonlinearVirtual :: NotifyDetail
+XMonad | notifyNormal :: NotifyMode
+XMonad | notifyPointer :: NotifyDetail
+XMonad | notifyPointerRoot :: NotifyDetail
+XMonad | notifyUngrab :: NotifyMode
+XMonad | notifyVirtual :: NotifyDetail
+XMonad | notifyWhileGrabbed :: NotifyMode
+XMonad | offsetRegion :: Region -> Point -> IO CInt
+XMonad | openDisplay :: String -> IO Display
+XMonad | ownerGrabButtonMask :: EventMask
+XMonad | pAspectBit :: Int
+XMonad | pBaseSizeBit :: Int
+XMonad | pIXMAP :: Atom
+XMonad | pMaxSizeBit :: Int
+XMonad | pMinSizeBit :: Int
+XMonad | pOINT :: Atom
+XMonad | pOINT_SIZE :: Atom
+XMonad | pRIMARY :: Atom
+XMonad | pResizeIncBit :: Int
+XMonad | pWinGravityBit :: Int
+XMonad | parseColor :: Display -> Colormap -> String -> IO Color
+XMonad | peekEvent :: Display -> XEventPtr -> IO ()
+XMonad | pending :: Display -> IO CInt
+XMonad | placeOnBottom :: Place
+XMonad | placeOnTop :: Place
+XMonad | planesOfScreen :: Screen -> CInt
+XMonad | pointInRegion :: Region -> Point -> IO Bool
+XMonad | pointerMotionHintMask :: EventMask
+XMonad | pointerMotionMask :: EventMask
+XMonad | polygonRegion :: [Point] -> FillRule -> IO Region
+XMonad | preferBlanking :: PreferBlankingMode
+XMonad | propModeAppend :: CInt
+XMonad | propModePrepend :: CInt
+XMonad | propModeReplace :: CInt
+XMonad | propertyChangeMask :: EventMask
+XMonad | propertyDelete :: PropertyNotification
+XMonad | propertyNewValue :: PropertyNotification
+XMonad | propertyNotify :: EventType
+XMonad | protocolRevision :: Display -> CInt
+XMonad | protocolVersion :: Display -> CInt
+XMonad | putBackEvent :: Display -> XEventPtr -> IO ()
+XMonad | putImage :: Display -> Drawable -> GC -> Image -> Position -> Position -> Position -> Position -> Dimension -> Dimension -> IO ()
+XMonad | qLength :: Display -> IO CInt
+XMonad | qUAD_WIDTH :: Atom
+XMonad | queryBestCursor :: Display -> Drawable -> Dimension -> Dimension -> IO (Dimension, Dimension)
+XMonad | queryBestSize :: Display -> QueryBestSizeClass -> Drawable -> Dimension -> Dimension -> IO (Dimension, Dimension)
+XMonad | queryBestStipple :: Display -> Drawable -> Dimension -> Dimension -> IO (Dimension, Dimension)
+XMonad | queryBestTile :: Display -> Drawable -> Dimension -> Dimension -> IO (Dimension, Dimension)
+XMonad | queryColor :: Display -> Colormap -> Color -> IO Color
+XMonad | queryColors :: Display -> Colormap -> [Color] -> IO [Color]
+XMonad | queryFont :: Display -> Font -> IO FontStruct
+XMonad | queryPointer :: Display -> Window -> IO (Bool, Window, Window, CInt, CInt, CInt, CInt, Modifier)
+XMonad | queryTree :: Display -> Window -> IO (Window, Window, [Window])
+XMonad | queuedAfterFlush :: QueuedMode
+XMonad | queuedAfterReading :: QueuedMode
+XMonad | queuedAlready :: QueuedMode
+XMonad | rECTANGLE :: Atom
+XMonad | rESOLUTION :: Atom
+XMonad | rESOURCE_MANAGER :: Atom
+XMonad | rGB_BEST_MAP :: Atom
+XMonad | rGB_BLUE_MAP :: Atom
+XMonad | rGB_COLOR_MAP :: Atom
+XMonad | rGB_DEFAULT_MAP :: Atom
+XMonad | rGB_GRAY_MAP :: Atom
+XMonad | rGB_GREEN_MAP :: Atom
+XMonad | rGB_RED_MAP :: Atom
+XMonad | raiseLowest :: CirculationDirection
+XMonad | raiseWindow :: Display -> Window -> IO ()
+XMonad | rawGetWindowProperty :: Storable a => Int -> Display -> Atom -> Window -> IO (Maybe [a])
+XMonad | readBitmapFile :: Display -> Drawable -> String -> IO (Either String (Dimension, Dimension, Pixmap, Maybe CInt, Maybe CInt))
+XMonad | recolorCursor :: Display -> Cursor -> Color -> Color -> IO ()
+XMonad | rectInRegion :: Region -> Rectangle -> IO RectInRegionResult
+XMonad | rectangleIn :: RectInRegionResult
+XMonad | rectangleOut :: RectInRegionResult
+XMonad | rectanglePart :: RectInRegionResult
+XMonad | refreshKeyboardMapping :: Event -> IO ()
+XMonad | removeFromSaveSet :: Display -> Window -> IO ()
+XMonad | reparentNotify :: EventType
+XMonad | reparentWindow :: Display -> Window -> Window -> Position -> Position -> IO ()
+XMonad | replayKeyboard :: AllowEvents
+XMonad | replayPointer :: AllowEvents
+XMonad | resetScreenSaver :: Display -> IO ()
+XMonad | resizeRedirectMask :: EventMask
+XMonad | resizeRequest :: EventType
+XMonad | resizeWindow :: Display -> Window -> Dimension -> Dimension -> IO ()
+XMonad | resourceManagerString :: Display -> String
+XMonad | restackWindows :: Display -> [Window] -> IO ()
+XMonad | retainPermanent :: CloseDownMode
+XMonad | retainTemporary :: CloseDownMode
+XMonad | revertToNone :: FocusMode
+XMonad | revertToParent :: FocusMode
+XMonad | revertToPointerRoot :: FocusMode
+XMonad | rmInitialize :: IO ()
+XMonad | rootWindow :: Display -> ScreenNumber -> IO Window
+XMonad | rootWindowOfScreen :: Screen -> Window
+XMonad | rotateBuffers :: Display -> CInt -> IO ()
+XMonad | rrCrtcChangeNotifyMask :: EventMask
+XMonad | rrNotify :: EventType
+XMonad | rrNotifyCrtcChange :: EventType
+XMonad | rrNotifyOutputChange :: EventType
+XMonad | rrNotifyOutputProperty :: EventType
+XMonad | rrOutputChangeNotifyMask :: EventMask
+XMonad | rrOutputPropertyNotifyMask :: EventMask
+XMonad | rrScreenChangeNotify :: EventType
+XMonad | rrScreenChangeNotifyMask :: EventMask
+XMonad | sECONDARY :: Atom
+XMonad | sTRIKEOUT_ASCENT :: Atom
+XMonad | sTRIKEOUT_DESCENT :: Atom
+XMonad | sTRING :: Atom
+XMonad | sUBSCRIPT_X :: Atom
+XMonad | sUBSCRIPT_Y :: Atom
+XMonad | sUPERSCRIPT_X :: Atom
+XMonad | sUPERSCRIPT_Y :: Atom
+XMonad | screenCount :: Display -> CInt
+XMonad | screenNumberOfScreen :: Screen -> ScreenNumber
+XMonad | screenOfDisplay :: Display -> ScreenNumber -> Screen
+XMonad | screenResourceString :: Screen -> String
+XMonad | screenSaverActive :: ScreenSaverMode
+XMonad | screenSaverCycleMask :: EventMask
+XMonad | screenSaverNotify :: EventType
+XMonad | screenSaverNotifyMask :: EventMask
+XMonad | screenSaverReset :: ScreenSaverMode
+XMonad | selectInput :: Display -> Window -> EventMask -> IO ()
+XMonad | selectionClear :: EventType
+XMonad | selectionNotify :: EventType
+XMonad | selectionRequest :: EventType
+XMonad | sendEvent :: Display -> Window -> Bool -> EventMask -> XEventPtr -> IO ()
+XMonad | serverVendor :: Display -> String
+XMonad | setArcMode :: Display -> GC -> ArcMode -> IO ()
+XMonad | setBackground :: Display -> GC -> Pixel -> IO ()
+XMonad | setClassHint :: Display -> Window -> ClassHint -> IO ()
+XMonad | setClientMessageEvent :: XEventPtr -> Window -> Atom -> CInt -> Atom -> Time -> IO ()
+XMonad | setClientMessageEvent' :: XEventPtr -> Window -> Atom -> CInt -> [CInt] -> IO ()
+XMonad | setClipMask :: Display -> GC -> Pixmap -> IO ()
+XMonad | setClipOrigin :: Display -> GC -> Position -> Position -> IO ()
+XMonad | setCloseDownMode :: Display -> CloseDownMode -> IO ()
+XMonad | setConfigureEvent :: XEventPtr -> Window -> Window -> CInt -> CInt -> CInt -> CInt -> CInt -> Window -> Bool -> IO ()
+XMonad | setDashes :: Display -> GC -> CInt -> String -> CInt -> IO ()
+XMonad | setDefaultErrorHandler :: IO ()
+XMonad | setErrorHandler :: XErrorHandler -> IO ()
+XMonad | setEventType :: XEventPtr -> EventType -> IO ()
+XMonad | setFillRule :: Display -> GC -> FillRule -> IO ()
+XMonad | setFillStyle :: Display -> GC -> FillStyle -> IO ()
+XMonad | setFont :: Display -> GC -> Font -> IO ()
+XMonad | setForeground :: Display -> GC -> Pixel -> IO ()
+XMonad | setFunction :: Display -> GC -> GXFunction -> IO ()
+XMonad | setGraphicsExposures :: Display -> GC -> Bool -> IO ()
+XMonad | setIconName :: Display -> Window -> String -> IO ()
+XMonad | setInputFocus :: Display -> Window -> FocusMode -> Time -> IO ()
+XMonad | setKeyEvent :: XEventPtr -> Window -> Window -> Window -> KeyMask -> KeyCode -> Bool -> IO ()
+XMonad | setLineAttributes :: Display -> GC -> CInt -> LineStyle -> CapStyle -> JoinStyle -> IO ()
+XMonad | setLocaleModifiers :: String -> IO String
+XMonad | setModeDelete :: ChangeSaveSetMode
+XMonad | setModeInsert :: ChangeSaveSetMode
+XMonad | setPlaneMask :: Display -> GC -> Pixel -> IO ()
+XMonad | setRegion :: Display -> GC -> Region -> IO CInt
+XMonad | setScreenSaver :: Display -> CInt -> CInt -> PreferBlankingMode -> AllowExposuresMode -> IO ()
+XMonad | setSelectionNotify :: XEventPtr -> Window -> Atom -> Atom -> Atom -> Time -> IO ()
+XMonad | setState :: Display -> GC -> Pixel -> Pixel -> GXFunction -> Pixel -> IO ()
+XMonad | setStipple :: Display -> GC -> Pixmap -> IO ()
+XMonad | setSubwindowMode :: Display -> GC -> SubWindowMode -> IO ()
+XMonad | setTSOrigin :: Display -> GC -> Position -> Position -> IO ()
+XMonad | setTextProperty :: Display -> Window -> String -> Atom -> IO ()
+XMonad | setTile :: Display -> GC -> Pixmap -> IO ()
+XMonad | setWMHints :: Display -> Window -> WMHints -> IO Status
+XMonad | setWMNormalHints :: Display -> Window -> SizeHints -> IO ()
+XMonad | setWMProtocols :: Display -> Window -> [Atom] -> IO ()
+XMonad | setWindowBackground :: Display -> Window -> Pixel -> IO ()
+XMonad | setWindowBackgroundPixmap :: Display -> Window -> Pixmap -> IO ()
+XMonad | setWindowBorder :: Display -> Window -> Pixel -> IO ()
+XMonad | setWindowBorderPixmap :: Display -> Window -> Pixmap -> IO ()
+XMonad | setWindowBorderWidth :: Display -> Window -> Dimension -> IO ()
+XMonad | setWindowColormap :: Display -> Window -> Colormap -> IO ()
+XMonad | set_background_pixel :: Ptr SetWindowAttributes -> Pixel -> IO ()
+XMonad | set_background_pixmap :: Ptr SetWindowAttributes -> Pixmap -> IO ()
+XMonad | set_backing_pixel :: Ptr SetWindowAttributes -> Pixel -> IO ()
+XMonad | set_backing_planes :: Ptr SetWindowAttributes -> Pixel -> IO ()
+XMonad | set_backing_store :: Ptr SetWindowAttributes -> BackingStore -> IO ()
+XMonad | set_bit_gravity :: Ptr SetWindowAttributes -> BitGravity -> IO ()
+XMonad | set_border_pixel :: Ptr SetWindowAttributes -> Pixel -> IO ()
+XMonad | set_border_pixmap :: Ptr SetWindowAttributes -> Pixmap -> IO ()
+XMonad | set_colormap :: Ptr SetWindowAttributes -> Colormap -> IO ()
+XMonad | set_cursor :: Ptr SetWindowAttributes -> Cursor -> IO ()
+XMonad | set_do_not_propagate_mask :: Ptr SetWindowAttributes -> EventMask -> IO ()
+XMonad | set_event_mask :: Ptr SetWindowAttributes -> EventMask -> IO ()
+XMonad | set_override_redirect :: Ptr SetWindowAttributes -> Bool -> IO ()
+XMonad | set_save_under :: Ptr SetWindowAttributes -> Bool -> IO ()
+XMonad | set_win_gravity :: Ptr SetWindowAttributes -> WindowGravity -> IO ()
+XMonad | shiftMapIndex :: Modifier
+XMonad | shiftMask :: KeyMask
+XMonad | shrinkRegion :: Region -> Point -> IO CInt
+XMonad | southEastGravity :: BitGravity
+XMonad | southGravity :: BitGravity
+XMonad | southWestGravity :: BitGravity
+XMonad | stateHintBit :: Int
+XMonad | staticGravity :: BitGravity
+XMonad | stippleShape :: QueryBestSizeClass
+XMonad | storeBuffer :: Display -> String -> CInt -> IO ()
+XMonad | storeBytes :: Display -> String -> IO ()
+XMonad | storeColor :: Display -> Colormap -> Color -> IO ()
+XMonad | storeName :: Display -> Window -> String -> IO ()
+XMonad | stringToKeysym :: String -> KeySym
+XMonad | structureNotifyMask :: EventMask
+XMonad | substructureNotifyMask :: EventMask
+XMonad | substructureRedirectMask :: EventMask
+XMonad | subtractRegion :: Region -> Region -> Region -> IO CInt
+XMonad | success :: ErrorCode
+XMonad | supportsLocale :: IO Bool
+XMonad | sync :: Display -> Bool -> IO ()
+XMonad | syncBoth :: AllowEvents
+XMonad | syncKeyboard :: AllowEvents
+XMonad | syncPointer :: AllowEvents
+XMonad | textExtents :: FontStruct -> String -> (FontDirection, Int32, Int32, CharStruct)
+XMonad | textWidth :: FontStruct -> String -> Int32
+XMonad | throwIfZero :: String -> IO Status -> IO ()
+XMonad | tileShape :: QueryBestSizeClass
+XMonad | translateCoordinates :: Display -> Window -> Window -> Position -> Position -> IO (Bool, Position, Position, Window)
+XMonad | type AllowEvents :: *
+XMonad | type AllowEvents = CInt
+XMonad | type AllowExposuresMode :: *
+XMonad | type AllowExposuresMode = CInt
+XMonad | type Angle :: *
+XMonad | type Angle = CInt
+XMonad | type Arc :: *
+XMonad | type ArcMode :: *
+XMonad | type ArcMode = CInt
+XMonad | type Atom :: *
+XMonad | type Atom = Word64
+XMonad | type AttributeMask :: *
+XMonad | type AttributeMask = Mask
+XMonad | type BackingStore :: *
+XMonad | type BackingStore = CInt
+XMonad | type BitGravity :: *
+XMonad | type BitGravity = CInt
+XMonad | type Buffer :: *
+XMonad | type Buffer = CInt
+XMonad | type Button :: *
+XMonad | type Button = Word32
+XMonad | type ButtonMask :: *
+XMonad | type ButtonMask = Modifier
+XMonad | type ByteOrder :: *
+XMonad | type ByteOrder = CInt
+XMonad | type CXErrorHandler :: *
+XMonad | type CXErrorHandler = Display -> XErrorEventPtr -> IO CInt
+XMonad | type CapStyle :: *
+XMonad | type CapStyle = CInt
+XMonad | type ChangeSaveSetMode :: *
+XMonad | type ChangeSaveSetMode = CInt
+XMonad | type CharStruct :: *
+XMonad | type CharStruct = (CInt, CInt, CInt, CInt, CInt)
+XMonad | type CirculationDirection :: *
+XMonad | type CirculationDirection = CInt
+XMonad | type ClassHint :: *
+XMonad | type CloseDownMode :: *
+XMonad | type CloseDownMode = CInt
+XMonad | type Color :: *
+XMonad | type Colormap :: *
+XMonad | type Colormap = XID
+XMonad | type ColormapAlloc :: *
+XMonad | type ColormapAlloc = CInt
+XMonad | type ColormapNotification :: *
+XMonad | type ColormapNotification = CInt
+XMonad | type Connection :: *
+XMonad | type Connection = Word16
+XMonad | type CoordinateMode :: *
+XMonad | type CoordinateMode = CInt
+XMonad | type Cursor :: *
+XMonad | type Cursor = XID
+XMonad | type Dimension :: *
+XMonad | type Dimension = Word32
+XMonad | type Display :: *
+XMonad | type Drawable :: *
+XMonad | type Drawable = XID
+XMonad | type ErrorCode :: *
+XMonad | type ErrorCode = CInt
+XMonad | type ErrorEvent :: *
+XMonad | type Event :: *
+XMonad | type EventMask :: *
+XMonad | type EventMask = Mask
+XMonad | type EventType :: *
+XMonad | type EventType = Word32
+XMonad | type FillRule :: *
+XMonad | type FillRule = CInt
+XMonad | type FillStyle :: *
+XMonad | type FillStyle = CInt
+XMonad | type FocusMode :: *
+XMonad | type FocusMode = CInt
+XMonad | type Font :: *
+XMonad | type Font = XID
+XMonad | type FontDirection :: *
+XMonad | type FontDirection = CInt
+XMonad | type FontSet :: *
+XMonad | type FontStruct :: *
+XMonad | type GC :: *
+XMonad | type GCMask :: *
+XMonad | type GCMask = CInt
+XMonad | type GContext :: *
+XMonad | type GContext = XID
+XMonad | type GXFunction :: *
+XMonad | type GXFunction = CInt
+XMonad | type Glyph :: *
+XMonad | type Glyph = Word16
+XMonad | type GrabMode :: *
+XMonad | type GrabMode = CInt
+XMonad | type GrabStatus :: *
+XMonad | type GrabStatus = CInt
+XMonad | type Image :: *
+XMonad | type ImageFormat :: *
+XMonad | type ImageFormat = CInt
+XMonad | type JoinStyle :: *
+XMonad | type JoinStyle = CInt
+XMonad | type KeyCode :: *
+XMonad | type KeyCode = Word8
+XMonad | type KeyMask :: *
+XMonad | type KeyMask = Modifier
+XMonad | type KeySym :: *
+XMonad | type KeySym = XID
+XMonad | type LineStyle :: *
+XMonad | type LineStyle = CInt
+XMonad | type MappingRequest :: *
+XMonad | type MappingRequest = CInt
+XMonad | type Mask :: *
+XMonad | type Mask = Word64
+XMonad | type Modifier :: *
+XMonad | type Modifier = CUInt
+XMonad | type NotifyDetail :: *
+XMonad | type NotifyDetail = CInt
+XMonad | type NotifyMode :: *
+XMonad | type NotifyMode = CInt
+XMonad | type Pixel :: *
+XMonad | type Pixel = Word64
+XMonad | type Pixmap :: *
+XMonad | type Pixmap = XID
+XMonad | type Place :: *
+XMonad | type Place = CInt
+XMonad | type Point :: *
+XMonad | type PolygonShape :: *
+XMonad | type PolygonShape = CInt
+XMonad | type Position :: *
+XMonad | type Position = Int32
+XMonad | type PreferBlankingMode :: *
+XMonad | type PreferBlankingMode = CInt
+XMonad | type PropertyNotification :: *
+XMonad | type PropertyNotification = CInt
+XMonad | type Protocol :: *
+XMonad | type Protocol = CInt
+XMonad | type QueryBestSizeClass :: *
+XMonad | type QueryBestSizeClass = CInt
+XMonad | type QueuedMode :: *
+XMonad | type QueuedMode = CInt
+XMonad | type RRCrtc :: *
+XMonad | type RRCrtc = Word64
+XMonad | type RRMode :: *
+XMonad | type RRMode = Word64
+XMonad | type RROutput :: *
+XMonad | type RROutput = Word64
+XMonad | type RectInRegionResult :: *
+XMonad | type RectInRegionResult = CInt
+XMonad | type Rectangle :: *
+XMonad | type Reflection :: *
+XMonad | type Reflection = Word16
+XMonad | type Region :: *
+XMonad | type Rotation :: *
+XMonad | type Rotation = Word16
+XMonad | type Screen :: *
+XMonad | type ScreenNumber :: *
+XMonad | type ScreenNumber = Word32
+XMonad | type ScreenSaverMode :: *
+XMonad | type ScreenSaverMode = CInt
+XMonad | type Segment :: *
+XMonad | type SetWindowAttributes :: *
+XMonad | type SizeHints :: *
+XMonad | type SizeID :: *
+XMonad | type SizeID = Word16
+XMonad | type Status :: *
+XMonad | type Status = CInt
+XMonad | type SubWindowMode :: *
+XMonad | type SubWindowMode = CInt
+XMonad | type SubpixelOrder :: *
+XMonad | type SubpixelOrder = Word16
+XMonad | type TextProperty :: *
+XMonad | type Time :: *
+XMonad | type Time = Word64
+XMonad | type Visibility :: *
+XMonad | type Visibility = CInt
+XMonad | type Visual :: *
+XMonad | type VisualID :: *
+XMonad | type VisualID = Word64
+XMonad | type VisualInfo :: *
+XMonad | type VisualInfoMask :: *
+XMonad | type VisualInfoMask = CLong
+XMonad | type WMHints :: *
+XMonad | type Window :: *
+XMonad | type Window = XID
+XMonad | type WindowAttributes :: *
+XMonad | type WindowChanges :: *
+XMonad | type WindowClass :: *
+XMonad | type WindowClass = CInt
+XMonad | type WindowGravity :: *
+XMonad | type WindowGravity = CInt
+XMonad | type XButtonEvent :: *
+XMonad | type XButtonEvent = (Window, Window, Time, CInt, CInt, CInt, CInt, Modifier, Button, Bool)
+XMonad | type XConfigureEvent :: *
+XMonad | type XConfigureEvent = (Position, Position, Dimension, Dimension)
+XMonad | type XErrorEventPtr :: *
+XMonad | type XErrorEventPtr = Ptr ()
+XMonad | type XErrorHandler :: *
+XMonad | type XErrorHandler = Display -> XErrorEventPtr -> IO ()
+XMonad | type XEvent :: *
+XMonad | type XEventPtr :: *
+XMonad | type XEventPtr = Ptr XEvent
+XMonad | type XExposeEvent :: *
+XMonad | type XExposeEvent = (Position, Position, Dimension, Dimension, CInt)
+XMonad | type XID :: *
+XMonad | type XID = Word64
+XMonad | type XKeyEvent :: *
+XMonad | type XKeyEvent = (Window, Window, Time, CInt, CInt, CInt, CInt, Modifier, KeyCode, Bool)
+XMonad | type XKeyEventPtr :: *
+XMonad | type XKeyEventPtr = Ptr XKeyEvent
+XMonad | type XMappingEvent :: *
+XMonad | type XMappingEvent = (MappingRequest, KeyCode, CInt)
+XMonad | type XMotionEvent :: *
+XMonad | type XMotionEvent = (Window, Window, Time, CInt, CInt, CInt, CInt, Modifier, NotifyMode, Bool)
+XMonad | type XRRModeFlags :: *
+XMonad | type XRRModeFlags = Word64
+XMonad | uNDERLINE_POSITION :: Atom
+XMonad | uNDERLINE_THICKNESS :: Atom
+XMonad | undefineCursor :: Display -> Window -> IO ()
+XMonad | ungrabButton :: Display -> Button -> ButtonMask -> Window -> IO ()
+XMonad | ungrabKey :: Display -> KeyCode -> KeyMask -> Window -> IO ()
+XMonad | ungrabKeyboard :: Display -> Time -> IO ()
+XMonad | ungrabPointer :: Display -> Time -> IO ()
+XMonad | ungrabServer :: Display -> IO ()
+XMonad | uninstallColormap :: Display -> Colormap -> IO ()
+XMonad | unionRectWithRegion :: Rectangle -> Region -> Region -> IO CInt
+XMonad | unionRegion :: Region -> Region -> Region -> IO CInt
+XMonad | unlockDisplay :: Display -> IO ()
+XMonad | unmapGravity :: WindowGravity
+XMonad | unmapNotify :: EventType
+XMonad | unmapSubwindows :: Display -> Window -> IO ()
+XMonad | unmapWindow :: Display -> Window -> IO ()
+XMonad | urgencyHintBit :: Int
+XMonad | vISUALID :: Atom
+XMonad | visibilityChangeMask :: EventMask
+XMonad | visibilityFullyObscured :: Visibility
+XMonad | visibilityNotify :: EventType
+XMonad | visibilityPartiallyObscured :: Visibility
+XMonad | visibilityUnobscured :: Visibility
+XMonad | visualAllMask :: VisualInfoMask
+XMonad | visualBitsPerRGBMask :: VisualInfoMask
+XMonad | visualBlueMaskMask :: VisualInfoMask
+XMonad | visualClassMask :: VisualInfoMask
+XMonad | visualColormapSizeMask :: VisualInfoMask
+XMonad | visualDepthMask :: VisualInfoMask
+XMonad | visualGreenMaskMask :: VisualInfoMask
+XMonad | visualIDFromVisual :: Visual -> IO VisualID
+XMonad | visualIDMask :: VisualInfoMask
+XMonad | visualNoMask :: VisualInfoMask
+XMonad | visualRedMaskMask :: VisualInfoMask
+XMonad | visualScreenMask :: VisualInfoMask
+XMonad | wEIGHT :: Atom
+XMonad | wINDOW :: Atom
+XMonad | wM_CLASS :: Atom
+XMonad | wM_CLIENT_MACHINE :: Atom
+XMonad | wM_COMMAND :: Atom
+XMonad | wM_HINTS :: Atom
+XMonad | wM_ICON_NAME :: Atom
+XMonad | wM_ICON_SIZE :: Atom
+XMonad | wM_NAME :: Atom
+XMonad | wM_NORMAL_HINTS :: Atom
+XMonad | wM_SIZE_HINTS :: Atom
+XMonad | wM_TRANSIENT_FOR :: Atom
+XMonad | wM_ZOOM_HINTS :: Atom
+XMonad | waIsUnmapped :: CInt
+XMonad | waIsUnviewable :: CInt
+XMonad | waIsViewable :: CInt
+XMonad | waitForEvent :: Display -> Word32 -> IO Bool
+XMonad | warpPointer :: Display -> Window -> Window -> Position -> Position -> Dimension -> Dimension -> Position -> Position -> IO ()
+XMonad | wcDrawImageString :: Display -> Drawable -> FontSet -> GC -> Position -> Position -> String -> IO ()
+XMonad | wcDrawString :: Display -> Drawable -> FontSet -> GC -> Position -> Position -> String -> IO ()
+XMonad | wcFreeStringList :: Ptr CWString -> IO ()
+XMonad | wcTextEscapement :: FontSet -> String -> Int32
+XMonad | wcTextExtents :: FontSet -> String -> (Rectangle, Rectangle)
+XMonad | wcTextPropertyToTextList :: Display -> TextProperty -> IO [String]
+XMonad | westGravity :: BitGravity
+XMonad | whenMapped :: BackingStore
+XMonad | whitePixel :: Display -> ScreenNumber -> Pixel
+XMonad | whitePixelOfScreen :: Screen -> Pixel
+XMonad | widthMMOfScreen :: Screen -> Dimension
+XMonad | widthOfScreen :: Screen -> Dimension
+XMonad | windingRule :: FillRule
+XMonad | windowEvent :: Display -> Window -> EventMask -> XEventPtr -> IO ()
+XMonad | windowGroupHintBit :: Int
+XMonad | withServer :: Display -> IO () -> IO ()
+XMonad | withdrawWindow :: Display -> Window -> ScreenNumber -> IO ()
+XMonad | withdrawnState :: Int
+XMonad | xAllocSizeHints :: IO (Ptr SizeHints)
+XMonad | xAllocWMHints :: IO (Ptr WMHints)
+XMonad | xC_X_cursor :: Glyph
+XMonad | xC_arrow :: Glyph
+XMonad | xC_based_arrow_down :: Glyph
+XMonad | xC_based_arrow_up :: Glyph
+XMonad | xC_boat :: Glyph
+XMonad | xC_bogosity :: Glyph
+XMonad | xC_bottom_left_corner :: Glyph
+XMonad | xC_bottom_right_corner :: Glyph
+XMonad | xC_bottom_side :: Glyph
+XMonad | xC_bottom_tee :: Glyph
+XMonad | xC_box_spiral :: Glyph
+XMonad | xC_center_ptr :: Glyph
+XMonad | xC_circle :: Glyph
+XMonad | xC_clock :: Glyph
+XMonad | xC_coffee_mug :: Glyph
+XMonad | xC_cross :: Glyph
+XMonad | xC_cross_reverse :: Glyph
+XMonad | xC_crosshair :: Glyph
+XMonad | xC_diamond_cross :: Glyph
+XMonad | xC_dot :: Glyph
+XMonad | xC_dotbox :: Glyph
+XMonad | xC_double_arrow :: Glyph
+XMonad | xC_draft_large :: Glyph
+XMonad | xC_draft_small :: Glyph
+XMonad | xC_draped_box :: Glyph
+XMonad | xC_exchange :: Glyph
+XMonad | xC_fleur :: Glyph
+XMonad | xC_gobbler :: Glyph
+XMonad | xC_gumby :: Glyph
+XMonad | xC_hand1 :: Glyph
+XMonad | xC_hand2 :: Glyph
+XMonad | xC_heart :: Glyph
+XMonad | xC_icon :: Glyph
+XMonad | xC_iron_cross :: Glyph
+XMonad | xC_left_ptr :: Glyph
+XMonad | xC_left_side :: Glyph
+XMonad | xC_left_tee :: Glyph
+XMonad | xC_leftbutton :: Glyph
+XMonad | xC_ll_angle :: Glyph
+XMonad | xC_lr_angle :: Glyph
+XMonad | xC_man :: Glyph
+XMonad | xC_mouse :: Glyph
+XMonad | xC_pencil :: Glyph
+XMonad | xC_pirate :: Glyph
+XMonad | xC_plus :: Glyph
+XMonad | xC_question_arrow :: Glyph
+XMonad | xC_right_ptr :: Glyph
+XMonad | xC_right_side :: Glyph
+XMonad | xC_right_tee :: Glyph
+XMonad | xC_rightbutton :: Glyph
+XMonad | xC_rtl_logo :: Glyph
+XMonad | xC_sailboat :: Glyph
+XMonad | xC_sb_down_arrow :: Glyph
+XMonad | xC_sb_h_double_arrow :: Glyph
+XMonad | xC_sb_left_arrow :: Glyph
+XMonad | xC_sb_right_arrow :: Glyph
+XMonad | xC_sb_up_arrow :: Glyph
+XMonad | xC_sb_v_double_arrow :: Glyph
+XMonad | xC_shuttle :: Glyph
+XMonad | xC_sizing :: Glyph
+XMonad | xC_spider :: Glyph
+XMonad | xC_spraycan :: Glyph
+XMonad | xC_star :: Glyph
+XMonad | xC_target :: Glyph
+XMonad | xC_tcross :: Glyph
+XMonad | xC_top_left_arrow :: Glyph
+XMonad | xC_top_left_corner :: Glyph
+XMonad | xC_top_right_corner :: Glyph
+XMonad | xC_top_side :: Glyph
+XMonad | xC_top_tee :: Glyph
+XMonad | xC_trek :: Glyph
+XMonad | xC_ul_angle :: Glyph
+XMonad | xC_umbrella :: Glyph
+XMonad | xC_ur_angle :: Glyph
+XMonad | xC_watch :: Glyph
+XMonad | xC_xterm :: Glyph
+XMonad | xChangeProperty :: Display -> Window -> Atom -> Atom -> CInt -> CInt -> Ptr CUChar -> CInt -> IO Status
+XMonad | xConfigureWindow :: Display -> Window -> CULong -> Ptr WindowChanges -> IO CInt
+XMonad | xConvertSelection :: Display -> Atom -> Atom -> Atom -> Window -> Time -> IO ()
+XMonad | xCreateFontSet :: Display -> CString -> Ptr (Ptr CString) -> Ptr CInt -> Ptr CString -> IO (Ptr FontSet)
+XMonad | xDeleteProperty :: Display -> Window -> Atom -> IO Status
+XMonad | xFetchName :: Display -> Window -> Ptr CString -> IO Status
+XMonad | xFree :: Ptr a -> IO CInt
+XMonad | xFreeModifiermap :: Ptr () -> IO (Ptr CInt)
+XMonad | xGetClassHint :: Display -> Window -> Ptr ClassHint -> IO Status
+XMonad | xGetCommand :: Display -> Window -> Ptr (Ptr CWString) -> Ptr CInt -> IO Status
+XMonad | xGetModifierMapping :: Display -> IO (Ptr ())
+XMonad | xGetPixel :: Image -> CInt -> CInt -> IO CULong
+XMonad | xGetSelectionOwner :: Display -> Atom -> IO Window
+XMonad | xGetTextProperty :: Display -> Window -> Ptr TextProperty -> Atom -> IO Status
+XMonad | xGetTransientForHint :: Display -> Window -> Ptr Window -> IO Status
+XMonad | xGetWMHints :: Display -> Window -> IO (Ptr WMHints)
+XMonad | xGetWMNormalHints :: Display -> Window -> Ptr SizeHints -> Ptr CLong -> IO Status
+XMonad | xGetWMProtocols :: Display -> Window -> Ptr (Ptr Atom) -> Ptr CInt -> IO Status
+XMonad | xGetWindowAttributes :: Display -> Window -> Ptr WindowAttributes -> IO Status
+XMonad | xGetWindowProperty :: Display -> Window -> Atom -> CLong -> CLong -> Bool -> Atom -> Ptr Atom -> Ptr CInt -> Ptr CULong -> Ptr CULong -> Ptr (Ptr CUChar) -> IO Status
+XMonad | xK_0 :: KeySym
+XMonad | xK_1 :: KeySym
+XMonad | xK_2 :: KeySym
+XMonad | xK_3 :: KeySym
+XMonad | xK_4 :: KeySym
+XMonad | xK_5 :: KeySym
+XMonad | xK_6 :: KeySym
+XMonad | xK_7 :: KeySym
+XMonad | xK_8 :: KeySym
+XMonad | xK_9 :: KeySym
+XMonad | xK_A :: KeySym
+XMonad | xK_AE :: KeySym
+XMonad | xK_Aacute :: KeySym
+XMonad | xK_Acircumflex :: KeySym
+XMonad | xK_Adiaeresis :: KeySym
+XMonad | xK_Agrave :: KeySym
+XMonad | xK_Alt_L :: KeySym
+XMonad | xK_Alt_R :: KeySym
+XMonad | xK_Aring :: KeySym
+XMonad | xK_Atilde :: KeySym
+XMonad | xK_B :: KeySym
+XMonad | xK_BackSpace :: KeySym
+XMonad | xK_Begin :: KeySym
+XMonad | xK_Break :: KeySym
+XMonad | xK_C :: KeySym
+XMonad | xK_Cancel :: KeySym
+XMonad | xK_Caps_Lock :: KeySym
+XMonad | xK_Ccedilla :: KeySym
+XMonad | xK_Clear :: KeySym
+XMonad | xK_Codeinput :: KeySym
+XMonad | xK_Control_L :: KeySym
+XMonad | xK_Control_R :: KeySym
+XMonad | xK_D :: KeySym
+XMonad | xK_Delete :: KeySym
+XMonad | xK_Down :: KeySym
+XMonad | xK_E :: KeySym
+XMonad | xK_ETH :: KeySym
+XMonad | xK_Eacute :: KeySym
+XMonad | xK_Ecircumflex :: KeySym
+XMonad | xK_Ediaeresis :: KeySym
+XMonad | xK_Egrave :: KeySym
+XMonad | xK_End :: KeySym
+XMonad | xK_Escape :: KeySym
+XMonad | xK_Eth :: KeySym
+XMonad | xK_Execute :: KeySym
+XMonad | xK_F :: KeySym
+XMonad | xK_F1 :: KeySym
+XMonad | xK_F10 :: KeySym
+XMonad | xK_F11 :: KeySym
+XMonad | xK_F12 :: KeySym
+XMonad | xK_F13 :: KeySym
+XMonad | xK_F14 :: KeySym
+XMonad | xK_F15 :: KeySym
+XMonad | xK_F16 :: KeySym
+XMonad | xK_F17 :: KeySym
+XMonad | xK_F18 :: KeySym
+XMonad | xK_F19 :: KeySym
+XMonad | xK_F2 :: KeySym
+XMonad | xK_F20 :: KeySym
+XMonad | xK_F21 :: KeySym
+XMonad | xK_F22 :: KeySym
+XMonad | xK_F23 :: KeySym
+XMonad | xK_F24 :: KeySym
+XMonad | xK_F25 :: KeySym
+XMonad | xK_F26 :: KeySym
+XMonad | xK_F27 :: KeySym
+XMonad | xK_F28 :: KeySym
+XMonad | xK_F29 :: KeySym
+XMonad | xK_F3 :: KeySym
+XMonad | xK_F30 :: KeySym
+XMonad | xK_F31 :: KeySym
+XMonad | xK_F32 :: KeySym
+XMonad | xK_F33 :: KeySym
+XMonad | xK_F34 :: KeySym
+XMonad | xK_F35 :: KeySym
+XMonad | xK_F4 :: KeySym
+XMonad | xK_F5 :: KeySym
+XMonad | xK_F6 :: KeySym
+XMonad | xK_F7 :: KeySym
+XMonad | xK_F8 :: KeySym
+XMonad | xK_F9 :: KeySym
+XMonad | xK_Find :: KeySym
+XMonad | xK_G :: KeySym
+XMonad | xK_H :: KeySym
+XMonad | xK_Help :: KeySym
+XMonad | xK_Home :: KeySym
+XMonad | xK_Hyper_L :: KeySym
+XMonad | xK_Hyper_R :: KeySym
+XMonad | xK_I :: KeySym
+XMonad | xK_Iacute :: KeySym
+XMonad | xK_Icircumflex :: KeySym
+XMonad | xK_Idiaeresis :: KeySym
+XMonad | xK_Igrave :: KeySym
+XMonad | xK_Insert :: KeySym
+XMonad | xK_J :: KeySym
+XMonad | xK_K :: KeySym
+XMonad | xK_KP_0 :: KeySym
+XMonad | xK_KP_1 :: KeySym
+XMonad | xK_KP_2 :: KeySym
+XMonad | xK_KP_3 :: KeySym
+XMonad | xK_KP_4 :: KeySym
+XMonad | xK_KP_5 :: KeySym
+XMonad | xK_KP_6 :: KeySym
+XMonad | xK_KP_7 :: KeySym
+XMonad | xK_KP_8 :: KeySym
+XMonad | xK_KP_9 :: KeySym
+XMonad | xK_KP_Add :: KeySym
+XMonad | xK_KP_Begin :: KeySym
+XMonad | xK_KP_Decimal :: KeySym
+XMonad | xK_KP_Delete :: KeySym
+XMonad | xK_KP_Divide :: KeySym
+XMonad | xK_KP_Down :: KeySym
+XMonad | xK_KP_End :: KeySym
+XMonad | xK_KP_Enter :: KeySym
+XMonad | xK_KP_Equal :: KeySym
+XMonad | xK_KP_F1 :: KeySym
+XMonad | xK_KP_F2 :: KeySym
+XMonad | xK_KP_F3 :: KeySym
+XMonad | xK_KP_F4 :: KeySym
+XMonad | xK_KP_Home :: KeySym
+XMonad | xK_KP_Insert :: KeySym
+XMonad | xK_KP_Left :: KeySym
+XMonad | xK_KP_Multiply :: KeySym
+XMonad | xK_KP_Next :: KeySym
+XMonad | xK_KP_Page_Down :: KeySym
+XMonad | xK_KP_Page_Up :: KeySym
+XMonad | xK_KP_Prior :: KeySym
+XMonad | xK_KP_Right :: KeySym
+XMonad | xK_KP_Separator :: KeySym
+XMonad | xK_KP_Space :: KeySym
+XMonad | xK_KP_Subtract :: KeySym
+XMonad | xK_KP_Tab :: KeySym
+XMonad | xK_KP_Up :: KeySym
+XMonad | xK_L :: KeySym
+XMonad | xK_L1 :: KeySym
+XMonad | xK_L10 :: KeySym
+XMonad | xK_L2 :: KeySym
+XMonad | xK_L3 :: KeySym
+XMonad | xK_L4 :: KeySym
+XMonad | xK_L5 :: KeySym
+XMonad | xK_L6 :: KeySym
+XMonad | xK_L7 :: KeySym
+XMonad | xK_L8 :: KeySym
+XMonad | xK_L9 :: KeySym
+XMonad | xK_Left :: KeySym
+XMonad | xK_Linefeed :: KeySym
+XMonad | xK_M :: KeySym
+XMonad | xK_Menu :: KeySym
+XMonad | xK_Meta_L :: KeySym
+XMonad | xK_Meta_R :: KeySym
+XMonad | xK_Mode_switch :: KeySym
+XMonad | xK_Multi_key :: KeySym
+XMonad | xK_MultipleCandidate :: KeySym
+XMonad | xK_N :: KeySym
+XMonad | xK_Next :: KeySym
+XMonad | xK_Ntilde :: KeySym
+XMonad | xK_Num_Lock :: KeySym
+XMonad | xK_O :: KeySym
+XMonad | xK_Oacute :: KeySym
+XMonad | xK_Ocircumflex :: KeySym
+XMonad | xK_Odiaeresis :: KeySym
+XMonad | xK_Ograve :: KeySym
+XMonad | xK_Ooblique :: KeySym
+XMonad | xK_Otilde :: KeySym
+XMonad | xK_P :: KeySym
+XMonad | xK_Page_Down :: KeySym
+XMonad | xK_Page_Up :: KeySym
+XMonad | xK_Pause :: KeySym
+XMonad | xK_PreviousCandidate :: KeySym
+XMonad | xK_Print :: KeySym
+XMonad | xK_Prior :: KeySym
+XMonad | xK_Q :: KeySym
+XMonad | xK_R :: KeySym
+XMonad | xK_R1 :: KeySym
+XMonad | xK_R10 :: KeySym
+XMonad | xK_R11 :: KeySym
+XMonad | xK_R12 :: KeySym
+XMonad | xK_R13 :: KeySym
+XMonad | xK_R14 :: KeySym
+XMonad | xK_R15 :: KeySym
+XMonad | xK_R2 :: KeySym
+XMonad | xK_R3 :: KeySym
+XMonad | xK_R4 :: KeySym
+XMonad | xK_R5 :: KeySym
+XMonad | xK_R6 :: KeySym
+XMonad | xK_R7 :: KeySym
+XMonad | xK_R8 :: KeySym
+XMonad | xK_R9 :: KeySym
+XMonad | xK_Redo :: KeySym
+XMonad | xK_Return :: KeySym
+XMonad | xK_Right :: KeySym
+XMonad | xK_S :: KeySym
+XMonad | xK_Scroll_Lock :: KeySym
+XMonad | xK_Select :: KeySym
+XMonad | xK_Shift_L :: KeySym
+XMonad | xK_Shift_Lock :: KeySym
+XMonad | xK_Shift_R :: KeySym
+XMonad | xK_SingleCandidate :: KeySym
+XMonad | xK_Super_L :: KeySym
+XMonad | xK_Super_R :: KeySym
+XMonad | xK_Sys_Req :: KeySym
+XMonad | xK_T :: KeySym
+XMonad | xK_THORN :: KeySym
+XMonad | xK_Tab :: KeySym
+XMonad | xK_Thorn :: KeySym
+XMonad | xK_U :: KeySym
+XMonad | xK_Uacute :: KeySym
+XMonad | xK_Ucircumflex :: KeySym
+XMonad | xK_Udiaeresis :: KeySym
+XMonad | xK_Ugrave :: KeySym
+XMonad | xK_Undo :: KeySym
+XMonad | xK_Up :: KeySym
+XMonad | xK_V :: KeySym
+XMonad | xK_VoidSymbol :: KeySym
+XMonad | xK_W :: KeySym
+XMonad | xK_X :: KeySym
+XMonad | xK_Y :: KeySym
+XMonad | xK_Yacute :: KeySym
+XMonad | xK_Z :: KeySym
+XMonad | xK_a :: KeySym
+XMonad | xK_aacute :: KeySym
+XMonad | xK_acircumflex :: KeySym
+XMonad | xK_acute :: KeySym
+XMonad | xK_adiaeresis :: KeySym
+XMonad | xK_ae :: KeySym
+XMonad | xK_agrave :: KeySym
+XMonad | xK_ampersand :: KeySym
+XMonad | xK_apostrophe :: KeySym
+XMonad | xK_aring :: KeySym
+XMonad | xK_asciicircum :: KeySym
+XMonad | xK_asciitilde :: KeySym
+XMonad | xK_asterisk :: KeySym
+XMonad | xK_at :: KeySym
+XMonad | xK_atilde :: KeySym
+XMonad | xK_b :: KeySym
+XMonad | xK_backslash :: KeySym
+XMonad | xK_bar :: KeySym
+XMonad | xK_braceleft :: KeySym
+XMonad | xK_braceright :: KeySym
+XMonad | xK_bracketleft :: KeySym
+XMonad | xK_bracketright :: KeySym
+XMonad | xK_brokenbar :: KeySym
+XMonad | xK_c :: KeySym
+XMonad | xK_ccedilla :: KeySym
+XMonad | xK_cedilla :: KeySym
+XMonad | xK_cent :: KeySym
+XMonad | xK_colon :: KeySym
+XMonad | xK_comma :: KeySym
+XMonad | xK_copyright :: KeySym
+XMonad | xK_currency :: KeySym
+XMonad | xK_d :: KeySym
+XMonad | xK_degree :: KeySym
+XMonad | xK_diaeresis :: KeySym
+XMonad | xK_division :: KeySym
+XMonad | xK_dollar :: KeySym
+XMonad | xK_e :: KeySym
+XMonad | xK_eacute :: KeySym
+XMonad | xK_ecircumflex :: KeySym
+XMonad | xK_ediaeresis :: KeySym
+XMonad | xK_egrave :: KeySym
+XMonad | xK_equal :: KeySym
+XMonad | xK_eth :: KeySym
+XMonad | xK_exclam :: KeySym
+XMonad | xK_exclamdown :: KeySym
+XMonad | xK_f :: KeySym
+XMonad | xK_g :: KeySym
+XMonad | xK_grave :: KeySym
+XMonad | xK_greater :: KeySym
+XMonad | xK_guillemotleft :: KeySym
+XMonad | xK_guillemotright :: KeySym
+XMonad | xK_h :: KeySym
+XMonad | xK_hyphen :: KeySym
+XMonad | xK_i :: KeySym
+XMonad | xK_iacute :: KeySym
+XMonad | xK_icircumflex :: KeySym
+XMonad | xK_idiaeresis :: KeySym
+XMonad | xK_igrave :: KeySym
+XMonad | xK_j :: KeySym
+XMonad | xK_k :: KeySym
+XMonad | xK_l :: KeySym
+XMonad | xK_less :: KeySym
+XMonad | xK_m :: KeySym
+XMonad | xK_macron :: KeySym
+XMonad | xK_masculine :: KeySym
+XMonad | xK_minus :: KeySym
+XMonad | xK_mu :: KeySym
+XMonad | xK_multiply :: KeySym
+XMonad | xK_n :: KeySym
+XMonad | xK_nobreakspace :: KeySym
+XMonad | xK_notsign :: KeySym
+XMonad | xK_ntilde :: KeySym
+XMonad | xK_numbersign :: KeySym
+XMonad | xK_o :: KeySym
+XMonad | xK_oacute :: KeySym
+XMonad | xK_ocircumflex :: KeySym
+XMonad | xK_odiaeresis :: KeySym
+XMonad | xK_ograve :: KeySym
+XMonad | xK_onehalf :: KeySym
+XMonad | xK_onequarter :: KeySym
+XMonad | xK_onesuperior :: KeySym
+XMonad | xK_ordfeminine :: KeySym
+XMonad | xK_oslash :: KeySym
+XMonad | xK_otilde :: KeySym
+XMonad | xK_p :: KeySym
+XMonad | xK_paragraph :: KeySym
+XMonad | xK_parenleft :: KeySym
+XMonad | xK_parenright :: KeySym
+XMonad | xK_percent :: KeySym
+XMonad | xK_period :: KeySym
+XMonad | xK_periodcentered :: KeySym
+XMonad | xK_plus :: KeySym
+XMonad | xK_plusminus :: KeySym
+XMonad | xK_q :: KeySym
+XMonad | xK_question :: KeySym
+XMonad | xK_questiondown :: KeySym
+XMonad | xK_quotedbl :: KeySym
+XMonad | xK_quoteleft :: KeySym
+XMonad | xK_quoteright :: KeySym
+XMonad | xK_r :: KeySym
+XMonad | xK_registered :: KeySym
+XMonad | xK_s :: KeySym
+XMonad | xK_script_switch :: KeySym
+XMonad | xK_section :: KeySym
+XMonad | xK_semicolon :: KeySym
+XMonad | xK_slash :: KeySym
+XMonad | xK_space :: KeySym
+XMonad | xK_ssharp :: KeySym
+XMonad | xK_sterling :: KeySym
+XMonad | xK_t :: KeySym
+XMonad | xK_thorn :: KeySym
+XMonad | xK_threequarters :: KeySym
+XMonad | xK_threesuperior :: KeySym
+XMonad | xK_twosuperior :: KeySym
+XMonad | xK_u :: KeySym
+XMonad | xK_uacute :: KeySym
+XMonad | xK_ucircumflex :: KeySym
+XMonad | xK_udiaeresis :: KeySym
+XMonad | xK_ugrave :: KeySym
+XMonad | xK_underscore :: KeySym
+XMonad | xK_v :: KeySym
+XMonad | xK_w :: KeySym
+XMonad | xK_x :: KeySym
+XMonad | xK_y :: KeySym
+XMonad | xK_yacute :: KeySym
+XMonad | xK_ydiaeresis :: KeySym
+XMonad | xK_yen :: KeySym
+XMonad | xK_z :: KeySym
+XMonad | xQueryTree :: Display -> Window -> Ptr Window -> Ptr Window -> Ptr (Ptr Window) -> Ptr CInt -> IO Status
+XMonad | xRR_Connected :: Connection
+XMonad | xRR_Disconnected :: Connection
+XMonad | xRR_Reflect_X :: Reflection
+XMonad | xRR_Reflect_Y :: Reflection
+XMonad | xRR_Rotate_0 :: Rotation
+XMonad | xRR_Rotate_180 :: Rotation
+XMonad | xRR_Rotate_270 :: Rotation
+XMonad | xRR_Rotate_90 :: Rotation
+XMonad | xRR_UnknownConnection :: Connection
+XMonad | xRefreshKeyboardMapping :: Ptr () -> IO CInt
+XMonad | xSetClassHint :: Display -> Window -> Ptr ClassHint -> IO ()
+XMonad | xSetErrorHandler :: IO ()
+XMonad | xSetSelectionOwner :: Display -> Atom -> Window -> Time -> IO ()
+XMonad | xSetWMHints :: Display -> Window -> Ptr WMHints -> IO Status
+XMonad | xSetWMNormalHints :: Display -> Window -> Ptr SizeHints -> IO ()
+XMonad | xUnmapWindow :: Display -> Window -> IO CInt
+XMonad | x_HEIGHT :: Atom
+XMonad | xorRegion :: Region -> Region -> Region -> IO CInt
+XMonad | xwcDrawImageString :: Display -> Drawable -> FontSet -> GC -> Position -> Position -> CWString -> CInt -> IO ()
+XMonad | xwcDrawString :: Display -> Drawable -> FontSet -> GC -> Position -> Position -> CWString -> CInt -> IO ()
+XMonad | xwcTextEscapement :: FontSet -> CWString -> CInt -> IO Int32
+XMonad | xwcTextExtents :: FontSet -> CWString -> CInt -> Ptr Rectangle -> Ptr Rectangle -> IO CInt
+XMonad | xwcTextPropertyToTextList :: Display -> Ptr TextProperty -> Ptr (Ptr CWString) -> Ptr CInt -> IO CInt
+XMonad | xyBitmap :: ImageFormat
+XMonad | xyPixmap :: ImageFormat
+XMonad | zPixmap :: ImageFormat
