@@ -49,6 +49,7 @@ import XMonad.Core
 import XMonad.River.Runtime (RestartRequested(..), setMainThread, warnUnimplemented)
 import XMonad.River.Connection
 import XMonad.River.Protocol.WindowManagement
+import XMonad.River.Protocol.Core
 import XMonad.River.Protocol.LayerShell
 import XMonad.River.Protocol.XkbBindings
 import XMonad.River.Wire (ObjectId, isNullObject)
@@ -107,21 +108,34 @@ riverMain userConfig dirs = do
   -- wallpaper setters, bars and lock screens.
   mLayerShell <- bindGlobal conn registry globals
                    riverLayerShellV1Interface 1 riverLayerShellV1Version
+  -- Surfaces the window manager draws itself -- prompts, decorations -- need
+  -- these two.  Both are core Wayland rather than river extensions, so a
+  -- compositor without them would be broken in a way worth reporting rather
+  -- than working around.
+  mCompositor <- bindGlobal conn registry globals
+                   wlCompositorInterface 4 wlCompositorVersion
+  mShm <- bindGlobal conn registry globals wlShmInterface 1 wlShmVersion
+
   case (mManager, mBindings) of
     (Just (manager, _), Just (bindings, _)) -> do
       when (mLayerShell == Nothing) $ hPutStrLn stderr
         "xmonad-river: river_layer_shell_v1 is unavailable; layer surfaces \
         \(fuzzel prompts, notifications, wallpaper, bars) will not be shown"
-      run conn manager bindings (fmap fst mLayerShell) userConfig dirs
+      when (mCompositor == Nothing || mShm == Nothing) $ hPutStrLn stderr
+        "xmonad-river: wl_compositor or wl_shm is unavailable; anything the \
+        \window manager draws itself (prompts, decorations) will not appear"
+      run conn manager bindings (fmap fst mLayerShell)
+          (fmap fst mCompositor) (fmap fst mShm) userConfig dirs
     _ -> do
       hPutStrLn stderr
         "xmonad-river: river_window_manager_v1 (>= 4) or \
         \river_xkb_bindings_v1 not supported by the compositor"
       exitFailure
 
-run :: Connection -> ObjectId -> ObjectId -> Maybe ObjectId -> XConfig Layout
+run :: Connection -> ObjectId -> ObjectId -> Maybe ObjectId
+    -> Maybe ObjectId -> Maybe ObjectId -> XConfig Layout
     -> Directories -> IO ()
-run conn manager bindings layerShell userConfig dirs = do
+run conn manager bindings layerShell compositor shm userConfig dirs = do
   windowsRef <- newIORef M.empty
   outputsRef <- newIORef M.empty
   seatsRef   <- newIORef M.empty
@@ -172,6 +186,8 @@ run conn manager bindings layerShell userConfig dirs = do
         , display = conn
         , riverManager = manager
         , riverBindings = bindings
+        , riverCompositor = compositor
+        , riverShm = shm
         , riverWindows = windowsRef
         , riverOutputs = outputsRef
         , riverSeats = seatsRef

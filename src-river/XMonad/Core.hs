@@ -151,6 +151,13 @@ data XConf = XConf
     , config        :: !(XConfig Layout)       -- ^ initial user configuration
     , riverManager  :: !ObjectId               -- ^ the @river_window_manager_v1@ global
     , riverBindings :: !ObjectId               -- ^ the @river_xkb_bindings_v1@ global
+    , riverCompositor :: !(Maybe ObjectId)
+      -- ^ the @wl_compositor@ global, for surfaces the window manager draws
+      -- itself.  'Nothing' on a compositor that does not advertise one, which
+      -- should not happen but is not worth crashing over -- a session without
+      -- decorations beats no session.
+    , riverShm      :: !(Maybe ObjectId)
+      -- ^ the @wl_shm@ global, for the buffers those surfaces are drawn into.
     , riverWindows  :: !(IORef (M.Map ObjectId RiverWindow))
     , riverOutputs  :: !(IORef (M.Map ObjectId RiverOutput))
     , riverSeats    :: !(IORef (M.Map ObjectId RiverSeat))

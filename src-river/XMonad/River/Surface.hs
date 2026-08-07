@@ -25,6 +25,7 @@ module XMonad.River.Surface
   , destroySurface
   , withSurfaceBuffer
   , moveSurface
+  , hideSurface
   ) where
 
 import Data.IORef
@@ -34,7 +35,7 @@ import XMonad.River.Connection (Connection)
 import XMonad.River.Protocol.Core
 import XMonad.River.Protocol.WindowManagement
 import XMonad.River.Types (Position)
-import XMonad.River.Wire (ObjectId)
+import XMonad.River.Wire (ObjectId, nullObject)
 
 -- | A window-manager-owned surface and its current backing store.
 data Surface = Surface
@@ -105,6 +106,18 @@ withSurfaceBuffer conn s shm width height draw = do
     (fromIntegral width) (fromIntegral height)
   wlSurfaceCommit conn (surfWl s)
   pure a
+
+-- | Unmap the surface without destroying it.
+--
+-- Attaching a null buffer is how a @wl_surface@ is unmapped; there is no
+-- separate hide request.  The backing store is kept, because a surface that is
+-- hidden is usually about to be shown again -- a decoration on a workspace
+-- being switched away from -- and reallocating shared memory for that is work
+-- with nothing to show for it.
+hideSurface :: Connection -> Surface -> IO ()
+hideSurface conn s = do
+  wlSurfaceAttach conn (surfWl s) nullObject 0 0
+  wlSurfaceCommit conn (surfWl s)
 
 -- | Tear down a surface and its backing store.
 destroySurface :: Connection -> Surface -> IO ()
