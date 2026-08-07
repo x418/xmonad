@@ -19,7 +19,7 @@ XMonad | Choose | type Choose :: (* -> *) -> (* -> *) -> * -> *
 XMonad | Choose | type role Choose representational representational nominal
 XMonad | ConfExtension | data ConfExtension = forall a. Typeable a => ConfExtension a
 XMonad | ConfExtension | type ConfExtension :: *
-XMonad | Connection | data Connection = Connection {connSocket :: Socket, connNextId :: (IORef Word32), connFreeIds :: (IORef [Word32]), connOut :: (IORef Encoded), connIn :: (IORef ByteString), connListeners :: (IORef (IntMap Listener))}
+XMonad | Connection | data Connection = Connection {connSocket :: Socket, connNextId :: (IORef Word32), connFreeIds :: (IORef [Word32]), connOut :: (IORef Encoded), connIn :: (IORef ByteString), connOutFds :: (IORef [Fd]), connInFds :: (IORef [Fd]), connListeners :: (IORef (IntMap Listener))}
 XMonad | Connection | type Connection :: *
 XMonad | D | type D :: *
 XMonad | D | type D = (Dimension, Dimension)
@@ -580,7 +580,7 @@ XMonad.Core | ButtonMask | type ButtonMask :: *
 XMonad.Core | ButtonMask | type ButtonMask = KeyMask
 XMonad.Core | ConfExtension | data ConfExtension = forall a. Typeable a => ConfExtension a
 XMonad.Core | ConfExtension | type ConfExtension :: *
-XMonad.Core | Connection | data Connection = Connection {connSocket :: Socket, connNextId :: (IORef Word32), connFreeIds :: (IORef [Word32]), connOut :: (IORef Encoded), connIn :: (IORef ByteString), connListeners :: (IORef (IntMap Listener))}
+XMonad.Core | Connection | data Connection = Connection {connSocket :: Socket, connNextId :: (IORef Word32), connFreeIds :: (IORef [Word32]), connOut :: (IORef Encoded), connIn :: (IORef ByteString), connOutFds :: (IORef [Fd]), connInFds :: (IORef [Fd]), connListeners :: (IORef (IntMap Listener))}
 XMonad.Core | Connection | type Connection :: *
 XMonad.Core | Dimension | type Dimension :: *
 XMonad.Core | Dimension | type Dimension = Word32

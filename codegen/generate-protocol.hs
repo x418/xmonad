@@ -18,6 +18,7 @@
 {-# LANGUAGE ViewPatterns #-}
 
 import Data.Char (isAlpha, toLower, toUpper)
+import Control.Monad (unless)
 import Data.List (intercalate, isPrefixOf)
 import Data.Maybe (fromMaybe, mapMaybe)
 import System.FilePath ((</>), (<.>))
@@ -176,7 +177,7 @@ haskellType a = case argType a of
   TObject -> "ObjectId"
   TNewId  -> "ObjectId"
   TArray  -> "ByteString"
-  TFd     -> error "file descriptor arguments are not supported"
+  TFd     -> "Fd"
 
 -- | How a request argument is encoded.
 argEncoder :: Argument -> String
@@ -188,7 +189,10 @@ argEncoder a = case argType a of
   TObject -> "argObject " ++ v
   TNewId  -> "argObject " ++ v
   TArray  -> "argArray " ++ v
-  TFd     -> error "file descriptor arguments are not supported"
+  -- An fd argument contributes nothing to the message body: it travels
+  -- entirely as ancillary data, and the server pairs it with the request by
+  -- position.  So it encodes as the empty Args and is passed separately.
+  TFd     -> "mempty"
   where v = safeVar (argName a)
 
 -- | How an event argument is decoded.
@@ -201,10 +205,14 @@ argDecoder a = case argType a of
   TObject -> "getObject"
   TNewId  -> "getObject"
   TArray  -> "getArray"
-  TFd     -> error "file descriptor arguments are not supported"
-
-hasFd :: Message -> Bool
-hasFd = any ((== TFd) . argType) . msgArgs
+  -- Requests can carry descriptors; events cannot, yet.  Event bodies are
+  -- decoded by a pure Peek, and claiming a descriptor means touching the
+  -- connection's receive queue, which is IO.  Nothing in the protocols this
+  -- backend generates needs it -- wl_shm.create_pool is a request, and the
+  -- event-side fds live in wl_keyboard.keymap and wl_data_source.send, which
+  -- a window manager never binds.  Failing here is better than emitting
+  -- something that looks generated and does not work.
+  TFd     -> error ("fd arguments in events are not supported: " ++ argName a)
 
 --------------------------------------------------------------------------------
 -- Rendering
@@ -238,6 +246,7 @@ renderModule modName source ifaces = unlines $
       [ [ "import Data.ByteString (ByteString)" ]
       , [ "import Data.Int (Int32)" | uses TInt ]
       , [ "import Data.Word (Word16, Word32)" ]
+      , [ "import System.Posix.Types (Fd)" | uses TFd ]
       ]
 
 -- | Renders a list with one prefix for the first element and another for the
@@ -254,7 +263,7 @@ ifaceExports i =
   , funName (ifaceName i) ++ "Listen"
   ] ++
   [ funName (ifaceName i) ++ typeName (msgName m)
-  | m <- ifaceRequests i, not (hasFd m)
+  | m <- ifaceRequests i
   ] ++
   [ enumConstName i e n | e <- ifaceEnums i, (n, _) <- enumEntries e ]
 
@@ -297,14 +306,7 @@ renderEnum i e = concat
   ]
 
 renderRequest :: Interface -> Message -> [String]
-renderRequest i m
-  | hasFd m =
-      [ "-- NOTE: " ++ ifaceName i ++ "." ++ msgName m ++ " is not generated:"
-      , "-- it passes a file descriptor, which this pure-Haskell wire"
-      , "-- implementation does not support (it would need SCM_RIGHTS)."
-      , ""
-      ]
-  | otherwise =
+renderRequest i m =
       [ "-- | @" ++ ifaceName i ++ "." ++ msgName m ++ "@"
       ] ++
       sinceComment ++
@@ -332,14 +334,21 @@ renderRequest i m
     -- A destructor request also drops the local listener, so that events the
     -- server had already queued for the object are discarded rather than
     -- delivered to a handler that no longer has any state to update.
+    -- Descriptors are handed to the connection alongside the bytes rather
+    -- than encoded into them; see XMonad.River.Socket.
+    fdArgs = [ a | a <- msgArgs m, argType a == TFd ]
+    send = case fdArgs of
+      [] -> "request conn self " ++ show (msgOpcode m) ++ " (" ++ encoded ++ ")"
+      as -> "requestWithFds conn self " ++ show (msgOpcode m) ++ " (" ++ encoded
+              ++ ") [" ++ intercalate ", " (map (safeVar . argName) as) ++ "]"
     body = case newIdArgs of
       [] ->
-        [ "  request conn self " ++ show (msgOpcode m) ++ " (" ++ encoded ++ ")" ]
+        [ "  " ++ send ]
         ++ [ "    >> freeObject conn self" | msgDestructor m ]
       (nid:_) ->
         [ "  do"
         , "    " ++ safeVar (argName nid) ++ " <- newObject conn"
-        , "    request conn self " ++ show (msgOpcode m) ++ " (" ++ encoded ++ ")"
+        , "    " ++ send
         , "    pure " ++ safeVar (argName nid)
         ]
 
@@ -393,19 +402,42 @@ renderListener i =
 --------------------------------------------------------------------------------
 -- Main
 
--- | Which protocol files to generate, and what to call the resulting modules.
-targets :: [(FilePath, String)]
+-- | Which protocol files to generate, what to call the resulting modules, and
+-- which interfaces to take from each.
+--
+-- 'Nothing' means every interface in the file.  @wayland.xml@ needs a
+-- selection: it defines the whole core protocol, most of which a window
+-- manager never binds, and two of its interfaces -- @wl_keyboard.keymap@ and
+-- @wl_data_source.send@ -- carry descriptors in *events*, which the generator
+-- does not support.  Taking only what is needed keeps that limitation from
+-- mattering.
+--
+-- @wl_display@ and @wl_registry@ are deliberately absent: "XMonad.River.Connection"
+-- implements them by hand, because id allocation, error reporting and the
+-- registry dance are the connection rather than ordinary protocol traffic.
+targets :: [(FilePath, String, Maybe [String])]
 targets =
-  [ ("river-window-management-v1.xml", "XMonad.River.Protocol.WindowManagement")
-  , ("river-xkb-bindings-v1.xml",      "XMonad.River.Protocol.XkbBindings")
-  , ("river-layer-shell-v1.xml",       "XMonad.River.Protocol.LayerShell")
+  [ ("river-window-management-v1.xml", "XMonad.River.Protocol.WindowManagement", Nothing)
+  , ("river-xkb-bindings-v1.xml",      "XMonad.River.Protocol.XkbBindings", Nothing)
+  , ("river-layer-shell-v1.xml",       "XMonad.River.Protocol.LayerShell", Nothing)
+  , ("wayland.xml",                    "XMonad.River.Protocol.Core",
+      Just [ "wl_compositor", "wl_shm", "wl_shm_pool", "wl_surface"
+           , "wl_buffer", "wl_region", "wl_callback" ])
   ]
 
 main :: IO ()
 main = mapM_ generate targets
   where
-    generate (xmlFile, modName) = do
-      ifaces <- parseProtocol ("protocol" </> xmlFile)
-      let out = "src" </> map (\c -> if c == '.' then '/' else c) modName <.> "hs"
+    generate (xmlFile, modName, only) = do
+      allIfaces <- parseProtocol ("protocol" </> xmlFile)
+      let ifaces = case only of
+            Nothing    -> allIfaces
+            Just names -> [ i | i <- allIfaces, ifaceName i `elem` names ]
+          missing = case only of
+            Nothing    -> []
+            Just names -> [ n | n <- names, n `notElem` map ifaceName allIfaces ]
+      unless (null missing) $
+        error (xmlFile ++ ": no such interface(s): " ++ intercalate ", " missing)
+      let out = "src-river" </> map (\c -> if c == '.' then '/' else c) modName <.> "hs"
       writeFile out (renderModule modName xmlFile ifaces)
       putStrLn ("wrote " ++ out ++ " (" ++ show (length ifaces) ++ " interfaces)")

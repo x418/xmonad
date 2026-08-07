@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 /* Ancillary-data send/receive for the Wayland socket.
  *
  * Wayland passes file descriptors as SCM_RIGHTS ancillary data attached to the
@@ -120,4 +121,47 @@ hs_wl_recvmsg_fds(int sock, void *buf, size_t len,
     }
 
     return n;
+}
+
+/* --- shared memory for wl_shm buffers ------------------------------------
+ *
+ * A wl_buffer's pixels live in memory shared with the compositor, which means
+ * an anonymous file both processes map.  Neither memfd_create nor mmap is
+ * exposed by the unix package, and both are a couple of lines here, so they
+ * keep the fd machinery company rather than pulling in another dependency.
+ */
+
+#include <sys/mman.h>
+#include <unistd.h>
+
+/* An anonymous, sealed-capable file of the given size, CLOEXEC as with
+ * received descriptors: the window manager forks on every spawn.
+ * Returns the fd, or -1 with errno set. */
+int
+hs_wl_memfd(const char *name, size_t size)
+{
+    int fd = memfd_create(name, MFD_CLOEXEC | MFD_ALLOW_SEALING);
+    if (fd < 0)
+        return -1;
+    if (ftruncate(fd, (off_t) size) < 0) {
+        int saved = errno;
+        close(fd);
+        errno = saved;
+        return -1;
+    }
+    return fd;
+}
+
+/* Map size bytes of fd read/write shared.  Returns NULL on failure. */
+void *
+hs_wl_mmap(int fd, size_t size)
+{
+    void *p = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    return p == MAP_FAILED ? NULL : p;
+}
+
+int
+hs_wl_munmap(void *addr, size_t size)
+{
+    return munmap(addr, size);
 }

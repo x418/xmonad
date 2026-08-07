@@ -18,6 +18,8 @@ module XMonad.River.Connection
   , disconnect
     -- * Requests
   , request
+  , requestWithFds
+  , takeFd
   , newObject
   , freeObject
     -- * Listeners
@@ -51,6 +53,10 @@ import qualified Network.Socket.ByteString as NBS
 
 import Data.Store.Core (Peek)
 
+import System.Posix.IO (closeFd)
+import System.Posix.Types (Fd)
+
+import XMonad.River.Socket (recvWithFds, sendWithFds)
 import XMonad.River.Wire
 
 --------------------------------------------------------------------------------
@@ -92,6 +98,13 @@ data Connection = Connection
     -- byte twice.
   , connIn        :: !(IORef ByteString)
     -- ^ Bytes read but not yet forming a complete message.
+  , connOutFds    :: !(IORef [Fd])
+    -- ^ Descriptors owed to the pending requests, oldest first.  A Wayland fd
+    -- argument occupies no space in the message body: it travels entirely as
+    -- ancillary data, and the server matches it to the request by position.
+    -- So these ride out with the next 'flush' and their order is the contract.
+  , connInFds     :: !(IORef [Fd])
+    -- ^ Descriptors received but not yet claimed by a decoded event.
   , connListeners :: !(IORef (IM.IntMap Listener))
   }
 
@@ -138,8 +151,10 @@ newConnection sock = do
   freeIds   <- newIORef []
   out       <- newIORef mempty
   inBuf     <- newIORef BS.empty
+  outFds    <- newIORef []
+  inFds     <- newIORef []
   listeners <- newIORef IM.empty
-  let conn = Connection sock nextId freeIds out inBuf listeners
+  let conn = Connection sock nextId freeIds out inBuf outFds inFds listeners
   setListener conn displayId (displayListener conn)
   pure conn
 
@@ -189,6 +204,33 @@ request :: Connection -> ObjectId -> Word16 -> Encoded -> IO ()
 request conn oid opcode args =
   modifyIORef' (connOut conn) (<> encodeMessage oid opcode args)
 
+-- | Queue a request that carries file descriptors.
+--
+-- The descriptors contribute nothing to the message body -- a Wayland @fd@
+-- argument is pure ancillary data -- so the bytes are queued exactly as
+-- 'request' would, and the descriptors are appended to a parallel queue that
+-- 'flush' attaches to the same @sendmsg@.  Order is the whole protocol here:
+-- the server pairs each descriptor with the next fd argument it decodes.
+--
+-- __This takes ownership of the descriptors.__  They are closed once the
+-- request has actually gone out, which is at the next 'flush' rather than
+-- now.  A caller that closes its own copy immediately after calling this --
+-- the obvious thing to write -- would have the connection transmit a closed
+-- descriptor.
+requestWithFds :: Connection -> ObjectId -> Word16 -> Encoded -> [Fd] -> IO ()
+requestWithFds conn oid opcode args fds = do
+  modifyIORef' (connOut conn) (<> encodeMessage oid opcode args)
+  modifyIORef' (connOutFds conn) (++ fds)
+
+-- | Take the next descriptor delivered alongside an event.
+--
+-- Returns 'Nothing' if the server sent an fd argument without the descriptor,
+-- which would be a protocol violation rather than something to recover from.
+takeFd :: Connection -> IO (Maybe Fd)
+takeFd conn = atomicModifyIORef' (connInFds conn) $ \fds -> case fds of
+  (f:rest) -> (rest, Just f)
+  []       -> ([], Nothing)
+
 --------------------------------------------------------------------------------
 -- Listeners
 
@@ -212,15 +254,34 @@ flush :: Connection -> IO ()
 flush conn = do
   pending <- readIORef (connOut conn)
   writeIORef (connOut conn) mempty
+  fds <- atomicModifyIORef' (connOutFds conn) $ \fs -> ([], fs)
   let bs = runEncoded pending
-  unless (BS.null bs) $ NBS.sendAll (connSocket conn) bs
+  unless (BS.null bs && null fds) $ sendAllWithFds conn bs fds
+  -- The compositor holds its own descriptors now, so ours are dead weight --
+  -- and a window manager forks constantly, so keeping them would leak a
+  -- mapping into every subsequent child.
+  mapM_ closeFd fds
+
+-- | Write every byte, keeping the descriptors on the first message.
+--
+-- A short write is ordinary on a stream socket, and the retry must not resend
+-- the descriptors: the server has already taken them, and sending them twice
+-- would pair them with the wrong requests.
+sendAllWithFds :: Connection -> ByteString -> [Fd] -> IO ()
+sendAllWithFds conn = go
+  where
+    go bs fds = do
+      n <- sendWithFds (connSocket conn) bs fds
+      let rest = BS.drop n bs
+      unless (BS.null rest) (go rest [])
 
 -- | Flush, block for at least one batch of events, and dispatch them all.
 -- This is the equivalent of @wl_display_dispatch@.
 dispatch :: Connection -> IO ()
 dispatch conn = do
   flush conn
-  chunk <- NBS.recv (connSocket conn) 4096
+  (chunk, fds) <- recvWithFds (connSocket conn) 4096
+  unless (null fds) $ modifyIORef' (connInFds conn) (++ fds)
   when (BS.null chunk) $ throwIO Disconnected
   -- ByteString's append short-circuits when either side is empty, so this is
   -- free whenever the previous read ended on a message boundary -- which is
