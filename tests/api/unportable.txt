@@ -58,25 +58,27 @@ stateFileName           FIX: returns with the rest; it is only a path.
 
 
 ################################################################################
-# 3. A degenerate answer would be truthful
+# 3. A degenerate answer would be truthful, but the answer would mislead
 #
-# These have an obviously correct implementation under river, because the thing
-# they guard against cannot happen.  Exporting them is defensible: `pure ()` is
-# not a stub here, it is the right answer.
+# `pure ()` is vacuously correct for both of these -- river grabs nothing, so
+# there is nothing to release and nothing to configure.  They are held back
+# anyway, because unlike cleanMask, extraModifiers, isRoot, clearEvents and
+# cacheNumlockMask (all now exported, for exactly the reason this section
+# rejects these two) their contract is advice rather than state.
 #
-# Held back for now because the rule is easier to hold than to relax, and
-# because two of them are advice-shaped -- unGrab's caller believes it has
-# released the keyboard so a screen locker can take it, and that belief is
-# true under X11 for a reason that does not exist here.  Worth deciding as a
-# group rather than one at a time.
+# unGrab's documentation tells the caller to run it before spawning a screen
+# locker, so the locker can take the keyboard without a sleep first.  A caller
+# writes `unGrab >> spawn "slock"` and believes the keyboard has been handed
+# over.  Under river it has not: a locker acquires input through
+# ext-session-lock-v1, which has nothing to do with this call.  Succeeding
+# silently would be true about grabs and false about the thing being asked.
+#
+# setButtonGrab is milder and the same shape: its Bool says whether to
+# intercept clicks, and river settled that when the pointer binding object was
+# created.  Taking the argument and discarding it misrepresents who decides.
 
-cleanMask               FIX: `pure` -- river delivers resolved modifiers, so stripping nothing is correct.
-extraModifiers          FIX: `pure [0]` -- no grabs, so exactly one combination to bind.
-clearEvents             FIX: `pure ()` -- there is no queue, so "stale events discarded" is vacuously true.
-isRoot                  FIX: `pure False` -- there is no root window, so nothing is it.
-cacheNumlockMask        FIX: `pure ()` -- nothing to cache; river resolves modifiers itself.
-unGrab                  FIX: `pure ()` -- nothing is grabbed.  But see the caveat above.
-setButtonGrab           FIX: `pure ()` -- pointer bindings are objects and are always live.
+unGrab                  HELD: `pure ()` is true about grabs and misleading about handing over the keyboard.
+setButtonGrab           HELD: `pure ()` would accept a Bool that river already decided.
 
 
 ################################################################################

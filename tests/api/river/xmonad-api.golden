@@ -127,9 +127,12 @@ XMonad | applySizeHintsContents | applySizeHintsContents :: Integral a => SizeHi
 XMonad | asks | asks :: MonadReader r m => (r -> a) -> m a
 XMonad | binFileName | binFileName :: Directories -> FilePath
 XMonad | broadcastMessage | broadcastMessage :: Message a => a -> X ()
+XMonad | cacheNumlockMask | cacheNumlockMask :: X ()
 XMonad | catchIO | catchIO :: MonadIO m => IO () -> m ()
 XMonad | catchX | catchX :: X a -> X a -> X a
 XMonad | className | className :: Query String
+XMonad | cleanMask | cleanMask :: KeyMask -> X KeyMask
+XMonad | clearEvents | clearEvents :: X ()
 XMonad | composeAll | composeAll :: Monoid m => [m] -> m
 XMonad | containedIn | containedIn :: Rectangle -> Rectangle -> Bool
 XMonad | defaultConfig | defaultConfig :: XConfig (Choose Tall (Choose (Mirror Tall) Full))
@@ -138,6 +141,7 @@ XMonad | doFloat | doFloat :: ManageHook
 XMonad | doIgnore | doIgnore :: ManageHook
 XMonad | doShift | doShift :: WorkspaceId -> ManageHook
 XMonad | exitSession | exitSession :: X ()
+XMonad | extraModifiers | extraModifiers :: X [KeyMask]
 XMonad | float | float :: Window -> X ()
 XMonad | floatLocation | floatLocation :: Window -> X (ScreenId, RationalRect)
 XMonad | focus | focus :: Window -> X ()
@@ -155,6 +159,7 @@ XMonad | installSignalHandlers | installSignalHandlers :: MonadIO m => m ()
 XMonad | io | io :: MonadIO m => IO a -> m a
 XMonad | isClient | isClient :: Window -> X Bool
 XMonad | isFixedSizeOrTransient | isFixedSizeOrTransient :: Window -> X Bool
+XMonad | isRoot | isRoot :: Window -> X Bool
 XMonad | kill | kill :: X ()
 XMonad | killWindow | killWindow :: Window -> X ()
 XMonad | launch | launch :: (LayoutClass l Window, Read (l Window)) => XConfig l -> Directories -> IO ()
@@ -309,6 +314,7 @@ XMonad.Core | getXMonadDir | getXMonadDir :: X String
 XMonad.Core | ifM | ifM :: Monad m => m Bool -> m a -> m a -> m a
 XMonad.Core | installSignalHandlers | installSignalHandlers :: MonadIO m => m ()
 XMonad.Core | io | io :: MonadIO m => IO a -> m a
+XMonad.Core | isRoot | isRoot :: Window -> X Bool
 XMonad.Core | layerHasFocus | layerHasFocus :: LayerFocus -> Bool
 XMonad.Core | manageDirty | manageDirty :: X ()
 XMonad.Core | noSizeHints | noSizeHints :: SizeHints
@@ -388,8 +394,12 @@ XMonad.Operations | applySizeHints | applySizeHints :: Integral a => Dimension -
 XMonad.Operations | applySizeHints' | applySizeHints' :: SizeHints -> D -> D
 XMonad.Operations | applySizeHintsContents | applySizeHintsContents :: Integral a => SizeHints -> (a, a) -> D
 XMonad.Operations | broadcastMessage | broadcastMessage :: Message a => a -> X ()
+XMonad.Operations | cacheNumlockMask | cacheNumlockMask :: X ()
+XMonad.Operations | cleanMask | cleanMask :: KeyMask -> X KeyMask
+XMonad.Operations | clearEvents | clearEvents :: X ()
 XMonad.Operations | containedIn | containedIn :: Rectangle -> Rectangle -> Bool
 XMonad.Operations | exitSession | exitSession :: X ()
+XMonad.Operations | extraModifiers | extraModifiers :: X [KeyMask]
 XMonad.Operations | float | float :: Window -> X ()
 XMonad.Operations | floatLocation | floatLocation :: Window -> X (ScreenId, RationalRect)
 XMonad.Operations | focus | focus :: Window -> X ()

@@ -30,8 +30,9 @@
 -- * 'XConf' holds a river 'Connection' rather than a @Display@, and there is no
 --   root window.  Everything X11 reached through the display -- atoms, window
 --   attributes, the root -- has no Wayland counterpart, so @withDisplay@,
---   @getAtom@, @atom_WM_*@, @withWindowAttributes@ and @isRoot@ are absent
---   rather than present and inert.  See tests/api/unportable.txt.
+--   @getAtom@, @atom_WM_*@ and @withWindowAttributes@ are absent rather than
+--   present and inert.  See tests/api/unportable.txt.  'isRoot' is the
+--   exception: "is this the root window" has a correct total answer here.
 -- * @clientMask@ and @rootMask@ are gone from 'XConfig': river delivers exactly
 --   the events the window management protocol defines, with no mask to select.
 -- * 'Event' is river's event type rather than Xlib's.
@@ -48,7 +49,7 @@ module XMonad.Core (
     SomeMessage(..), fromMessage, LayoutMessages(..),
     StateExtension(..), ExtensionClass(..), ConfExtension(..),
     runX, catchX, userCode, userCodeDef, io, catchIO, installSignalHandlers, uninstallSignalHandlers,
-    withWindowSet, runOnWorkspaces,
+    withWindowSet, isRoot, runOnWorkspaces,
     spawn, spawnPID, xfork, recompile, trace, whenJust, whenX, ifM,
     getXMonadDir, getXMonadCacheDir, getXMonadDataDir, binFileName,
     ManageHook, Query(..), runQuery, Directories'(..), Directories, getDirectories,
@@ -288,6 +289,16 @@ userCodeDef defValue a = fromMaybe defValue <$> userCode a
 -- | Run a monadic action with the current stack set
 withWindowSet :: (WindowSet -> X a) -> X a
 withWindowSet f = gets windowset >>= f
+
+-- | True if the given window is the root window.
+--
+-- Always 'False'.  That is not a stub: river has no root window, so nothing is
+-- it, and the question has a correct total answer rather than an unavailable
+-- one.  Every window river reports is a real toplevel, which is precisely why
+-- the X11 callers of this -- "is this event about the root or about a client"
+-- -- have nothing to disambiguate here.
+isRoot :: Window -> X Bool
+isRoot _ = pure False
 
 ------------------------------------------------------------------------
 -- LayoutClass handling. See particular instances in Operations.hs

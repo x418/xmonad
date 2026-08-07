@@ -44,6 +44,9 @@ module XMonad.Operations (
     windows, refresh, rescreen, modifyWindowSet, windowBracket, windowBracket_,
     withFocused, withUnfocused,
 
+    -- * Keyboard and Mouse
+    cleanMask, extraModifiers, cacheNumlockMask, clearEvents,
+
     -- * Messages
     sendMessage, broadcastMessage, sendMessageWithNoRefresh,
 
@@ -185,6 +188,59 @@ withUnfocused f = withWindowSet $ \ws ->
     whenJust (W.peek ws) $ \w ->
         let unfocusedWindows = filter (/= w) $ W.index ws
         in mapM_ f unfocusedWindows
+
+-- ---------------------------------------------------------------------
+-- Keyboard and mouse
+--
+-- These four have a correct total implementation under river rather than an
+-- unavailable one, because the situation each guards against cannot arise.
+-- They are not stubs: each establishes exactly the postcondition its caller
+-- is entitled to.
+--
+-- Their neighbours in upstream's export list -- unGrab and setButtonGrab --
+-- are deliberately *not* here, even though `pure ()` would be equally
+-- vacuous.  Those two are advice-shaped: unGrab's caller writes
+-- @unGrab >> spawn "slock"@ believing it has handed the keyboard over, and
+-- under river it has not.  The locker gets input by a different route
+-- entirely, so a silent success would be true about grabs and misleading
+-- about the thing the caller cares about.  See tests/api/unportable.txt.
+
+-- | Strip numlock\/capslock from a mask.
+--
+-- The identity, because river delivers modifiers already resolved: the bits
+-- this was written to remove are never set.  Stripping nothing is the correct
+-- strip, not a skipped one.
+cleanMask :: KeyMask -> X KeyMask
+cleanMask = return
+
+-- | Combinations of extra modifier masks we need to grab keys\/buttons for.
+--
+-- Exactly one, the empty one.  This existed so that a binding could be
+-- grabbed once per numlock\/capslock combination; river's bindings are
+-- protocol objects matched against resolved modifiers, so one is all there is.
+extraModifiers :: X [KeyMask]
+extraModifiers = return [0]
+
+-- | Find the numlock modifier and remember it.
+--
+-- There is no keymap to inspect and no mask to find.  The field is set to
+-- zero, which is what 'cleanMask' and 'extraModifiers' above already assume,
+-- so this establishes its postcondition rather than skipping it.
+cacheNumlockMask :: X ()
+cacheNumlockMask = modify $ \s -> s { numberlockMask = 0 }
+
+-- | Remove all pending events of a given type from the event queue.
+--
+-- Vacuous, and correct: river has no event queue to drain.  It delivers a
+-- manage\/render sequence, and the events that reach a window manager are the
+-- ones the protocol defines, not a stream that can run ahead of us.
+--
+-- Upstream takes an @EventMask@ saying what to discard.  That parameter is
+-- dropped rather than accepted and ignored: river exports no event mask
+-- constants for a caller to pass, so keeping it would only offer a slot that
+-- nothing can fill.
+clearEvents :: X ()
+clearEvents = return ()
 
 -- ---------------------------------------------------------------------
 -- Screens

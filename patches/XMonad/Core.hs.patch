@@ -1,6 +1,6 @@
 --- src/XMonad/Core.hs	2026-08-06 14:14:13.108989784 -0600
-+++ src-river/XMonad/Core.hs	2026-08-06 18:28:02.804029231 -0600
-@@ -16,13 +16,28 @@
++++ src-river/XMonad/Core.hs	2026-08-06 18:35:05.495782636 -0600
+@@ -16,13 +16,29 @@
  -- Copyright   :  (c) Spencer Janssen 2007
  -- License     :  BSD3-style (see LICENSE)
  --
@@ -22,8 +22,9 @@
 +-- * 'XConf' holds a river 'Connection' rather than a @Display@, and there is no
 +--   root window.  Everything X11 reached through the display -- atoms, window
 +--   attributes, the root -- has no Wayland counterpart, so @withDisplay@,
-+--   @getAtom@, @atom_WM_*@, @withWindowAttributes@ and @isRoot@ are absent
-+--   rather than present and inert.  See tests/api/unportable.txt.
++--   @getAtom@, @atom_WM_*@ and @withWindowAttributes@ are absent rather than
++--   present and inert.  See tests/api/unportable.txt.  'isRoot' is the
++--   exception: "is this the root window" has a correct total answer here.
 +-- * @clientMask@ and @rootMask@ are gone from 'XConfig': river delivers exactly
 +--   the events the window management protocol defines, with no mask to select.
 +-- * 'Event' is river's event type rather than Xlib's.
@@ -33,7 +34,7 @@
  -----------------------------------------------------------------------------
  
  module XMonad.Core (
-@@ -33,16 +48,32 @@
+@@ -33,16 +49,32 @@
      SomeMessage(..), fromMessage, LayoutMessages(..),
      StateExtension(..), ExtensionClass(..), ConfExtension(..),
      runX, catchX, userCode, userCodeDef, io, catchIO, installSignalHandlers, uninstallSignalHandlers,
@@ -41,7 +42,7 @@
 -    getAtom, spawn, spawnPID, xfork, xmessage, recompile, trace, whenJust, whenX, ifM,
 -    getXMonadDir, getXMonadCacheDir, getXMonadDataDir, stateFileName, binFileName,
 -    atom_WM_STATE, atom_WM_PROTOCOLS, atom_WM_DELETE_WINDOW, atom_WM_TAKE_FOCUS, withWindowAttributes,
-+    withWindowSet, runOnWorkspaces,
++    withWindowSet, isRoot, runOnWorkspaces,
 +    spawn, spawnPID, xfork, recompile, trace, whenJust, whenX, ifM,
 +    getXMonadDir, getXMonadCacheDir, getXMonadDataDir, binFileName,
      ManageHook, Query(..), runQuery, Directories'(..), Directories, getDirectories,
@@ -70,7 +71,7 @@
  import Control.Exception (fromException, try, bracket_, throw, finally, SomeException(..))
  import qualified Control.Exception as E
  import Control.Applicative ((<|>), empty)
-@@ -50,13 +81,16 @@
+@@ -50,13 +82,16 @@
  import Control.Monad.Fix (fix)
  import Control.Monad.State
  import Control.Monad.Reader
@@ -88,7 +89,7 @@
  import Data.List (isInfixOf, intercalate, (\\))
  import System.FilePath
  import System.IO
-@@ -69,8 +103,6 @@
+@@ -69,8 +104,6 @@
  import System.Process
  import System.Directory
  import System.Exit
@@ -97,7 +98,7 @@
  import Data.Typeable
  import Data.Maybe (isJust,fromMaybe)
  import Data.Monoid (Ap(..))
-@@ -78,13 +110,30 @@
+@@ -78,13 +111,30 @@
  import qualified Data.Map as M
  import qualified Data.Set as S
  
@@ -130,7 +131,7 @@
      , extensibleState  :: !(M.Map String (Either String StateExtension))
      -- ^ stores custom state information.
      --
-@@ -94,11 +143,26 @@
+@@ -94,11 +144,26 @@
  
  -- | XConf, the (read-only) window manager configuration.
  data XConf = XConf
@@ -162,7 +163,7 @@
      , keyActions    :: !(M.Map (KeyMask, KeySym) (X ()))
                                        -- ^ a mapping of key presses to actions
      , buttonActions :: !(M.Map (KeyMask, Button) (Window -> X ()))
-@@ -115,25 +179,23 @@
+@@ -115,25 +180,23 @@
  data XConfig l = XConfig
      { normalBorderColor  :: !String              -- ^ Non focused windows border color. Default: \"#dddddd\"
      , focusedBorderColor :: !String              -- ^ Focused windows border color. Default: \"#ff0000\"
@@ -192,7 +193,7 @@
      , handleExtraArgs    :: !([String] -> XConfig Layout -> IO (XConfig Layout))
                                                   -- ^ Modify the configuration, complain about extra arguments etc. with arguments that are not handled by default
      , extensibleConf     :: !(M.Map TypeRep ConfExtension)
-@@ -143,6 +205,14 @@
+@@ -143,6 +206,14 @@
                                                   -- provides additional information and a simple interface for using this.
      }
  
@@ -207,7 +208,7 @@
  
  type WindowSet   = StackSet  WorkspaceId (Layout Window) Window ScreenId ScreenDetail
  type WindowSpace = Workspace WorkspaceId (Layout Window) Window
-@@ -215,35 +285,10 @@
+@@ -215,34 +286,19 @@
  -- ---------------------------------------------------------------------
  -- Convenient wrappers to state
  
@@ -226,7 +227,14 @@
 -    catchX (whenJust wa f) (return ())
 -
 --- | True if the given window is the root window
--isRoot :: Window -> X Bool
++-- | True if the given window is the root window.
++--
++-- Always 'False'.  That is not a stub: river has no root window, so nothing is
++-- it, and the question has a correct total answer rather than an unavailable
++-- one.  Every window river reports is a real toplevel, which is precisely why
++-- the X11 callers of this -- "is this event about the root or about a client"
++-- -- have nothing to disambiguate here.
+ isRoot :: Window -> X Bool
 -isRoot w = asks $ (w ==) . theRoot
 -
 --- | Wrapper for the common case of atom internment
@@ -239,11 +247,11 @@
 -atom_WM_DELETE_WINDOW   = getAtom "WM_DELETE_WINDOW"
 -atom_WM_STATE           = getAtom "WM_STATE"
 -atom_WM_TAKE_FOCUS      = getAtom "WM_TAKE_FOCUS"
--
++isRoot _ = pure False
+ 
  ------------------------------------------------------------------------
  -- LayoutClass handling. See particular instances in Operations.hs
- 
-@@ -273,20 +318,11 @@
+@@ -273,20 +329,11 @@
  -- * 'description'
  --
  -- Note that any code which /uses/ 'LayoutClass' methods should only
@@ -266,7 +274,7 @@
      runLayout :: Workspace WorkspaceId (layout a) a
                -> Rectangle
                -> X ([(a, Rectangle)], Maybe (layout a))
-@@ -294,25 +330,13 @@
+@@ -294,25 +341,13 @@
  
      -- | Given a 'Rectangle' in which to place the windows, and a 'Stack'
      -- of windows, return a list of windows and their corresponding
@@ -295,7 +303,7 @@
      pureLayout  :: layout a -> Rectangle -> Stack a -> [(a, Rectangle)]
      pureLayout _ r s = [(focus s, r)]
  
-@@ -320,28 +344,17 @@
+@@ -320,28 +355,17 @@
      emptyLayout :: layout a -> Rectangle -> X ([(a, Rectangle)], Maybe (layout a))
      emptyLayout _ _ = return ([], Nothing)
  
@@ -327,7 +335,7 @@
      description :: layout a -> String
      description      = show
  
-@@ -374,7 +387,7 @@
+@@ -374,7 +398,7 @@
  fromMessage :: Message m => SomeMessage -> Maybe m
  fromMessage (SomeMessage m) = cast m
  
@@ -336,7 +344,7 @@
  instance Message Event
  
  -- | 'LayoutMessages' are core messages that all layouts (especially stateful
-@@ -398,11 +411,12 @@
+@@ -398,11 +422,12 @@
      -- | Defines an initial value for the state extension
      initialValue :: a
      -- | Specifies whether the state extension should be
@@ -353,7 +361,7 @@
      extensionType :: a -> StateExtension
      extensionType = StateExtension
  
-@@ -417,6 +431,74 @@
+@@ -417,6 +442,74 @@
  data ConfExtension = forall a. Typeable a => ConfExtension a
  
  -- ---------------------------------------------------------------------
@@ -428,7 +436,7 @@
  -- General utilities
  
  -- | If-then-else lifted to a 'Monad'.
-@@ -459,17 +541,6 @@
+@@ -459,17 +552,6 @@
          dupTo fd stdInput
          closeFd fd
  
@@ -446,7 +454,7 @@
  -- | This is basically a map function, running a function in the 'X' monad on
  -- each workspace with the output of that function being the modified workspace.
  runOnWorkspaces :: (WindowSpace -> X WindowSpace) -> X ()
-@@ -494,7 +565,6 @@
+@@ -494,7 +576,6 @@
  -- * @cacheDir@: This directory is used to store temporary files that
  -- can easily be recreated such as the configuration binary and any
  -- intermediate object files generated by GHC.
@@ -454,7 +462,7 @@
  --
  -- For how these directories are chosen, see 'getDirectories'.
  --
-@@ -521,9 +591,6 @@
+@@ -521,9 +602,6 @@
  --    @XDG_CONFIG_HOME@, and @XDG_CACHE_HOME@ (or their respective
  --    fallbacks).  These directories are created if necessary.
  --
@@ -464,7 +472,7 @@
  getDirectories :: IO Directories
  getDirectories = xmEnvDirs <|> xmDirs <|> xdgDirs
    where
-@@ -574,9 +641,8 @@
+@@ -574,9 +652,8 @@
  binFileName  Directories{ cacheDir } = cacheDir </> "xmonad-" <> arch <> "-" <> os
  buildDirName Directories{ cacheDir } = cacheDir </> "build-" <> arch <> "-" <> os
  
@@ -475,7 +483,7 @@
  
  srcFileName, libFileName :: Directories -> FilePath
  srcFileName Directories{ cfgDir } = cfgDir </> "xmonad.hs"
-@@ -798,6 +864,10 @@
+@@ -798,6 +875,10 @@
  
  -- | Check GHC output for deprecation warnings and notify the user if there
  -- were any. Report success otherwise.
@@ -486,7 +494,7 @@
  checkCompileWarnings :: Directories -> IO ()
  checkCompileWarnings dirs = do
      ghcErr <- readFile (errFileName dirs)
-@@ -808,7 +878,6 @@
+@@ -808,7 +889,6 @@
                  ++ lines ghcErr
                  ++ ["","Please correct them or silence using {-# OPTIONS_GHC -Wno-deprecations #-}."]
          trace msg
@@ -494,7 +502,7 @@
        else
          trace "XMonad recompilation process exited with success!"
  
-@@ -820,10 +889,7 @@
+@@ -820,10 +900,7 @@
              ["Errors detected while compiling xmonad config: " <> srcFileName dirs]
              ++ lines (if null ghcErr then show status else ghcErr)
              ++ ["","Please check the file for errors."]
@@ -505,7 +513,7 @@
  
  -- | Recompile the xmonad configuration file when any of the following apply:
  --
-@@ -836,12 +902,8 @@
+@@ -836,12 +913,8 @@
  --
  --  * custom @build@ script is being used
  --
@@ -519,7 +527,7 @@
  --
  -- 'False' is returned if there are compilation errors.
  --
-@@ -869,8 +931,8 @@
+@@ -869,8 +942,8 @@
  whenX :: X Bool -> X () -> X ()
  whenX a f = a >>= \b -> when b f
  
