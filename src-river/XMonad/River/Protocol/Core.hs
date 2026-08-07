@@ -178,6 +178,49 @@ module XMonad.River.Protocol.Core
   , wlSurfaceErrorInvalidSize
   , wlSurfaceErrorInvalidOffset
   , wlSurfaceErrorDefunctRoleObject
+  , WlSeatEvent(..)
+  , wlSeatInterface
+  , wlSeatVersion
+  , wlSeatListen
+  , wlSeatGetPointer
+  , wlSeatGetKeyboard
+  , wlSeatGetTouch
+  , wlSeatRelease
+  , wlSeatCapabilityPointer
+  , wlSeatCapabilityKeyboard
+  , wlSeatCapabilityTouch
+  , wlSeatErrorMissingCapability
+  , WlKeyboardEvent(..)
+  , wlKeyboardInterface
+  , wlKeyboardVersion
+  , wlKeyboardListen
+  , wlKeyboardRelease
+  , wlKeyboardKeymapFormatNoKeymap
+  , wlKeyboardKeymapFormatXkbV1
+  , wlKeyboardKeyStateReleased
+  , wlKeyboardKeyStatePressed
+  , wlKeyboardKeyStateRepeated
+  , WlOutputEvent(..)
+  , wlOutputInterface
+  , wlOutputVersion
+  , wlOutputListen
+  , wlOutputRelease
+  , wlOutputSubpixelUnknown
+  , wlOutputSubpixelNone
+  , wlOutputSubpixelHorizontalRgb
+  , wlOutputSubpixelHorizontalBgr
+  , wlOutputSubpixelVerticalRgb
+  , wlOutputSubpixelVerticalBgr
+  , wlOutputTransformNormal
+  , wlOutputTransform90
+  , wlOutputTransform180
+  , wlOutputTransform270
+  , wlOutputTransformFlipped
+  , wlOutputTransformFlipped90
+  , wlOutputTransformFlipped180
+  , wlOutputTransformFlipped270
+  , wlOutputModeCurrent
+  , wlOutputModePreferred
   , WlRegionEvent(..)
   , wlRegionInterface
   , wlRegionVersion
@@ -1013,6 +1056,271 @@ wlSurfaceListen conn self handler =
     3 ->
       handler =<< decode (WlSurfacePreferredBufferTransform <$> getWord32) body
     _ -> handler (WlSurfaceUnknown opcode body)
+
+--------------------------------------------------------------------------------
+-- wl_seat (version 10)
+--------------------------------------------------------------------------------
+
+-- | The interface name, as advertised by @wl_registry@.
+wlSeatInterface :: ByteString
+wlSeatInterface = "wl_seat"
+
+-- | The highest version these bindings were generated against.
+wlSeatVersion :: Word32
+wlSeatVersion = 10
+
+-- | @wl_seat.capability.pointer@
+wlSeatCapabilityPointer :: Word32
+wlSeatCapabilityPointer = 1
+
+-- | @wl_seat.capability.keyboard@
+wlSeatCapabilityKeyboard :: Word32
+wlSeatCapabilityKeyboard = 2
+
+-- | @wl_seat.capability.touch@
+wlSeatCapabilityTouch :: Word32
+wlSeatCapabilityTouch = 4
+
+-- | @wl_seat.error.missing_capability@
+wlSeatErrorMissingCapability :: Word32
+wlSeatErrorMissingCapability = 0
+
+-- | @wl_seat.get_pointer@
+wlSeatGetPointer :: Connection -> ObjectId -> IO ObjectId
+wlSeatGetPointer conn self =
+  do
+    id_ <- newObject conn
+    request conn self 0 (argObject id_)
+    pure id_
+
+-- | @wl_seat.get_keyboard@
+wlSeatGetKeyboard :: Connection -> ObjectId -> IO ObjectId
+wlSeatGetKeyboard conn self =
+  do
+    id_ <- newObject conn
+    request conn self 1 (argObject id_)
+    pure id_
+
+-- | @wl_seat.get_touch@
+wlSeatGetTouch :: Connection -> ObjectId -> IO ObjectId
+wlSeatGetTouch conn self =
+  do
+    id_ <- newObject conn
+    request conn self 2 (argObject id_)
+    pure id_
+
+-- | @wl_seat.release@
+-- Since version 5.
+wlSeatRelease :: Connection -> ObjectId -> IO ()
+wlSeatRelease conn self =
+  request conn self 3 (mempty)
+    >> freeObject conn self
+
+-- | Events delivered to a @wl_seat@.
+data WlSeatEvent
+  = WlSeatCapabilities !Word32
+  | WlSeatName !ByteString
+  | WlSeatUnknown !Word16 !ByteString
+    -- ^ An event this build does not know about, from a server speaking
+    -- a newer version of the protocol. Ignoring these is what keeps a
+    -- client forward compatible.
+  deriving (Eq, Show)
+
+-- | Attach an event handler to a @wl_seat@ object.
+wlSeatListen :: Connection -> ObjectId -> (WlSeatEvent -> IO ()) -> IO ()
+wlSeatListen conn self handler =
+  setListener conn self $ \opcode body -> case opcode of
+    0 ->
+      handler =<< decode (WlSeatCapabilities <$> getWord32) body
+    1 ->
+      handler =<< decode (WlSeatName <$> getString) body
+    _ -> handler (WlSeatUnknown opcode body)
+
+--------------------------------------------------------------------------------
+-- wl_keyboard (version 10)
+--------------------------------------------------------------------------------
+
+-- | The interface name, as advertised by @wl_registry@.
+wlKeyboardInterface :: ByteString
+wlKeyboardInterface = "wl_keyboard"
+
+-- | The highest version these bindings were generated against.
+wlKeyboardVersion :: Word32
+wlKeyboardVersion = 10
+
+-- | @wl_keyboard.keymap_format.no_keymap@
+wlKeyboardKeymapFormatNoKeymap :: Word32
+wlKeyboardKeymapFormatNoKeymap = 0
+
+-- | @wl_keyboard.keymap_format.xkb_v1@
+wlKeyboardKeymapFormatXkbV1 :: Word32
+wlKeyboardKeymapFormatXkbV1 = 1
+
+-- | @wl_keyboard.key_state.released@
+wlKeyboardKeyStateReleased :: Word32
+wlKeyboardKeyStateReleased = 0
+
+-- | @wl_keyboard.key_state.pressed@
+wlKeyboardKeyStatePressed :: Word32
+wlKeyboardKeyStatePressed = 1
+
+-- | @wl_keyboard.key_state.repeated@
+wlKeyboardKeyStateRepeated :: Word32
+wlKeyboardKeyStateRepeated = 2
+
+-- | @wl_keyboard.release@
+-- Since version 3.
+wlKeyboardRelease :: Connection -> ObjectId -> IO ()
+wlKeyboardRelease conn self =
+  request conn self 0 (mempty)
+    >> freeObject conn self
+
+-- | Events delivered to a @wl_keyboard@.
+data WlKeyboardEvent
+  = WlKeyboardKeymap !Word32 !Fd !Word32
+  | WlKeyboardEnter !Word32 !ObjectId !ByteString
+  | WlKeyboardLeave !Word32 !ObjectId
+  | WlKeyboardKey !Word32 !Word32 !Word32 !Word32
+  | WlKeyboardModifiers !Word32 !Word32 !Word32 !Word32 !Word32
+  | WlKeyboardRepeatInfo !Int32 !Int32
+  | WlKeyboardUnknown !Word16 !ByteString
+    -- ^ An event this build does not know about, from a server speaking
+    -- a newer version of the protocol. Ignoring these is what keeps a
+    -- client forward compatible.
+  deriving (Eq, Show)
+
+-- | Attach an event handler to a @wl_keyboard@ object.
+wlKeyboardListen :: Connection -> ObjectId -> (WlKeyboardEvent -> IO ()) -> IO ()
+wlKeyboardListen conn self handler =
+  setListener conn self $ \opcode body -> case opcode of
+    0 -> do
+      fd_fd <- takeFdOrFail conn "fd"
+      handler =<< decode (WlKeyboardKeymap <$> getWord32 <*> pure fd_fd <*> getWord32) body
+    1 ->
+      handler =<< decode (WlKeyboardEnter <$> getWord32 <*> getObject <*> getArray) body
+    2 ->
+      handler =<< decode (WlKeyboardLeave <$> getWord32 <*> getObject) body
+    3 ->
+      handler =<< decode (WlKeyboardKey <$> getWord32 <*> getWord32 <*> getWord32 <*> getWord32) body
+    4 ->
+      handler =<< decode (WlKeyboardModifiers <$> getWord32 <*> getWord32 <*> getWord32 <*> getWord32 <*> getWord32) body
+    5 ->
+      handler =<< decode (WlKeyboardRepeatInfo <$> getInt <*> getInt) body
+    _ -> handler (WlKeyboardUnknown opcode body)
+
+--------------------------------------------------------------------------------
+-- wl_output (version 4)
+--------------------------------------------------------------------------------
+
+-- | The interface name, as advertised by @wl_registry@.
+wlOutputInterface :: ByteString
+wlOutputInterface = "wl_output"
+
+-- | The highest version these bindings were generated against.
+wlOutputVersion :: Word32
+wlOutputVersion = 4
+
+-- | @wl_output.subpixel.unknown@
+wlOutputSubpixelUnknown :: Word32
+wlOutputSubpixelUnknown = 0
+
+-- | @wl_output.subpixel.none@
+wlOutputSubpixelNone :: Word32
+wlOutputSubpixelNone = 1
+
+-- | @wl_output.subpixel.horizontal_rgb@
+wlOutputSubpixelHorizontalRgb :: Word32
+wlOutputSubpixelHorizontalRgb = 2
+
+-- | @wl_output.subpixel.horizontal_bgr@
+wlOutputSubpixelHorizontalBgr :: Word32
+wlOutputSubpixelHorizontalBgr = 3
+
+-- | @wl_output.subpixel.vertical_rgb@
+wlOutputSubpixelVerticalRgb :: Word32
+wlOutputSubpixelVerticalRgb = 4
+
+-- | @wl_output.subpixel.vertical_bgr@
+wlOutputSubpixelVerticalBgr :: Word32
+wlOutputSubpixelVerticalBgr = 5
+
+-- | @wl_output.transform.normal@
+wlOutputTransformNormal :: Word32
+wlOutputTransformNormal = 0
+
+-- | @wl_output.transform.90@
+wlOutputTransform90 :: Word32
+wlOutputTransform90 = 1
+
+-- | @wl_output.transform.180@
+wlOutputTransform180 :: Word32
+wlOutputTransform180 = 2
+
+-- | @wl_output.transform.270@
+wlOutputTransform270 :: Word32
+wlOutputTransform270 = 3
+
+-- | @wl_output.transform.flipped@
+wlOutputTransformFlipped :: Word32
+wlOutputTransformFlipped = 4
+
+-- | @wl_output.transform.flipped_90@
+wlOutputTransformFlipped90 :: Word32
+wlOutputTransformFlipped90 = 5
+
+-- | @wl_output.transform.flipped_180@
+wlOutputTransformFlipped180 :: Word32
+wlOutputTransformFlipped180 = 6
+
+-- | @wl_output.transform.flipped_270@
+wlOutputTransformFlipped270 :: Word32
+wlOutputTransformFlipped270 = 7
+
+-- | @wl_output.mode.current@
+wlOutputModeCurrent :: Word32
+wlOutputModeCurrent = 1
+
+-- | @wl_output.mode.preferred@
+wlOutputModePreferred :: Word32
+wlOutputModePreferred = 2
+
+-- | @wl_output.release@
+-- Since version 3.
+wlOutputRelease :: Connection -> ObjectId -> IO ()
+wlOutputRelease conn self =
+  request conn self 0 (mempty)
+    >> freeObject conn self
+
+-- | Events delivered to a @wl_output@.
+data WlOutputEvent
+  = WlOutputGeometry !Int32 !Int32 !Int32 !Int32 !Int32 !ByteString !ByteString !Int32
+  | WlOutputMode !Word32 !Int32 !Int32 !Int32
+  | WlOutputDone
+  | WlOutputScale !Int32
+  | WlOutputName !ByteString
+  | WlOutputDescription !ByteString
+  | WlOutputUnknown !Word16 !ByteString
+    -- ^ An event this build does not know about, from a server speaking
+    -- a newer version of the protocol. Ignoring these is what keeps a
+    -- client forward compatible.
+  deriving (Eq, Show)
+
+-- | Attach an event handler to a @wl_output@ object.
+wlOutputListen :: Connection -> ObjectId -> (WlOutputEvent -> IO ()) -> IO ()
+wlOutputListen conn self handler =
+  setListener conn self $ \opcode body -> case opcode of
+    0 ->
+      handler =<< decode (WlOutputGeometry <$> getInt <*> getInt <*> getInt <*> getInt <*> getInt <*> getString <*> getString <*> getInt) body
+    1 ->
+      handler =<< decode (WlOutputMode <$> getWord32 <*> getInt <*> getInt <*> getInt) body
+    2 -> handler WlOutputDone
+    3 ->
+      handler =<< decode (WlOutputScale <$> getInt) body
+    4 ->
+      handler =<< decode (WlOutputName <$> getString) body
+    5 ->
+      handler =<< decode (WlOutputDescription <$> getString) body
+    _ -> handler (WlOutputUnknown opcode body)
 
 --------------------------------------------------------------------------------
 -- wl_region (version 1)

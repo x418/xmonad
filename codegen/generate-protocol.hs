@@ -196,6 +196,10 @@ argEncoder a = case argType a of
   where v = safeVar (argName a)
 
 -- | How an event argument is decoded.
+-- | The local name a claimed descriptor is bound to.
+fdVar :: Argument -> String
+fdVar a = "fd_" ++ safeVar (argName a)
+
 argDecoder :: Argument -> String
 argDecoder a = case argType a of
   TInt    -> "getInt"
@@ -205,14 +209,10 @@ argDecoder a = case argType a of
   TObject -> "getObject"
   TNewId  -> "getObject"
   TArray  -> "getArray"
-  -- Requests can carry descriptors; events cannot, yet.  Event bodies are
-  -- decoded by a pure Peek, and claiming a descriptor means touching the
-  -- connection's receive queue, which is IO.  Nothing in the protocols this
-  -- backend generates needs it -- wl_shm.create_pool is a request, and the
-  -- event-side fds live in wl_keyboard.keymap and wl_data_source.send, which
-  -- a window manager never binds.  Failing here is better than emitting
-  -- something that looks generated and does not work.
-  TFd     -> error ("fd arguments in events are not supported: " ++ argName a)
+  -- A descriptor occupies no bytes in the body: it is claimed from the
+  -- connection before decoding and spliced in with pure, which keeps the
+  -- applicative in argument order without consuming input.  See renderListener.
+  TFd     -> "pure " ++ fdVar a
 
 --------------------------------------------------------------------------------
 -- Rendering
@@ -390,14 +390,23 @@ renderListener i =
     renderCase m = case msgArgs m of
       [] ->
         [ "    " ++ show (msgOpcode m) ++ " -> handler " ++ tn ++ typeName (msgName m) ]
-      as ->
+      as | null (fdClaims as) ->
         [ "    " ++ show (msgOpcode m) ++ " ->"
         , "      handler =<< decode (" ++ applicative as ++ ") body"
         ]
+      as ->
+        [ "    " ++ show (msgOpcode m) ++ " -> do" ]
+        ++ fdClaims as ++
+        [ "      handler =<< decode (" ++ applicative as ++ ") body" ]
       where
         applicative as' =
           tn ++ typeName (msgName m) ++ " <$> "
             ++ intercalate " <*> " (map argDecoder as')
+        -- Descriptors arriving with an event are claimed in the order their
+        -- arguments appear, which is the order the server sent them.
+        fdClaims as' =
+          [ "      " ++ fdVar a ++ " <- takeFdOrFail conn " ++ show (argName a)
+          | a <- as', argType a == TFd ]
 
 --------------------------------------------------------------------------------
 -- Main
@@ -422,7 +431,12 @@ targets =
   , ("river-layer-shell-v1.xml",       "XMonad.River.Protocol.LayerShell", Nothing)
   , ("wayland.xml",                    "XMonad.River.Protocol.Core",
       Just [ "wl_compositor", "wl_shm", "wl_shm_pool", "wl_surface"
-           , "wl_buffer", "wl_region", "wl_callback" ])
+           , "wl_buffer", "wl_region", "wl_callback"
+           -- For prompts, which run as an ordinary Wayland client on a second
+           -- connection so that they get real keyboard input.  See
+           -- XMonad.River.Client.
+           , "wl_seat", "wl_keyboard", "wl_output" ])
+  , ("wlr-layer-shell-unstable-v1.xml", "XMonad.River.Protocol.LayerShellClient", Nothing)
   ]
 
 main :: IO ()

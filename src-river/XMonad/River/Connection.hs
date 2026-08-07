@@ -20,6 +20,7 @@ module XMonad.River.Connection
   , request
   , requestWithFds
   , takeFd
+  , takeFdOrFail
   , newObject
   , freeObject
     -- * Listeners
@@ -239,6 +240,17 @@ takeFd :: Connection -> IO (Maybe Fd)
 takeFd conn = atomicModifyIORef' (connInFds conn) $ \fds -> case fds of
   (f:rest) -> (rest, Just f)
   []       -> ([], Nothing)
+
+-- | Take a descriptor an event promised, failing loudly if it is not there.
+--
+-- The server sending an fd argument without the descriptor is a protocol
+-- violation rather than something to paper over: everything decoded after it
+-- would be misaligned, so the useful thing is to say so at the point it
+-- happened.
+takeFdOrFail :: Connection -> String -> IO Fd
+takeFdOrFail conn argName = takeFd conn >>= \case
+  Just fd -> pure fd
+  Nothing -> throwIO (DecodeError ("no descriptor received for fd argument " ++ argName))
 
 --------------------------------------------------------------------------------
 -- Listeners

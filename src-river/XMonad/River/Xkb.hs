@@ -1,0 +1,123 @@
+{-# LANGUAGE ForeignFunctionInterface #-}
+
+-- | Turning Wayland keycodes into keysyms and text, via libxkbcommon.
+--
+-- A @wl_keyboard.key@ event carries a raw evdev keycode and nothing else.
+-- Everything a person expects from a keyboard -- that the key left of @1@ is
+-- @grave@ or @sub@ depending on layout, that shift makes @a@ into @A@, that
+-- compose then @\'@ then @e@ makes @é@, that a Chinese input method is running
+-- at all -- lives in the keymap the compositor sends as a file descriptor, and
+-- interpreting it is what libxkbcommon is for.
+--
+-- This matters more than it sounds.  The alternative this replaces was one
+-- @river_xkb_bindings_v1@ binding per keysym, and while that is fine for
+-- shortcuts it cannot express typing: no dead keys, no compose sequences, no
+-- input method, no key repeat, no switching layout mid-prompt.  Anyone whose
+-- language needs more than unmodified ASCII simply could not use a prompt.
+--
+-- There is no Haskell binding to xkbcommon on Stackage, so these are the six
+-- calls a prompt needs, bound directly.  Marked @safe@ rather than @unsafe@:
+-- they are not hot -- one per keystroke -- and @xkb_keymap_new_from_string@
+-- parses a keymap that can run to tens of kilobytes.
+module XMonad.River.Xkb
+  ( XkbState
+  , newXkbState
+  , freeXkbState
+  , keycodeToKeysym
+  , keycodeToUtf8
+  , updateModifiers
+  ) where
+
+import Control.Monad (when)
+import Data.Word (Word32)
+import Foreign.C.String (CString, peekCString, withCString)
+import Foreign.C.Types (CChar (..), CInt (..), CSize (..))
+import Foreign.ForeignPtr ()
+import Foreign.Marshal.Alloc (allocaBytes)
+import Foreign.Ptr (Ptr, nullPtr)
+
+data XkbContext
+data XkbKeymap
+data XkbStateT
+
+-- | A parsed keymap and the modifier state that goes with it.
+data XkbState = XkbState
+  { xkbCtx    :: !(Ptr XkbContext)
+  , xkbKeymap :: !(Ptr XkbKeymap)
+  , xkbState  :: !(Ptr XkbStateT)
+  }
+
+foreign import ccall safe "xkb_context_new"
+  c_context_new :: CInt -> IO (Ptr XkbContext)
+foreign import ccall safe "xkb_context_unref"
+  c_context_unref :: Ptr XkbContext -> IO ()
+foreign import ccall safe "xkb_keymap_new_from_string"
+  c_keymap_new :: Ptr XkbContext -> CString -> CInt -> CInt -> IO (Ptr XkbKeymap)
+foreign import ccall safe "xkb_keymap_unref"
+  c_keymap_unref :: Ptr XkbKeymap -> IO ()
+foreign import ccall safe "xkb_state_new"
+  c_state_new :: Ptr XkbKeymap -> IO (Ptr XkbStateT)
+foreign import ccall safe "xkb_state_unref"
+  c_state_unref :: Ptr XkbStateT -> IO ()
+foreign import ccall safe "xkb_state_key_get_one_sym"
+  c_get_one_sym :: Ptr XkbStateT -> Word32 -> IO Word32
+foreign import ccall safe "xkb_state_key_get_utf8"
+  c_get_utf8 :: Ptr XkbStateT -> Word32 -> Ptr CChar -> CSize -> IO CInt
+foreign import ccall safe "xkb_state_update_mask"
+  c_update_mask :: Ptr XkbStateT -> Word32 -> Word32 -> Word32
+                -> Word32 -> Word32 -> Word32 -> IO CInt
+
+-- | Parse the keymap the compositor sent.
+--
+-- The text is what was read from the @wl_keyboard.keymap@ descriptor.  Returns
+-- 'Nothing' if it will not parse, which should not happen and is not worth
+-- crashing over: a prompt that cannot read the keyboard is better than a
+-- window manager that exits.
+newXkbState :: String -> IO (Maybe XkbState)
+newXkbState keymapText = do
+  ctx <- c_context_new 0
+  if ctx == nullPtr then pure Nothing else do
+    km <- withCString keymapText $ \s ->
+      -- 1 is XKB_KEYMAP_FORMAT_TEXT_V1; 0 is no compile flags.
+      c_keymap_new ctx s 1 0
+    if km == nullPtr
+      then c_context_unref ctx >> pure Nothing
+      else do
+        st <- c_state_new km
+        if st == nullPtr
+          then c_keymap_unref km >> c_context_unref ctx >> pure Nothing
+          else pure (Just (XkbState ctx km st))
+
+freeXkbState :: XkbState -> IO ()
+freeXkbState x = do
+  c_state_unref (xkbState x)
+  c_keymap_unref (xkbKeymap x)
+  c_context_unref (xkbCtx x)
+
+-- | The keysym a keycode currently produces.
+--
+-- Wayland reports evdev keycodes and xkb expects X11 ones, which differ by a
+-- constant 8.  Getting that wrong shifts every key by roughly one row, which
+-- looks like a broken layout rather than an off-by-eight.
+keycodeToKeysym :: XkbState -> Word32 -> IO Word32
+keycodeToKeysym x code = c_get_one_sym (xkbState x) (code + 8)
+
+-- | The text a keycode currently produces, which is not the same question.
+--
+-- A keysym identifies a key's meaning; this is what should appear in a text
+-- field, and the two diverge exactly where it matters -- dead keys and compose
+-- sequences produce no text until the sequence completes, and one keystroke
+-- can produce several bytes.
+keycodeToUtf8 :: XkbState -> Word32 -> IO String
+keycodeToUtf8 x code = allocaBytes 64 $ \buf -> do
+  n <- c_get_utf8 (xkbState x) (code + 8) buf 64
+  if n <= 0 then pure "" else peekCString buf
+
+-- | Track the modifier state the compositor reports.
+--
+-- Without this the keymap is consulted as though nothing were held, so shift
+-- would never capitalise and a layout's third level would be unreachable.
+updateModifiers :: XkbState -> Word32 -> Word32 -> Word32 -> Word32 -> IO ()
+updateModifiers x depressed latched locked group = do
+  r <- c_update_mask (xkbState x) depressed latched locked 0 0 group
+  when (r == 0) (pure ())

@@ -127,10 +127,12 @@ library
                      XMonad.River.Surface
                      XMonad.River.Protocol.Core
                      XMonad.River.Protocol.LayerShell
+                     XMonad.River.Protocol.LayerShellClient
                      XMonad.River.Protocol.WindowManagement
                      XMonad.River.Protocol.XkbBindings
                      XMonad.River.Types
                      XMonad.River.Wire
+                     XMonad.River.Xkb
                      XMonad.River.WM
     build-depends:   bytestring
                    , network
@@ -141,6 +143,11 @@ library
     -- not worth reimplementing against hard-coded struct offsets.  See
     -- XMonad.River.Socket.
     c-sources:       cbits/wl-fd.c
+    -- libxkbcommon turns the compositor's keymap and a raw evdev keycode into
+    -- a keysym and the text it produces.  Needed for prompts: a binding per
+    -- keysym can express shortcuts but not typing -- no dead keys, no compose,
+    -- no input method.  See XMonad.River.Xkb.
+    pkgconfig-depends: xkbcommon
   else
     hs-source-dirs:  src
     build-depends:   X11                   >= 1.10 && < 1.11

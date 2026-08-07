@@ -118,6 +118,13 @@ data Event
   | SeatRemoved        { ev_seat   :: !ObjectId }
   | SessionLocked
   | SessionUnlocked
+  | KeyPressed { ev_state :: !KeyMask, ev_keysym :: !KeySym }
+    -- ^ A key captured by "XMonad.River.Keyboard".
+    --
+    -- Not something river volunteers: the window manager only learns about
+    -- keys it has created a binding for, so this reaches a config only while
+    -- something -- a prompt, a submap -- is holding a grab.  Ordinary
+    -- keybindings never arrive this way; they run their action directly.
   | TimerFired !Int
     -- ^ A timer started with @XMonad.Util.Timer.startTimer@ has expired.
     --
