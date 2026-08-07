@@ -1,0 +1,12 @@
+--- src/XMonad/Layout.hs	2026-08-06 13:48:47.931613303 -0600
++++ src-river/XMonad/Layout.hs	2026-08-06 18:14:31.106190712 -0600
+@@ -28,8 +28,7 @@
+ 
+ import XMonad.Core
+ 
+-import Graphics.X11 (Rectangle(..))
+-import Graphics.X11.Xlib.Extras ( Event(DestroyWindowEvent) )
++import XMonad.River.Types (Rectangle(..), Event(DestroyWindowEvent))
+ import qualified XMonad.StackSet as W
+ import Control.Arrow ((***), second)
+ import Control.Monad

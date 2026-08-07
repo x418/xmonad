@@ -1,0 +1,528 @@
+--- src/XMonad/Core.hs	2026-08-06 14:14:13.108989784 -0600
++++ src-river/XMonad/Core.hs	2026-08-06 15:37:17.396906519 -0600
+@@ -16,13 +16,29 @@
+ -- Copyright   :  (c) Spencer Janssen 2007
+ -- License     :  BSD3-style (see LICENSE)
+ --
+--- Maintainer  :  spencerjanssen@gmail.com
+--- Stability   :  unstable
+--- Portability :  not portable, uses cunning newtype deriving
+---
+ -- The 'X' monad, a state monad transformer over 'IO', for the window
+ -- manager state, and support routines.
+ --
++-- This is the river backend's copy, shadowing @src\/XMonad\/Core.hs@ by
++-- @hs-source-dirs@ precedence.  It is deliberately kept as close to that file
++-- as it can be, because the difference between the two is the thing a reviewer
++-- has to be able to see.  @diff src/XMonad/Core.hs src-river/XMonad/Core.hs@
++-- should be readable in one sitting; if it stops being readable, something has
++-- drifted that should not have.
++--
++-- What differs, and only what differs:
++--
++-- * 'XConf' holds a river 'Connection' rather than a @Display@, and there is no
++--   root window.  Everything X11 reached through the display -- atoms, window
++--   attributes, the root -- has no Wayland counterpart, so @withDisplay@,
++--   @getAtom@, @atom_WM_*@, @withWindowAttributes@ and @isRoot@ are absent
++--   rather than present and inert.  See tests/api/unportable.txt.
++-- * @clientMask@ and @rootMask@ are gone from 'XConfig': river delivers exactly
++--   the events the window management protocol defines, with no mask to select.
++-- * 'Event' is river's event type rather than Xlib's.
++-- * Border colours are RGBA quadruples, which is what @set_borders@ takes,
++--   rather than an X11 @Pixel@ resolved against a colormap.
++--
+ -----------------------------------------------------------------------------
+ 
+ module XMonad.Core (
+@@ -33,16 +49,31 @@
+     SomeMessage(..), fromMessage, LayoutMessages(..),
+     StateExtension(..), ExtensionClass(..), ConfExtension(..),
+     runX, catchX, userCode, userCodeDef, io, catchIO, installSignalHandlers, uninstallSignalHandlers,
+-    withDisplay, withWindowSet, isRoot, runOnWorkspaces,
+-    getAtom, spawn, spawnPID, xfork, xmessage, recompile, trace, whenJust, whenX, ifM,
+-    getXMonadDir, getXMonadCacheDir, getXMonadDataDir, stateFileName, binFileName,
+-    atom_WM_STATE, atom_WM_PROTOCOLS, atom_WM_DELETE_WINDOW, atom_WM_TAKE_FOCUS, withWindowAttributes,
++    withWindowSet, runOnWorkspaces,
++    spawn, spawnPID, xfork, recompile, trace, whenJust, whenX, ifM,
++    getXMonadDir, getXMonadCacheDir, getXMonadDataDir, binFileName,
+     ManageHook, Query(..), runQuery, Directories'(..), Directories, getDirectories,
++    -- * Types that port unchanged
++    --
++    -- | The X11 build gets these from @XMonad@'s re-export of "Graphics.X11".
++    -- River does not re-export that module, so the handful of names from it
++    -- that /do/ port faithfully are exported here instead -- a config still
++    -- has to be able to write @LayoutClass l Window@.
++    Window, Rectangle(..), Position, Dimension, KeyMask, KeySym, Button,
++    -- * River plumbing
++    --
++    -- $river
++    Event(..), RiverWindow(..), RiverOutput(..), RiverSeat(..),
++    LayerFocus(..), layerHasFocus,
++    Connection, BorderColor,
++    manageDirty, RestartRequested(..), sendRestart, setMainThread,
++    warnUnimplemented,
+   ) where
+ 
+ import XMonad.StackSet hiding (modify)
+ 
+ import Prelude
++import Control.Concurrent (ThreadId, myThreadId)
+ import Control.Exception (fromException, try, bracket_, throw, finally, SomeException(..))
+ import qualified Control.Exception as E
+ import Control.Applicative ((<|>), empty)
+@@ -50,13 +81,16 @@
+ import Control.Monad.Fix (fix)
+ import Control.Monad.State
+ import Control.Monad.Reader
+-import Control.Monad (filterM, guard, void, when)
++import Control.Monad (filterM, guard, unless, void, when)
+ import Data.Char (isSpace)
++import Data.IORef
+ import Data.Semigroup
+ import Data.Traversable (for)
+ import Data.Time.Clock (UTCTime)
+ import Data.Default.Class
++import Data.Word (Word32)
+ import System.Environment (lookupEnv)
++import System.IO.Unsafe (unsafePerformIO)
+ import Data.List (isInfixOf, intercalate, (\\))
+ import System.FilePath
+ import System.IO
+@@ -69,8 +103,6 @@
+ import System.Process
+ import System.Directory
+ import System.Exit
+-import Graphics.X11.Xlib
+-import Graphics.X11.Xlib.Extras (getWindowAttributes, WindowAttributes, Event)
+ import Data.Typeable
+ import Data.Maybe (isJust,fromMaybe)
+ import Data.Monoid (Ap(..))
+@@ -78,13 +110,30 @@
+ import qualified Data.Map as M
+ import qualified Data.Set as S
+ 
++import XMonad.River.Connection (Connection)
++import XMonad.River.Types
++import XMonad.River.Wire (ObjectId)
++
++-- $river
++-- These names have no X11 counterpart.  They are exported because a river
++-- config legitimately needs them -- 'sendRestart' is what makes @M-q@ work --
++-- not as a compatibility surface.
++
++-- | An RGBA border colour, in the 32-bit-per-channel form
++-- @river_window_v1.set_borders@ takes.
++--
++-- X11 stored a 'Pixel' resolved against the window's colormap.  Wayland has no
++-- colormaps and no pixel values, so the honest representation is the one the
++-- protocol asks for.
++type BorderColor = (Word32, Word32, Word32, Word32)
++
+ -- | XState, the (mutable) window manager state.
+ data XState = XState
+     { windowset        :: !WindowSet                     -- ^ workspace list
+     , mapped           :: !(S.Set Window)                -- ^ the Set of mapped windows
+-    , waitingUnmap     :: !(M.Map Window Int)            -- ^ the number of expected UnmapEvents
++    , waitingUnmap     :: !(M.Map Window Int)            -- ^ retained for shape; river has no unmap race to track
+     , dragging         :: !(Maybe (Position -> Position -> X (), X ()))
+-    , numberlockMask   :: !KeyMask                       -- ^ The numlock modifier
++    , numberlockMask   :: !KeyMask                       -- ^ retained for shape; river resolves modifiers itself
+     , extensibleState  :: !(M.Map String (Either String StateExtension))
+     -- ^ stores custom state information.
+     --
+@@ -94,11 +143,22 @@
+ 
+ -- | XConf, the (read-only) window manager configuration.
+ data XConf = XConf
+-    { display       :: Display        -- ^ the X11 display
+-    , config        :: !(XConfig Layout)       -- ^ initial user configuration
+-    , theRoot       :: !Window        -- ^ the root window
+-    , normalBorder  :: !Pixel         -- ^ border color of unfocused windows
+-    , focusedBorder :: !Pixel         -- ^ border color of the focused window
++    { config        :: !(XConfig Layout)       -- ^ initial user configuration
++    , riverConn     :: !Connection             -- ^ the compositor connection
++    , riverManager  :: !ObjectId               -- ^ the @river_window_manager_v1@ global
++    , riverBindings :: !ObjectId               -- ^ the @river_xkb_bindings_v1@ global
++    , riverWindows  :: !(IORef (M.Map ObjectId RiverWindow))
++    , riverOutputs  :: !(IORef (M.Map ObjectId RiverOutput))
++    , riverSeats    :: !(IORef (M.Map ObjectId RiverSeat))
++    , riverDirty    :: !(IORef Bool)
++      -- ^ set when state changed outside a manage sequence, so that one must
++      -- be requested with @manage_dirty@
++    , inManageSeq   :: !(IORef Bool)
++      -- ^ guards requests river only permits during a manage sequence
++    , riverRestart  :: !(IORef (Maybe String))
++      -- ^ command to exec once river confirms this window manager has stopped
++    , normalBorder  :: !BorderColor   -- ^ border colour of unfocused windows
++    , focusedBorder :: !BorderColor   -- ^ border colour of the focused window
+     , keyActions    :: !(M.Map (KeyMask, KeySym) (X ()))
+                                       -- ^ a mapping of key presses to actions
+     , buttonActions :: !(M.Map (KeyMask, Button) (Window -> X ()))
+@@ -115,25 +175,23 @@
+ data XConfig l = XConfig
+     { normalBorderColor  :: !String              -- ^ Non focused windows border color. Default: \"#dddddd\"
+     , focusedBorderColor :: !String              -- ^ Focused windows border color. Default: \"#ff0000\"
+-    , terminal           :: !String              -- ^ The preferred terminal application. Default: \"xterm\"
++    , terminal           :: !String              -- ^ The preferred terminal application. Default: \"foot\"
+     , layoutHook         :: !(l Window)          -- ^ The available layouts
+     , manageHook         :: !ManageHook          -- ^ The action to run when a new window is opened
+-    , handleEventHook    :: !(Event -> X All)    -- ^ Handle an X event, returns (All True) if the default handler
++    , handleEventHook    :: !(Event -> X All)    -- ^ Handle a river event, returns (All True) if the default handler
+                                                  -- should also be run afterwards. mappend should be used for combining
+                                                  -- event hooks in most cases.
+     , workspaces         :: ![String]            -- ^ The list of workspaces' names
+     , modMask            :: !KeyMask             -- ^ the mod modifier
+-    , keys               :: !(XConfig Layout -> M.Map (ButtonMask,KeySym) (X ()))
++    , keys               :: !(XConfig Layout -> M.Map (KeyMask,KeySym) (X ()))
+                                                  -- ^ The key binding: a map from key presses and actions
+-    , mouseBindings      :: !(XConfig Layout -> M.Map (ButtonMask, Button) (Window -> X ()))
++    , mouseBindings      :: !(XConfig Layout -> M.Map (KeyMask, Button) (Window -> X ()))
+                                                  -- ^ The mouse bindings
+     , borderWidth        :: !Dimension           -- ^ The border width
+     , logHook            :: !(X ())              -- ^ The action to perform when the windows set is changed
+     , startupHook        :: !(X ())              -- ^ The action to perform on startup
+     , focusFollowsMouse  :: !Bool                -- ^ Whether window entry events can change focus
+     , clickJustFocuses   :: !Bool                -- ^ False to make a click which changes focus to be additionally passed to the window
+-    , clientMask         :: !EventMask           -- ^ The client events that xmonad is interested in
+-    , rootMask           :: !EventMask           -- ^ The root events that xmonad is interested in
+     , handleExtraArgs    :: !([String] -> XConfig Layout -> IO (XConfig Layout))
+                                                  -- ^ Modify the configuration, complain about extra arguments etc. with arguments that are not handled by default
+     , extensibleConf     :: !(M.Map TypeRep ConfExtension)
+@@ -143,6 +201,14 @@
+                                                  -- provides additional information and a simple interface for using this.
+     }
+ 
++-- | Modifier masks and keysyms are numerically identical between X11 and
++-- xkbcommon, and @river_seat_v1.modifiers@ assigns shift=1, ctrl=4, mod1=8,
++-- mod3=32, mod4=64, mod5=128 -- exactly X11's values.  So a key description
++-- like @\"M-S-\<Return\>\"@ means the same thing on both sides, and these are
++-- plain numbers rather than anything river-specific.
++type KeyMask = Word32
++type KeySym  = Word32
++type Button  = Word32
+ 
+ type WindowSet   = StackSet  WorkspaceId (Layout Window) Window ScreenId ScreenDetail
+ type WindowSpace = Workspace WorkspaceId (Layout Window) Window
+@@ -215,35 +281,10 @@
+ -- ---------------------------------------------------------------------
+ -- Convenient wrappers to state
+ 
+--- | Run a monad action with the current display settings
+-withDisplay :: (Display -> X a) -> X a
+-withDisplay   f = asks display >>= f
+-
+ -- | Run a monadic action with the current stack set
+ withWindowSet :: (WindowSet -> X a) -> X a
+ withWindowSet f = gets windowset >>= f
+ 
+--- | Safely access window attributes.
+-withWindowAttributes :: Display -> Window -> (WindowAttributes -> X ()) -> X ()
+-withWindowAttributes dpy win f = do
+-    wa <- userCode (io $ getWindowAttributes dpy win)
+-    catchX (whenJust wa f) (return ())
+-
+--- | True if the given window is the root window
+-isRoot :: Window -> X Bool
+-isRoot w = asks $ (w ==) . theRoot
+-
+--- | Wrapper for the common case of atom internment
+-getAtom :: String -> X Atom
+-getAtom str = withDisplay $ \dpy -> io $ internAtom dpy str False
+-
+--- | Common non-predefined atoms
+-atom_WM_PROTOCOLS, atom_WM_DELETE_WINDOW, atom_WM_STATE, atom_WM_TAKE_FOCUS :: X Atom
+-atom_WM_PROTOCOLS       = getAtom "WM_PROTOCOLS"
+-atom_WM_DELETE_WINDOW   = getAtom "WM_DELETE_WINDOW"
+-atom_WM_STATE           = getAtom "WM_STATE"
+-atom_WM_TAKE_FOCUS      = getAtom "WM_TAKE_FOCUS"
+-
+ ------------------------------------------------------------------------
+ -- LayoutClass handling. See particular instances in Operations.hs
+ 
+@@ -273,20 +314,11 @@
+ -- * 'description'
+ --
+ -- Note that any code which /uses/ 'LayoutClass' methods should only
+--- ever call 'runLayout', 'handleMessage', and 'description'!  In
+--- other words, the only calls to 'doLayout', 'pureMessage', and other
+--- such methods should be from the default implementations of
+--- 'runLayout', 'handleMessage', and so on.  This ensures that the
+--- proper methods will be used, regardless of the particular methods
+--- that any 'LayoutClass' instance chooses to define.
++-- ever call 'runLayout', 'handleMessage', and 'description'!
+ class (Show (layout a), Typeable layout) => LayoutClass layout a where
+ 
+     -- | By default, 'runLayout' calls 'doLayout' if there are any
+-    --   windows to be laid out, and 'emptyLayout' otherwise.  Most
+-    --   instances of 'LayoutClass' probably do not need to implement
+-    --   'runLayout'; it is only useful for layouts which wish to make
+-    --   use of more of the 'Workspace' information (for example,
+-    --   "XMonad.Layout.PerWorkspace").
++    --   windows to be laid out, and 'emptyLayout' otherwise.
+     runLayout :: Workspace WorkspaceId (layout a) a
+               -> Rectangle
+               -> X ([(a, Rectangle)], Maybe (layout a))
+@@ -294,25 +326,13 @@
+ 
+     -- | Given a 'Rectangle' in which to place the windows, and a 'Stack'
+     -- of windows, return a list of windows and their corresponding
+-    -- Rectangles.  If an element is not given a Rectangle by
+-    -- 'doLayout', then it is not shown on screen.  The order of
+-    -- windows in this list should be the desired stacking order.
+-    --
+-    -- Also possibly return a modified layout (by returning @Just
+-    -- newLayout@), if this layout needs to be modified (e.g. if it
+-    -- keeps track of some sort of state).  Return @Nothing@ if the
+-    -- layout does not need to be modified.
+-    --
+-    -- Layouts which do not need access to the 'X' monad ('IO', window
+-    -- manager state, or configuration) and do not keep track of their
+-    -- own state should implement 'pureLayout' instead of 'doLayout'.
++    -- Rectangles.  The order of windows in this list should be the
++    -- desired stacking order.
+     doLayout    :: layout a -> Rectangle -> Stack a
+                 -> X ([(a, Rectangle)], Maybe (layout a))
+     doLayout l r s   = return (pureLayout l r s, Nothing)
+ 
+-    -- | This is a pure version of 'doLayout', for cases where we
+-    -- don't need access to the 'X' monad to determine how to lay out
+-    -- the windows, and we don't need to modify the layout itself.
++    -- | This is a pure version of 'doLayout'.
+     pureLayout  :: layout a -> Rectangle -> Stack a -> [(a, Rectangle)]
+     pureLayout _ r s = [(focus s, r)]
+ 
+@@ -320,28 +340,17 @@
+     emptyLayout :: layout a -> Rectangle -> X ([(a, Rectangle)], Maybe (layout a))
+     emptyLayout _ _ = return ([], Nothing)
+ 
+-    -- | 'handleMessage' performs message handling.  If
+-    -- 'handleMessage' returns @Nothing@, then the layout did not
+-    -- respond to the message and the screen is not refreshed.
+-    -- Otherwise, 'handleMessage' returns an updated layout and the
+-    -- screen is refreshed.
+-    --
+-    -- Layouts which do not need access to the 'X' monad to decide how
+-    -- to handle messages should implement 'pureMessage' instead of
+-    -- 'handleMessage' (this restricts the risk of error, and makes
+-    -- testing much easier).
++    -- | 'handleMessage' performs message handling.
+     handleMessage :: layout a -> SomeMessage -> X (Maybe (layout a))
+     handleMessage l  = return . pureMessage l
+ 
+     -- | Respond to a message by (possibly) changing our layout, but
+-    -- taking no other action.  If the layout changes, the screen will
+-    -- be refreshed.
++    -- taking no other action.
+     pureMessage :: layout a -> SomeMessage -> Maybe (layout a)
+     pureMessage _ _  = Nothing
+ 
+     -- | This should be a human-readable string that is used when
+-    -- selecting layouts by name.  The default implementation is
+-    -- 'show', which is in some cases a poor default.
++    -- selecting layouts by name.
+     description :: layout a -> String
+     description      = show
+ 
+@@ -374,7 +383,7 @@
+ fromMessage :: Message m => SomeMessage -> Maybe m
+ fromMessage (SomeMessage m) = cast m
+ 
+--- X Events are valid Messages.
++-- River events are valid Messages, exactly as X events were.
+ instance Message Event
+ 
+ -- | 'LayoutMessages' are core messages that all layouts (especially stateful
+@@ -398,11 +407,12 @@
+     -- | Defines an initial value for the state extension
+     initialValue :: a
+     -- | Specifies whether the state extension should be
+-    -- persistent. Setting this method to 'PersistentExtension'
+-    -- will make the stored data survive restarts, but
+-    -- requires a to be an instance of Read and Show.
++    -- persistent.
+     --
+-    -- It defaults to 'StateExtension', i.e. no persistence.
++    -- Note that under river this makes no difference: there is no state file,
++    -- because a window id serialised by one process means nothing to its
++    -- successor.  'PersistentExtension' therefore behaves exactly like
++    -- 'StateExtension'.  See README.river.md.
+     extensionType :: a -> StateExtension
+     extensionType = StateExtension
+ 
+@@ -417,6 +427,74 @@
+ data ConfExtension = forall a. Typeable a => ConfExtension a
+ 
+ -- ---------------------------------------------------------------------
++-- River plumbing
++
++-- | Ask the compositor to start a manage sequence, because state it cannot see
++-- has changed.
++--
++-- This is what makes actions triggered from forked threads and timers take
++-- effect: river only permits window management state to change during a manage
++-- sequence, so something has to ask for one.
++manageDirty :: X ()
++manageDirty = do
++  ref <- asks riverDirty
++  io (writeIORef ref True)
++
++-- | Thrown into the event loop thread to ask for a restart.
++data RestartRequested = RestartRequested deriving (Show)
++
++instance E.Exception RestartRequested
++
++{-# NOINLINE mainThreadRef #-}
++mainThreadRef :: IORef (Maybe ThreadId)
++mainThreadRef = unsafePerformIO (newIORef Nothing)
++
++-- | Record the thread running the event loop, so 'sendRestart' can reach it.
++setMainThread :: IO ()
++setMainThread = writeIORef mainThreadRef . Just =<< myThreadId
++
++-- | Ask the window manager to restart itself, from any thread.
++--
++-- This exists for the same reason xmonad's does: @restart@ runs in 'X', which
++-- is a 'StateT' over the event loop's own state, so a forked thread cannot call
++-- it -- and @M-q@ typically forks to run a rebuild script and then wants a
++-- restart.
++--
++-- xmonad solved it by posting a client message to the X11 event queue.  There
++-- is no equivalent queue here, but Haskell offers something better: an
++-- asynchronous exception thrown into the event loop's thread.  Under the
++-- threaded runtime the loop's blocking socket read is interruptible, so this
++-- takes effect immediately rather than at the next event.
++sendRestart :: IO ()
++sendRestart = readIORef mainThreadRef >>= \case
++  Just tid -> E.throwTo tid RestartRequested
++  Nothing -> hPutStrLn stderr
++    "xmonad-river: sendRestart called before the event loop started"
++
++-- | Complain, once per process, that something is doing less than it says.
++--
++-- The rule in this backend is that anything which cannot be faithfully ported
++-- is not exported at all, so this is deliberately rare -- it is for the cases
++-- where the name must stay because it is load-bearing in shared code, but the
++-- behaviour is partial.  Silence would be the wrong default: a rule that never
++-- fires looks like a bug in the config, and the person debugging it has no
++-- reason to suspect the backend.
++warnUnimplemented
++  :: MonadIO m
++  => String  -- ^ what is partial, e.g. @"mouseDrag"@
++  -> String  -- ^ what happens instead, and what to do about it
++  -> m ()
++warnUnimplemented name explanation = io $ do
++  already <- atomicModifyIORef' warnedRef $ \seen ->
++    (S.insert name seen, S.member name seen)
++  unless already $
++    hPutStrLn stderr ("xmonad-river: " ++ name ++ " is not implemented. " ++ explanation)
++
++{-# NOINLINE warnedRef #-}
++warnedRef :: IORef (S.Set String)
++warnedRef = unsafePerformIO (newIORef S.empty)
++
++-- ---------------------------------------------------------------------
+ -- General utilities
+ 
+ -- | If-then-else lifted to a 'Monad'.
+@@ -459,17 +537,6 @@
+         dupTo fd stdInput
+         closeFd fd
+ 
+--- | Use @xmessage@ to show information to the user.
+-xmessage :: MonadIO m => String -> m ()
+-xmessage msg = void . xfork $ do
+-    xmessageBin <- fromMaybe "xmessage" <$> liftIO (lookupEnv "XMONAD_XMESSAGE")
+-    executeFile xmessageBin True
+-        [ "-default", "okay"
+-        , "-xrm", "*international:true"
+-        , "-xrm", "*fontSet:-*-fixed-medium-r-normal-*-18-*-*-*-*-*-*-*,-*-fixed-*-*-*-*-18-*-*-*-*-*-*-*,-*-*-*-*-*-*-18-*-*-*-*-*-*-*"
+-        , msg
+-        ] Nothing
+-
+ -- | This is basically a map function, running a function in the 'X' monad on
+ -- each workspace with the output of that function being the modified workspace.
+ runOnWorkspaces :: (WindowSpace -> X WindowSpace) -> X ()
+@@ -494,7 +561,6 @@
+ -- * @cacheDir@: This directory is used to store temporary files that
+ -- can easily be recreated such as the configuration binary and any
+ -- intermediate object files generated by GHC.
+--- Also, the XPrompt history file goes here.
+ --
+ -- For how these directories are chosen, see 'getDirectories'.
+ --
+@@ -521,9 +587,6 @@
+ --    @XDG_CONFIG_HOME@, and @XDG_CACHE_HOME@ (or their respective
+ --    fallbacks).  These directories are created if necessary.
+ --
+--- The xmonad configuration file (or the build script, if present) is
+--- always assumed to be in @cfgDir@.
+---
+ getDirectories :: IO Directories
+ getDirectories = xmEnvDirs <|> xmDirs <|> xdgDirs
+   where
+@@ -574,9 +637,8 @@
+ binFileName  Directories{ cacheDir } = cacheDir </> "xmonad-" <> arch <> "-" <> os
+ buildDirName Directories{ cacheDir } = cacheDir </> "build-" <> arch <> "-" <> os
+ 
+-errFileName, stateFileName :: Directories -> FilePath
++errFileName :: Directories -> FilePath
+ errFileName   Directories{ dataDir } = dataDir </> "xmonad.errors"
+-stateFileName Directories{ dataDir } = dataDir </> "xmonad.state"
+ 
+ srcFileName, libFileName :: Directories -> FilePath
+ srcFileName Directories{ cfgDir } = cfgDir </> "xmonad.hs"
+@@ -798,6 +860,10 @@
+ 
+ -- | Check GHC output for deprecation warnings and notify the user if there
+ -- were any. Report success otherwise.
++--
++-- xmonad pops an @xmessage@ here.  That is an X11 client, so under river the
++-- report goes to stderr only -- which lands in the journal, and is where the
++-- rest of this backend's diagnostics go too.
+ checkCompileWarnings :: Directories -> IO ()
+ checkCompileWarnings dirs = do
+     ghcErr <- readFile (errFileName dirs)
+@@ -808,7 +874,6 @@
+                 ++ lines ghcErr
+                 ++ ["","Please correct them or silence using {-# OPTIONS_GHC -Wno-deprecations #-}."]
+         trace msg
+-        xmessage msg
+       else
+         trace "XMonad recompilation process exited with success!"
+ 
+@@ -820,10 +885,7 @@
+             ["Errors detected while compiling xmonad config: " <> srcFileName dirs]
+             ++ lines (if null ghcErr then show status else ghcErr)
+             ++ ["","Please check the file for errors."]
+-    -- nb, the ordering of printing, then forking, is crucial due to
+-    -- lazy evaluation
+     trace msg
+-    xmessage msg
+ 
+ -- | Recompile the xmonad configuration file when any of the following apply:
+ --
+@@ -836,12 +898,8 @@
+ --
+ --  * custom @build@ script is being used
+ --
+--- The -i flag is used to restrict recompilation to the xmonad.hs file only,
+--- and any files in the aforementioned @lib@ directory.
+---
+ -- Compilation errors (if any) are logged to the @xmonad.errors@ file
+--- in the xmonad data directory.  If GHC indicates failure with a
+--- non-zero exit code, an xmessage displaying that file is spawned.
++-- in the xmonad data directory.
+ --
+ -- 'False' is returned if there are compilation errors.
+ --
+@@ -869,8 +927,8 @@
+ whenX :: X Bool -> X () -> X ()
+ whenX a f = a >>= \b -> when b f
+ 
+--- | A 'trace' for the 'X' monad. Logs a string to stderr. The result may
+--- be found in your .xsession-errors file
++-- | A 'trace' for the 'X' monad. Logs a string to stderr, and therefore into
++-- the journal.
+ trace :: MonadIO m => String -> m ()
+ trace = io . hPutStrLn stderr
+ 

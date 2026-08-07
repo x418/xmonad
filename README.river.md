@@ -47,14 +47,33 @@ possible — bump the SHA in the same commit, and that diff is the review signal
 
 `src-river/` is a complete second copy. It does not shadow `src/` by
 `hs-source-dirs` precedence and shares nothing with it; the flag-off build never
-looks at it. That costs two copies of `XMonad.StackSet` and `XMonad.Layout`,
-which are backend-independent. The alternative was to share those two and let
-the rest shadow, which makes a module's provenance depend on a flag and on
+looks at it. The alternative was to share the backend-independent modules and
+let the rest shadow, which makes a module's provenance depend on a flag and on
 directory order. Two honest copies read better than one file that means
-different things on different days, and the API goldens are what hold them in
-step.
+different things on different days.
 
 Nothing in `src-river/` is named `Graphics.X11`.
+
+The cost of a second copy is drift, so `tests/check-copies.sh` sorts every
+module into one of three categories and pins the membership exactly:
+
+| | | |
+| --- | --- | --- |
+| **identical** | `XMonad.StackSet` | byte-for-byte. Pure, total, mentions neither backend — any difference at all is a bug |
+| **patched** | `XMonad`, `XMonad.Core`, `XMonad.Layout` | a tracked divergence kept as a unified diff under `patches/`; applying it to `src/` must reproduce `src-river/` exactly |
+| **rewritten** | `XMonad.Config`, `.ManageHook`, `.Main`, `.Operations` | different programs that agree on an interface; nothing to diff |
+
+The patched category is where the rebase safety actually lives. `XMonad.Core`
+is 84% shared with upstream — it holds `recompile`, `getDirectories` and the
+whole compile path, none of which has anything to do with X11 — so when
+upstream fixes something there, `patch` either applies the fix or conflicts
+loudly. Either beats discovering months later that only one copy was fixed.
+`tests/check-copies.sh --regen` rewrites the patches after a deliberate change.
+
+A file moving between categories fails until the manifest says so, including a
+file that becomes *more* similar: that usually means a river module has been
+simplified back toward upstream, and whether it should still be a separate copy
+is worth answering deliberately.
 
 ## The rule
 
