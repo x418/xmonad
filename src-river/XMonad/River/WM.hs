@@ -622,8 +622,24 @@ adoptNewWindows = do
   ref <- asks riverWindows
   ws <- io (readIORef ref)
   let fresh = [ w | w <- M.elems ws, rwNew w, not (rwClosed w) ]
+  conn <- asks display
   forM_ fresh $ \w -> do
     io $ adjust ref (rwObject w) $ \x -> x { rwNew = False }
+    -- Ask for server-side decoration before the manage hook runs, so a config
+    -- that wants otherwise can override it there.
+    --
+    -- This has to be said out loud: river's default, if a window manager makes
+    -- neither request, is use_csd -- the client draws its own title bar and
+    -- close button.  That is right for a floating desktop and wrong for a
+    -- tiling one, where the window manager owns the frame and a client-drawn
+    -- title bar is decoration nobody asked for on every single window.
+    --
+    -- "Server side" here does not mean river draws a title bar either: it
+    -- draws exactly what this window manager asks for, which is the border
+    -- from 'borderWidth' and nothing else.  A client that only supports CSD
+    -- ignores the request, which river documents and which is why this is not
+    -- conditional on the decoration_hint.
+    io (riverWindowV1UseSsd conn (rwObject w))
     mh <- asks (manageHook . config)
     g <- userCodeDef (mempty) (runQuery mh (rwObject w))
     ws' <- gets windowset

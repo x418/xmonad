@@ -42,6 +42,13 @@ module XMonad.River (
     -- reports where a window is, because the window manager is what decided.
     windowRect, moveResizeWindow, pointerPosition,
 
+    -- * Decorations
+    --
+    -- | Server-side decoration is requested for every new window before the
+    -- manage hook runs, because river's default is the opposite.  These are
+    -- how a manage hook overrides that.
+    useServerDecorations, useClientDecorations,
+
     -- * Reading a key
     --
     -- | What a submap is built on.  River has no keyboard grab, so this
@@ -156,6 +163,38 @@ pointerPosition = do
     pure $ case M.elems seats of
         (s:_) -> Just (rsPointer s)
         []    -> Nothing
+
+-- | Ask a window to let the window manager draw its frame.
+--
+-- The default for every new window, and the reason it has to be asked for is
+-- that river's default is @use_csd@: a window manager that says nothing gets
+-- clients drawing their own title bars and close buttons.  On a tiling desktop
+-- that is decoration on every window that nobody asked for.
+--
+-- \"Server side\" does not mean river draws a title bar.  It draws what this
+-- window manager asks for, which is the border from
+-- 'XMonad.Core.borderWidth' and nothing else.
+--
+-- Has no effect on a client that only supports client-side decoration; river
+-- documents that, which is why this is not conditional on the decoration hint.
+--
+-- Only legal during a manage sequence, so a manage hook is the place for it.
+useServerDecorations :: Window -> X ()
+useServerDecorations w = do
+    conn <- asks display
+    io (riverWindowV1UseSsd conn w)
+
+-- | Let a window draw its own title bar and borders.
+--
+-- Undoes 'useServerDecorations' for one window, from a manage hook:
+--
+-- > manageHook = className =? \"Gimp\" --> liftX (ask >>= useClientDecorations) <> idHook
+--
+-- Only legal during a manage sequence.
+useClientDecorations :: Window -> X ()
+useClientDecorations w = do
+    conn <- asks display
+    io (riverWindowV1UseCsd conn w)
 
 -- | Read one key press and run the action it selects.
 --
