@@ -1,0 +1,107 @@
+name: River
+
+# The river backend and the consistency checks that protect it.
+#
+# Kept separate from the Stack workflow rather than folded into its resolver
+# matrix, for two reasons.  The river backend targets one resolver -- the one
+# in stack.yaml -- because it depends on store-core and network and there is no
+# value in proving it builds on GHC 8.6.  And the checks below are not a build:
+# they compare the two backends against each other and against a recorded
+# baseline, so they need both halves built in the same job, which a matrix
+# entry cannot express.
+#
+# Before this existed, every line under src-river/ was uncompiled in CI, the
+# river-wire suite never ran, and none of the four consistency scripts ran
+# anywhere -- they only protected the tree when someone remembered to invoke
+# them by hand.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  river:
+    name: River backend + consistency checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Clone project
+        uses: actions/checkout@v7
+        with:
+          # tests/check-x11-source.sh diffs the working tree against the commit
+          # recorded in tests/upstream-base.sha, which a shallow clone will not
+          # contain.
+          fetch-depth: 0
+
+      - name: Install C dependencies
+        # Needed for the X11 half.  The river backend links nothing but is
+        # built alongside it, because the API checks compare the two.
+        run: |
+          set -ex
+          sudo apt update -y
+          sudo apt install -y \
+            libx11-dev \
+            libxext-dev \
+            libxinerama-dev \
+            libxrandr-dev \
+            libxss-dev \
+            #
+
+      - name: Refresh caches once a month
+        id: cache-date
+        run: |
+          set -ex
+          echo "date=$(date +%Y-%m)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Stack
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.stack
+            .stack-work
+            !~/.stack/pantry
+          key: river-${{ runner.os }}-${{ steps.cache-date.outputs.date }}-${{ hashFiles('stack.yaml') }}-${{ hashFiles('*.cabal') }}
+          restore-keys: |
+            river-${{ runner.os }}-${{ steps.cache-date.outputs.date }}-${{ hashFiles('stack.yaml') }}-
+            river-${{ runner.os }}-${{ steps.cache-date.outputs.date }}-
+
+      - name: Update hackage index
+        run: stack update
+
+      # --- the X11 build, which must be untouched by any river work ---------
+
+      - name: X11 sources match the recorded upstream base
+        run: ./tests/check-x11-source.sh
+
+      - name: Build X11 backend
+        run: stack build --fast --no-terminal --system-ghc --flag=xmonad:pedantic
+
+      - name: X11 API matches its golden
+        run: GHC="stack exec --system-ghc -- ghc" ./tests/api/check-api.sh x11
+
+      # --- the river build --------------------------------------------------
+
+      - name: Build and test river backend
+        run: |
+          stack test --fast --no-terminal --system-ghc \
+            --flag=xmonad:pedantic --flag=xmonad:river
+
+      - name: River API matches its golden
+        run: GHC="stack exec --system-ghc -- ghc" ./tests/api/check-api.sh river
+
+      # --- the two cross-cutting checks -------------------------------------
+
+      - name: River API is the intended subset of the X11 one
+        run: ./tests/api/check-subset.sh
+
+      - name: src-river copies of src/ files are as recorded
+        run: ./tests/check-copies.sh
+
+      - name: Generated keysyms are up to date
+        # Regenerating must be a no-op; if it is not, someone edited the
+        # generated module by hand or bumped X11 without rerunning the
+        # generator.
+        run: |
+          ./codegen/gen-keysyms.sh
+          git diff --exit-code -- src-river/XMonad/River/Keysym.hs \
+                                  src-river/XMonad/River/Keysym/Table.hs

@@ -143,6 +143,9 @@ run conn manager bindings layerShell userConfig dirs = do
           <*> pure layerShell
           <*> newIORef Nothing
 
+  when (null (workspaces userConfig)) $ hPutStrLn stderr
+    "xmonad-river: the config has no workspaces; using a single one named \"1\""
+
   -- Already existentially wrapped: XMonad.xmonad does that before calling
   -- here, so that every workspace can hold a different layout.
   let layout = layoutHook userConfig
@@ -150,11 +153,19 @@ run conn manager bindings layerShell userConfig dirs = do
       -- reconciled against river's outputs at the start of every manage
       -- sequence, so the placeholder here is replaced before anything is laid
       -- out.
-      initialWorkspaces =
-        [ W.Workspace i layout Nothing | i <- workspaces userConfig ]
-      placeholder = W.Screen (head initialWorkspaces) 0 (SD (Rectangle 0 0 0 0))
+      -- A StackSet must have a current screen, so there must be at least one
+      -- workspace.  A config with `workspaces = []` is a config error rather
+      -- than something to crash on later with a head of an empty list, so it
+      -- gets one unnamed workspace and a diagnostic.
+      initialWorkspaces = case workspaces userConfig of
+        []    -> [ W.Workspace "1" layout Nothing ]
+        names -> [ W.Workspace i layout Nothing | i <- names ]
+      (firstWorkspace, otherWorkspaces) = case initialWorkspaces of
+        (w:ws) -> (w, ws)
+        []     -> error "unreachable: initialWorkspaces is never empty"
+      placeholder = W.Screen firstWorkspace 0 (SD (Rectangle 0 0 0 0))
       -- The fourth field is the floating window map, empty at startup.
-      initialSet = W.StackSet placeholder [] (drop 1 initialWorkspaces) M.empty
+      initialSet = W.StackSet placeholder [] otherWorkspaces M.empty
 
       xconf = XConf
         { config = userConfig
