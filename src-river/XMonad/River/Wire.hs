@@ -85,8 +85,27 @@ import Data.Store.Core
 newtype ObjectId = ObjectId { unObjectId :: Word32 }
   deriving (Eq, Ord)
 
+-- | The @#5@ spelling is what wayland-debug and river's own logs use, so it
+-- stays.
 instance Show ObjectId where
   show (ObjectId n) = '#' : show n
+
+-- | Parses what 'Show' writes.
+--
+-- This is not a way to deserialise a window across a restart -- ids are
+-- per-connection and recycled after @wl_display.delete_id@, which is why there
+-- is no state file.  It is required for a much narrower reason: 'Layout' is
+-- @forall l. (LayoutClass l a, Read (l a)) => Layout (l a)@, so a layout that
+-- keeps a 'Window' in its state cannot be wrapped at all without it.  Eleven
+-- xmonad-contrib modules fail at @deriving Read@ for exactly that reason, none
+-- of them going near a file.
+--
+-- X11's Window is a Word64 with a derived Read and has always had the same
+-- property: @read "12345"@ yields an id that may name nothing.
+instance Read ObjectId where
+  readsPrec _ s = case dropWhile (== ' ') s of
+    '#' : rest -> [ (ObjectId n, r) | (n, r) <- reads rest ]
+    _          -> []
 
 -- | The null object, used for nullable @object@ arguments.
 nullObject :: ObjectId
