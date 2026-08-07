@@ -60,10 +60,6 @@ workspaces = map show [1 .. 9 :: Int]
 defaultModMask :: KeyMask
 defaultModMask = mod1Mask
 
-shiftMask, mod1Mask :: KeyMask
-shiftMask = 1
-mod1Mask  = 8
-
 -- | Width of the window border in pixels.
 borderWidth :: Dimension
 borderWidth = 1
@@ -133,39 +129,6 @@ focusFollowsMouse = True
 -- | Whether a mouse click select the focus or is just passed to the window
 clickJustFocuses :: Bool
 clickJustFocuses = True
-
--- Keysyms.  xkbcommon reuses X11's numbering, so these are X11's values and a
--- key description means the same thing on both backends.
-xK_Return, xK_p, xK_c, xK_space, xK_n, xK_Tab, xK_j, xK_k, xK_m, xK_h, xK_l,
-  xK_t, xK_comma, xK_period, xK_q, xK_slash, xK_question, xK_w, xK_e, xK_r,
-  xK_1, xK_9 :: KeySym
-xK_Return   = 0xff0d
-xK_Tab      = 0xff09
-xK_space    = 0x0020
-xK_comma    = 0x002c
-xK_period   = 0x002e
-xK_slash    = 0x002f
-xK_question = 0x003f
-xK_1        = 0x0031
-xK_9        = 0x0039
-xK_c        = 0x0063
-xK_e        = 0x0065
-xK_h        = 0x0068
-xK_j        = 0x006a
-xK_k        = 0x006b
-xK_l        = 0x006c
-xK_m        = 0x006d
-xK_n        = 0x006e
-xK_p        = 0x0070
-xK_q        = 0x0071
-xK_r        = 0x0072
-xK_t        = 0x0074
-xK_w        = 0x0077
-
-button1, button2, button3 :: Button
-button1 = 1
-button2 = 2
-button3 = 3
 
 -- | The xmonad key bindings. Add, modify or remove key bindings here.
 keys :: XConfig Layout -> M.Map (KeyMask, KeySym) (X ())

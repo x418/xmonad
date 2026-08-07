@@ -131,6 +131,11 @@ XMonad | applySizeHintsContents | applySizeHintsContents :: Integral a => SizeHi
 XMonad | asks | asks :: MonadReader r m => (r -> a) -> m a
 XMonad | binFileName | binFileName :: Directories -> FilePath
 XMonad | broadcastMessage | broadcastMessage :: Message a => a -> X ()
+XMonad | button1 | button1 :: Button
+XMonad | button2 | button2 :: Button
+XMonad | button3 | button3 :: Button
+XMonad | button4 | button4 :: Button
+XMonad | button5 | button5 :: Button
 XMonad | cacheNumlockMask | cacheNumlockMask :: X ()
 XMonad | catchIO | catchIO :: MonadIO m => IO () -> m ()
 XMonad | catchX | catchX :: X a -> X a -> X a
@@ -138,6 +143,7 @@ XMonad | className | className :: Query String
 XMonad | cleanMask | cleanMask :: KeyMask -> X KeyMask
 XMonad | composeAll | composeAll :: Monoid m => [m] -> m
 XMonad | containedIn | containedIn :: Rectangle -> Rectangle -> Bool
+XMonad | controlMask | controlMask :: KeyMask
 XMonad | defaultConfig | defaultConfig :: XConfig (Choose Tall (Choose (Mirror Tall) Full))
 XMonad | doF | doF :: (s -> s) -> Query (Endo s)
 XMonad | doFloat | doFloat :: ManageHook
@@ -163,20 +169,30 @@ XMonad | io | io :: MonadIO m => IO a -> m a
 XMonad | isClient | isClient :: Window -> X Bool
 XMonad | isFixedSizeOrTransient | isFixedSizeOrTransient :: Display -> Window -> X Bool
 XMonad | isRoot | isRoot :: Window -> X Bool
+XMonad | keysymTable | keysymTable :: Map String KeySym
+XMonad | keysymToString | keysymToString :: KeySym -> String
 XMonad | kill | kill :: X ()
 XMonad | killWindow | killWindow :: Window -> X ()
 XMonad | launch | launch :: (LayoutClass l Window, Read (l Window)) => XConfig l -> Directories -> IO ()
 XMonad | layerHasFocus | layerHasFocus :: LayerFocus -> Bool
 XMonad | liftX | liftX :: X a -> Query a
+XMonad | lockMask | lockMask :: KeyMask
 XMonad | manageDirty | manageDirty :: X ()
 XMonad | mirrorRect | mirrorRect :: Rectangle -> Rectangle
 XMonad | mkAdjust | mkAdjust :: Window -> X (D -> D)
+XMonad | mod1Mask | mod1Mask :: KeyMask
+XMonad | mod2Mask | mod2Mask :: KeyMask
+XMonad | mod3Mask | mod3Mask :: KeyMask
+XMonad | mod4Mask | mod4Mask :: KeyMask
+XMonad | mod5Mask | mod5Mask :: KeyMask
 XMonad | modify | modify :: MonadState s m => (s -> s) -> m ()
 XMonad | modifyWindowSet | modifyWindowSet :: (WindowSet -> WindowSet) -> X ()
 XMonad | mouseDrag | mouseDrag :: (Position -> Position -> X ()) -> X () -> X ()
 XMonad | mouseMoveWindow | mouseMoveWindow :: Window -> X ()
 XMonad | mouseResizeWindow | mouseResizeWindow :: Window -> X ()
+XMonad | noModMask | noModMask :: KeyMask
 XMonad | noSizeHints | noSizeHints :: SizeHints
+XMonad | noSymbol | noSymbol :: KeySym
 XMonad | nubScreens | nubScreens :: [Rectangle] -> [Rectangle]
 XMonad | pointScreen | pointScreen :: Position -> Position -> X (Maybe (Screen WorkspaceId (Layout Window) Window ScreenId ScreenDetail))
 XMonad | pointWithin | pointWithin :: Position -> Position -> Rectangle -> Bool
@@ -187,6 +203,7 @@ XMonad | rescreen | rescreen :: X ()
 XMonad | resource | resource :: Query String
 XMonad | restart | restart :: String -> Bool -> X ()
 XMonad | reveal | reveal :: Window -> X ()
+XMonad | reverseKeysymTable | reverseKeysymTable :: Map KeySym String
 XMonad | runOnWorkspaces | runOnWorkspaces :: (WindowSpace -> X WindowSpace) -> X ()
 XMonad | runQuery | runQuery :: Query a -> Window -> X a
 XMonad | runX | runX :: XConf -> XState -> X a -> IO (a, XState)
@@ -197,12 +214,14 @@ XMonad | sendMessageWithNoRefresh | sendMessageWithNoRefresh :: Message a => a -
 XMonad | sendRestart | sendRestart :: IO ()
 XMonad | setLayout | setLayout :: Layout Window -> X ()
 XMonad | setMainThread | setMainThread :: IO ()
+XMonad | shiftMask | shiftMask :: KeyMask
 XMonad | spawn | spawn :: MonadIO m => String -> m ()
 XMonad | spawnPID | spawnPID :: MonadIO m => String -> m ProcessID
 XMonad | splitHorizontally | splitHorizontally :: Int -> Rectangle -> [Rectangle]
 XMonad | splitHorizontallyBy | splitHorizontallyBy :: RealFrac r => r -> Rectangle -> (Rectangle, Rectangle)
 XMonad | splitVertically | splitVertically :: Int -> Rectangle -> [Rectangle]
 XMonad | splitVerticallyBy | splitVerticallyBy :: RealFrac r => r -> Rectangle -> (Rectangle, Rectangle)
+XMonad | stringToKeysym | stringToKeysym :: String -> KeySym
 XMonad | tile | tile :: Rational -> Rectangle -> Int -> Int -> [Rectangle]
 XMonad | title | title :: Query String
 XMonad | trace | trace :: MonadIO m => String -> m ()
@@ -223,6 +242,353 @@ XMonad | withDisplay | withDisplay :: (Display -> X a) -> X a
 XMonad | withFocused | withFocused :: (Window -> X ()) -> X ()
 XMonad | withUnfocused | withUnfocused :: (Window -> X ()) -> X ()
 XMonad | withWindowSet | withWindowSet :: (WindowSet -> X a) -> X a
+XMonad | xK_0 | xK_0 :: KeySym
+XMonad | xK_1 | xK_1 :: KeySym
+XMonad | xK_2 | xK_2 :: KeySym
+XMonad | xK_3 | xK_3 :: KeySym
+XMonad | xK_4 | xK_4 :: KeySym
+XMonad | xK_5 | xK_5 :: KeySym
+XMonad | xK_6 | xK_6 :: KeySym
+XMonad | xK_7 | xK_7 :: KeySym
+XMonad | xK_8 | xK_8 :: KeySym
+XMonad | xK_9 | xK_9 :: KeySym
+XMonad | xK_A | xK_A :: KeySym
+XMonad | xK_AE | xK_AE :: KeySym
+XMonad | xK_Aacute | xK_Aacute :: KeySym
+XMonad | xK_Acircumflex | xK_Acircumflex :: KeySym
+XMonad | xK_Adiaeresis | xK_Adiaeresis :: KeySym
+XMonad | xK_Agrave | xK_Agrave :: KeySym
+XMonad | xK_Alt_L | xK_Alt_L :: KeySym
+XMonad | xK_Alt_R | xK_Alt_R :: KeySym
+XMonad | xK_Aring | xK_Aring :: KeySym
+XMonad | xK_Atilde | xK_Atilde :: KeySym
+XMonad | xK_B | xK_B :: KeySym
+XMonad | xK_BackSpace | xK_BackSpace :: KeySym
+XMonad | xK_Begin | xK_Begin :: KeySym
+XMonad | xK_Break | xK_Break :: KeySym
+XMonad | xK_C | xK_C :: KeySym
+XMonad | xK_Cancel | xK_Cancel :: KeySym
+XMonad | xK_Caps_Lock | xK_Caps_Lock :: KeySym
+XMonad | xK_Ccedilla | xK_Ccedilla :: KeySym
+XMonad | xK_Clear | xK_Clear :: KeySym
+XMonad | xK_Codeinput | xK_Codeinput :: KeySym
+XMonad | xK_Control_L | xK_Control_L :: KeySym
+XMonad | xK_Control_R | xK_Control_R :: KeySym
+XMonad | xK_D | xK_D :: KeySym
+XMonad | xK_Delete | xK_Delete :: KeySym
+XMonad | xK_Down | xK_Down :: KeySym
+XMonad | xK_E | xK_E :: KeySym
+XMonad | xK_ETH | xK_ETH :: KeySym
+XMonad | xK_Eacute | xK_Eacute :: KeySym
+XMonad | xK_Ecircumflex | xK_Ecircumflex :: KeySym
+XMonad | xK_Ediaeresis | xK_Ediaeresis :: KeySym
+XMonad | xK_Egrave | xK_Egrave :: KeySym
+XMonad | xK_End | xK_End :: KeySym
+XMonad | xK_Escape | xK_Escape :: KeySym
+XMonad | xK_Eth | xK_Eth :: KeySym
+XMonad | xK_Execute | xK_Execute :: KeySym
+XMonad | xK_F | xK_F :: KeySym
+XMonad | xK_F1 | xK_F1 :: KeySym
+XMonad | xK_F10 | xK_F10 :: KeySym
+XMonad | xK_F11 | xK_F11 :: KeySym
+XMonad | xK_F12 | xK_F12 :: KeySym
+XMonad | xK_F13 | xK_F13 :: KeySym
+XMonad | xK_F14 | xK_F14 :: KeySym
+XMonad | xK_F15 | xK_F15 :: KeySym
+XMonad | xK_F16 | xK_F16 :: KeySym
+XMonad | xK_F17 | xK_F17 :: KeySym
+XMonad | xK_F18 | xK_F18 :: KeySym
+XMonad | xK_F19 | xK_F19 :: KeySym
+XMonad | xK_F2 | xK_F2 :: KeySym
+XMonad | xK_F20 | xK_F20 :: KeySym
+XMonad | xK_F21 | xK_F21 :: KeySym
+XMonad | xK_F22 | xK_F22 :: KeySym
+XMonad | xK_F23 | xK_F23 :: KeySym
+XMonad | xK_F24 | xK_F24 :: KeySym
+XMonad | xK_F25 | xK_F25 :: KeySym
+XMonad | xK_F26 | xK_F26 :: KeySym
+XMonad | xK_F27 | xK_F27 :: KeySym
+XMonad | xK_F28 | xK_F28 :: KeySym
+XMonad | xK_F29 | xK_F29 :: KeySym
+XMonad | xK_F3 | xK_F3 :: KeySym
+XMonad | xK_F30 | xK_F30 :: KeySym
+XMonad | xK_F31 | xK_F31 :: KeySym
+XMonad | xK_F32 | xK_F32 :: KeySym
+XMonad | xK_F33 | xK_F33 :: KeySym
+XMonad | xK_F34 | xK_F34 :: KeySym
+XMonad | xK_F35 | xK_F35 :: KeySym
+XMonad | xK_F4 | xK_F4 :: KeySym
+XMonad | xK_F5 | xK_F5 :: KeySym
+XMonad | xK_F6 | xK_F6 :: KeySym
+XMonad | xK_F7 | xK_F7 :: KeySym
+XMonad | xK_F8 | xK_F8 :: KeySym
+XMonad | xK_F9 | xK_F9 :: KeySym
+XMonad | xK_Find | xK_Find :: KeySym
+XMonad | xK_G | xK_G :: KeySym
+XMonad | xK_H | xK_H :: KeySym
+XMonad | xK_Help | xK_Help :: KeySym
+XMonad | xK_Home | xK_Home :: KeySym
+XMonad | xK_Hyper_L | xK_Hyper_L :: KeySym
+XMonad | xK_Hyper_R | xK_Hyper_R :: KeySym
+XMonad | xK_I | xK_I :: KeySym
+XMonad | xK_Iacute | xK_Iacute :: KeySym
+XMonad | xK_Icircumflex | xK_Icircumflex :: KeySym
+XMonad | xK_Idiaeresis | xK_Idiaeresis :: KeySym
+XMonad | xK_Igrave | xK_Igrave :: KeySym
+XMonad | xK_Insert | xK_Insert :: KeySym
+XMonad | xK_J | xK_J :: KeySym
+XMonad | xK_K | xK_K :: KeySym
+XMonad | xK_KP_0 | xK_KP_0 :: KeySym
+XMonad | xK_KP_1 | xK_KP_1 :: KeySym
+XMonad | xK_KP_2 | xK_KP_2 :: KeySym
+XMonad | xK_KP_3 | xK_KP_3 :: KeySym
+XMonad | xK_KP_4 | xK_KP_4 :: KeySym
+XMonad | xK_KP_5 | xK_KP_5 :: KeySym
+XMonad | xK_KP_6 | xK_KP_6 :: KeySym
+XMonad | xK_KP_7 | xK_KP_7 :: KeySym
+XMonad | xK_KP_8 | xK_KP_8 :: KeySym
+XMonad | xK_KP_9 | xK_KP_9 :: KeySym
+XMonad | xK_KP_Add | xK_KP_Add :: KeySym
+XMonad | xK_KP_Begin | xK_KP_Begin :: KeySym
+XMonad | xK_KP_Decimal | xK_KP_Decimal :: KeySym
+XMonad | xK_KP_Delete | xK_KP_Delete :: KeySym
+XMonad | xK_KP_Divide | xK_KP_Divide :: KeySym
+XMonad | xK_KP_Down | xK_KP_Down :: KeySym
+XMonad | xK_KP_End | xK_KP_End :: KeySym
+XMonad | xK_KP_Enter | xK_KP_Enter :: KeySym
+XMonad | xK_KP_Equal | xK_KP_Equal :: KeySym
+XMonad | xK_KP_F1 | xK_KP_F1 :: KeySym
+XMonad | xK_KP_F2 | xK_KP_F2 :: KeySym
+XMonad | xK_KP_F3 | xK_KP_F3 :: KeySym
+XMonad | xK_KP_F4 | xK_KP_F4 :: KeySym
+XMonad | xK_KP_Home | xK_KP_Home :: KeySym
+XMonad | xK_KP_Insert | xK_KP_Insert :: KeySym
+XMonad | xK_KP_Left | xK_KP_Left :: KeySym
+XMonad | xK_KP_Multiply | xK_KP_Multiply :: KeySym
+XMonad | xK_KP_Next | xK_KP_Next :: KeySym
+XMonad | xK_KP_Page_Down | xK_KP_Page_Down :: KeySym
+XMonad | xK_KP_Page_Up | xK_KP_Page_Up :: KeySym
+XMonad | xK_KP_Prior | xK_KP_Prior :: KeySym
+XMonad | xK_KP_Right | xK_KP_Right :: KeySym
+XMonad | xK_KP_Separator | xK_KP_Separator :: KeySym
+XMonad | xK_KP_Space | xK_KP_Space :: KeySym
+XMonad | xK_KP_Subtract | xK_KP_Subtract :: KeySym
+XMonad | xK_KP_Tab | xK_KP_Tab :: KeySym
+XMonad | xK_KP_Up | xK_KP_Up :: KeySym
+XMonad | xK_L | xK_L :: KeySym
+XMonad | xK_L1 | xK_L1 :: KeySym
+XMonad | xK_L10 | xK_L10 :: KeySym
+XMonad | xK_L2 | xK_L2 :: KeySym
+XMonad | xK_L3 | xK_L3 :: KeySym
+XMonad | xK_L4 | xK_L4 :: KeySym
+XMonad | xK_L5 | xK_L5 :: KeySym
+XMonad | xK_L6 | xK_L6 :: KeySym
+XMonad | xK_L7 | xK_L7 :: KeySym
+XMonad | xK_L8 | xK_L8 :: KeySym
+XMonad | xK_L9 | xK_L9 :: KeySym
+XMonad | xK_Left | xK_Left :: KeySym
+XMonad | xK_Linefeed | xK_Linefeed :: KeySym
+XMonad | xK_M | xK_M :: KeySym
+XMonad | xK_Menu | xK_Menu :: KeySym
+XMonad | xK_Meta_L | xK_Meta_L :: KeySym
+XMonad | xK_Meta_R | xK_Meta_R :: KeySym
+XMonad | xK_Mode_switch | xK_Mode_switch :: KeySym
+XMonad | xK_Multi_key | xK_Multi_key :: KeySym
+XMonad | xK_MultipleCandidate | xK_MultipleCandidate :: KeySym
+XMonad | xK_N | xK_N :: KeySym
+XMonad | xK_Next | xK_Next :: KeySym
+XMonad | xK_Ntilde | xK_Ntilde :: KeySym
+XMonad | xK_Num_Lock | xK_Num_Lock :: KeySym
+XMonad | xK_O | xK_O :: KeySym
+XMonad | xK_Oacute | xK_Oacute :: KeySym
+XMonad | xK_Ocircumflex | xK_Ocircumflex :: KeySym
+XMonad | xK_Odiaeresis | xK_Odiaeresis :: KeySym
+XMonad | xK_Ograve | xK_Ograve :: KeySym
+XMonad | xK_Ooblique | xK_Ooblique :: KeySym
+XMonad | xK_Otilde | xK_Otilde :: KeySym
+XMonad | xK_P | xK_P :: KeySym
+XMonad | xK_Page_Down | xK_Page_Down :: KeySym
+XMonad | xK_Page_Up | xK_Page_Up :: KeySym
+XMonad | xK_Pause | xK_Pause :: KeySym
+XMonad | xK_PreviousCandidate | xK_PreviousCandidate :: KeySym
+XMonad | xK_Print | xK_Print :: KeySym
+XMonad | xK_Prior | xK_Prior :: KeySym
+XMonad | xK_Q | xK_Q :: KeySym
+XMonad | xK_R | xK_R :: KeySym
+XMonad | xK_R1 | xK_R1 :: KeySym
+XMonad | xK_R10 | xK_R10 :: KeySym
+XMonad | xK_R11 | xK_R11 :: KeySym
+XMonad | xK_R12 | xK_R12 :: KeySym
+XMonad | xK_R13 | xK_R13 :: KeySym
+XMonad | xK_R14 | xK_R14 :: KeySym
+XMonad | xK_R15 | xK_R15 :: KeySym
+XMonad | xK_R2 | xK_R2 :: KeySym
+XMonad | xK_R3 | xK_R3 :: KeySym
+XMonad | xK_R4 | xK_R4 :: KeySym
+XMonad | xK_R5 | xK_R5 :: KeySym
+XMonad | xK_R6 | xK_R6 :: KeySym
+XMonad | xK_R7 | xK_R7 :: KeySym
+XMonad | xK_R8 | xK_R8 :: KeySym
+XMonad | xK_R9 | xK_R9 :: KeySym
+XMonad | xK_Redo | xK_Redo :: KeySym
+XMonad | xK_Return | xK_Return :: KeySym
+XMonad | xK_Right | xK_Right :: KeySym
+XMonad | xK_S | xK_S :: KeySym
+XMonad | xK_Scroll_Lock | xK_Scroll_Lock :: KeySym
+XMonad | xK_Select | xK_Select :: KeySym
+XMonad | xK_Shift_L | xK_Shift_L :: KeySym
+XMonad | xK_Shift_Lock | xK_Shift_Lock :: KeySym
+XMonad | xK_Shift_R | xK_Shift_R :: KeySym
+XMonad | xK_SingleCandidate | xK_SingleCandidate :: KeySym
+XMonad | xK_Super_L | xK_Super_L :: KeySym
+XMonad | xK_Super_R | xK_Super_R :: KeySym
+XMonad | xK_Sys_Req | xK_Sys_Req :: KeySym
+XMonad | xK_T | xK_T :: KeySym
+XMonad | xK_THORN | xK_THORN :: KeySym
+XMonad | xK_Tab | xK_Tab :: KeySym
+XMonad | xK_Thorn | xK_Thorn :: KeySym
+XMonad | xK_U | xK_U :: KeySym
+XMonad | xK_Uacute | xK_Uacute :: KeySym
+XMonad | xK_Ucircumflex | xK_Ucircumflex :: KeySym
+XMonad | xK_Udiaeresis | xK_Udiaeresis :: KeySym
+XMonad | xK_Ugrave | xK_Ugrave :: KeySym
+XMonad | xK_Undo | xK_Undo :: KeySym
+XMonad | xK_Up | xK_Up :: KeySym
+XMonad | xK_V | xK_V :: KeySym
+XMonad | xK_VoidSymbol | xK_VoidSymbol :: KeySym
+XMonad | xK_W | xK_W :: KeySym
+XMonad | xK_X | xK_X :: KeySym
+XMonad | xK_Y | xK_Y :: KeySym
+XMonad | xK_Yacute | xK_Yacute :: KeySym
+XMonad | xK_Z | xK_Z :: KeySym
+XMonad | xK_a | xK_a :: KeySym
+XMonad | xK_aacute | xK_aacute :: KeySym
+XMonad | xK_acircumflex | xK_acircumflex :: KeySym
+XMonad | xK_acute | xK_acute :: KeySym
+XMonad | xK_adiaeresis | xK_adiaeresis :: KeySym
+XMonad | xK_ae | xK_ae :: KeySym
+XMonad | xK_agrave | xK_agrave :: KeySym
+XMonad | xK_ampersand | xK_ampersand :: KeySym
+XMonad | xK_apostrophe | xK_apostrophe :: KeySym
+XMonad | xK_aring | xK_aring :: KeySym
+XMonad | xK_asciicircum | xK_asciicircum :: KeySym
+XMonad | xK_asciitilde | xK_asciitilde :: KeySym
+XMonad | xK_asterisk | xK_asterisk :: KeySym
+XMonad | xK_at | xK_at :: KeySym
+XMonad | xK_atilde | xK_atilde :: KeySym
+XMonad | xK_b | xK_b :: KeySym
+XMonad | xK_backslash | xK_backslash :: KeySym
+XMonad | xK_bar | xK_bar :: KeySym
+XMonad | xK_braceleft | xK_braceleft :: KeySym
+XMonad | xK_braceright | xK_braceright :: KeySym
+XMonad | xK_bracketleft | xK_bracketleft :: KeySym
+XMonad | xK_bracketright | xK_bracketright :: KeySym
+XMonad | xK_brokenbar | xK_brokenbar :: KeySym
+XMonad | xK_c | xK_c :: KeySym
+XMonad | xK_ccedilla | xK_ccedilla :: KeySym
+XMonad | xK_cedilla | xK_cedilla :: KeySym
+XMonad | xK_cent | xK_cent :: KeySym
+XMonad | xK_colon | xK_colon :: KeySym
+XMonad | xK_comma | xK_comma :: KeySym
+XMonad | xK_copyright | xK_copyright :: KeySym
+XMonad | xK_currency | xK_currency :: KeySym
+XMonad | xK_d | xK_d :: KeySym
+XMonad | xK_degree | xK_degree :: KeySym
+XMonad | xK_diaeresis | xK_diaeresis :: KeySym
+XMonad | xK_division | xK_division :: KeySym
+XMonad | xK_dollar | xK_dollar :: KeySym
+XMonad | xK_e | xK_e :: KeySym
+XMonad | xK_eacute | xK_eacute :: KeySym
+XMonad | xK_ecircumflex | xK_ecircumflex :: KeySym
+XMonad | xK_ediaeresis | xK_ediaeresis :: KeySym
+XMonad | xK_egrave | xK_egrave :: KeySym
+XMonad | xK_equal | xK_equal :: KeySym
+XMonad | xK_eth | xK_eth :: KeySym
+XMonad | xK_exclam | xK_exclam :: KeySym
+XMonad | xK_exclamdown | xK_exclamdown :: KeySym
+XMonad | xK_f | xK_f :: KeySym
+XMonad | xK_g | xK_g :: KeySym
+XMonad | xK_grave | xK_grave :: KeySym
+XMonad | xK_greater | xK_greater :: KeySym
+XMonad | xK_guillemotleft | xK_guillemotleft :: KeySym
+XMonad | xK_guillemotright | xK_guillemotright :: KeySym
+XMonad | xK_h | xK_h :: KeySym
+XMonad | xK_hyphen | xK_hyphen :: KeySym
+XMonad | xK_i | xK_i :: KeySym
+XMonad | xK_iacute | xK_iacute :: KeySym
+XMonad | xK_icircumflex | xK_icircumflex :: KeySym
+XMonad | xK_idiaeresis | xK_idiaeresis :: KeySym
+XMonad | xK_igrave | xK_igrave :: KeySym
+XMonad | xK_j | xK_j :: KeySym
+XMonad | xK_k | xK_k :: KeySym
+XMonad | xK_l | xK_l :: KeySym
+XMonad | xK_less | xK_less :: KeySym
+XMonad | xK_m | xK_m :: KeySym
+XMonad | xK_macron | xK_macron :: KeySym
+XMonad | xK_masculine | xK_masculine :: KeySym
+XMonad | xK_minus | xK_minus :: KeySym
+XMonad | xK_mu | xK_mu :: KeySym
+XMonad | xK_multiply | xK_multiply :: KeySym
+XMonad | xK_n | xK_n :: KeySym
+XMonad | xK_nobreakspace | xK_nobreakspace :: KeySym
+XMonad | xK_notsign | xK_notsign :: KeySym
+XMonad | xK_ntilde | xK_ntilde :: KeySym
+XMonad | xK_numbersign | xK_numbersign :: KeySym
+XMonad | xK_o | xK_o :: KeySym
+XMonad | xK_oacute | xK_oacute :: KeySym
+XMonad | xK_ocircumflex | xK_ocircumflex :: KeySym
+XMonad | xK_odiaeresis | xK_odiaeresis :: KeySym
+XMonad | xK_ograve | xK_ograve :: KeySym
+XMonad | xK_onehalf | xK_onehalf :: KeySym
+XMonad | xK_onequarter | xK_onequarter :: KeySym
+XMonad | xK_onesuperior | xK_onesuperior :: KeySym
+XMonad | xK_ordfeminine | xK_ordfeminine :: KeySym
+XMonad | xK_oslash | xK_oslash :: KeySym
+XMonad | xK_otilde | xK_otilde :: KeySym
+XMonad | xK_p | xK_p :: KeySym
+XMonad | xK_paragraph | xK_paragraph :: KeySym
+XMonad | xK_parenleft | xK_parenleft :: KeySym
+XMonad | xK_parenright | xK_parenright :: KeySym
+XMonad | xK_percent | xK_percent :: KeySym
+XMonad | xK_period | xK_period :: KeySym
+XMonad | xK_periodcentered | xK_periodcentered :: KeySym
+XMonad | xK_plus | xK_plus :: KeySym
+XMonad | xK_plusminus | xK_plusminus :: KeySym
+XMonad | xK_q | xK_q :: KeySym
+XMonad | xK_question | xK_question :: KeySym
+XMonad | xK_questiondown | xK_questiondown :: KeySym
+XMonad | xK_quotedbl | xK_quotedbl :: KeySym
+XMonad | xK_quoteleft | xK_quoteleft :: KeySym
+XMonad | xK_quoteright | xK_quoteright :: KeySym
+XMonad | xK_r | xK_r :: KeySym
+XMonad | xK_registered | xK_registered :: KeySym
+XMonad | xK_s | xK_s :: KeySym
+XMonad | xK_script_switch | xK_script_switch :: KeySym
+XMonad | xK_section | xK_section :: KeySym
+XMonad | xK_semicolon | xK_semicolon :: KeySym
+XMonad | xK_slash | xK_slash :: KeySym
+XMonad | xK_space | xK_space :: KeySym
+XMonad | xK_ssharp | xK_ssharp :: KeySym
+XMonad | xK_sterling | xK_sterling :: KeySym
+XMonad | xK_t | xK_t :: KeySym
+XMonad | xK_thorn | xK_thorn :: KeySym
+XMonad | xK_threequarters | xK_threequarters :: KeySym
+XMonad | xK_threesuperior | xK_threesuperior :: KeySym
+XMonad | xK_twosuperior | xK_twosuperior :: KeySym
+XMonad | xK_u | xK_u :: KeySym
+XMonad | xK_uacute | xK_uacute :: KeySym
+XMonad | xK_ucircumflex | xK_ucircumflex :: KeySym
+XMonad | xK_udiaeresis | xK_udiaeresis :: KeySym
+XMonad | xK_ugrave | xK_ugrave :: KeySym
+XMonad | xK_underscore | xK_underscore :: KeySym
+XMonad | xK_v | xK_v :: KeySym
+XMonad | xK_w | xK_w :: KeySym
+XMonad | xK_x | xK_x :: KeySym
+XMonad | xK_y | xK_y :: KeySym
+XMonad | xK_yacute | xK_yacute :: KeySym
+XMonad | xK_ydiaeresis | xK_ydiaeresis :: KeySym
+XMonad | xK_yen | xK_yen :: KeySym
+XMonad | xK_z | xK_z :: KeySym
 XMonad | xfork | xfork :: MonadIO m => IO () -> m ProcessID
 XMonad | xmonad | xmonad :: (LayoutClass l Window, Read (l Window)) => XConfig l -> IO ()
 XMonad.Config | Default | type Default :: * -> Constraint
@@ -312,8 +678,14 @@ XMonad.Core | XConfig | type XConfig :: (* -> *) -> *
 XMonad.Core | XState | data XState = XState {windowset :: WindowSet, mapped :: (Set Window), waitingUnmap :: (Map Window Int), dragging :: (Maybe (Position -> Position -> X (), X ())), numberlockMask :: KeyMask, extensibleState :: (Map String (Either String StateExtension))}
 XMonad.Core | XState | type XState :: *
 XMonad.Core | binFileName | binFileName :: Directories -> FilePath
+XMonad.Core | button1 | button1 :: Button
+XMonad.Core | button2 | button2 :: Button
+XMonad.Core | button3 | button3 :: Button
+XMonad.Core | button4 | button4 :: Button
+XMonad.Core | button5 | button5 :: Button
 XMonad.Core | catchIO | catchIO :: MonadIO m => IO () -> m ()
 XMonad.Core | catchX | catchX :: X a -> X a -> X a
+XMonad.Core | controlMask | controlMask :: KeyMask
 XMonad.Core | fromMessage | fromMessage :: Message m => SomeMessage -> Maybe m
 XMonad.Core | getDirectories | getDirectories :: IO Directories
 XMonad.Core | getXMonadCacheDir | getXMonadCacheDir :: X String
@@ -323,18 +695,31 @@ XMonad.Core | ifM | ifM :: Monad m => m Bool -> m a -> m a -> m a
 XMonad.Core | installSignalHandlers | installSignalHandlers :: MonadIO m => m ()
 XMonad.Core | io | io :: MonadIO m => IO a -> m a
 XMonad.Core | isRoot | isRoot :: Window -> X Bool
+XMonad.Core | keysymTable | keysymTable :: Map String KeySym
+XMonad.Core | keysymToString | keysymToString :: KeySym -> String
 XMonad.Core | layerHasFocus | layerHasFocus :: LayerFocus -> Bool
+XMonad.Core | lockMask | lockMask :: KeyMask
 XMonad.Core | manageDirty | manageDirty :: X ()
+XMonad.Core | mod1Mask | mod1Mask :: KeyMask
+XMonad.Core | mod2Mask | mod2Mask :: KeyMask
+XMonad.Core | mod3Mask | mod3Mask :: KeyMask
+XMonad.Core | mod4Mask | mod4Mask :: KeyMask
+XMonad.Core | mod5Mask | mod5Mask :: KeyMask
+XMonad.Core | noModMask | noModMask :: KeyMask
 XMonad.Core | noSizeHints | noSizeHints :: SizeHints
+XMonad.Core | noSymbol | noSymbol :: KeySym
 XMonad.Core | readsLayout | readsLayout :: Layout a -> String -> [(Layout a, String)]
 XMonad.Core | recompile | recompile :: MonadIO m => Directories -> Bool -> m Bool
+XMonad.Core | reverseKeysymTable | reverseKeysymTable :: Map KeySym String
 XMonad.Core | runOnWorkspaces | runOnWorkspaces :: (WindowSpace -> X WindowSpace) -> X ()
 XMonad.Core | runQuery | runQuery :: Query a -> Window -> X a
 XMonad.Core | runX | runX :: XConf -> XState -> X a -> IO (a, XState)
 XMonad.Core | sendRestart | sendRestart :: IO ()
 XMonad.Core | setMainThread | setMainThread :: IO ()
+XMonad.Core | shiftMask | shiftMask :: KeyMask
 XMonad.Core | spawn | spawn :: MonadIO m => String -> m ()
 XMonad.Core | spawnPID | spawnPID :: MonadIO m => String -> m ProcessID
+XMonad.Core | stringToKeysym | stringToKeysym :: String -> KeySym
 XMonad.Core | trace | trace :: MonadIO m => String -> m ()
 XMonad.Core | uninstallSignalHandlers | uninstallSignalHandlers :: MonadIO m => m ()
 XMonad.Core | userCode | userCode :: X a -> X (Maybe a)
@@ -344,6 +729,353 @@ XMonad.Core | whenJust | whenJust :: Monad m => Maybe a -> (a -> m ()) -> m ()
 XMonad.Core | whenX | whenX :: X Bool -> X () -> X ()
 XMonad.Core | withDisplay | withDisplay :: (Display -> X a) -> X a
 XMonad.Core | withWindowSet | withWindowSet :: (WindowSet -> X a) -> X a
+XMonad.Core | xK_0 | xK_0 :: KeySym
+XMonad.Core | xK_1 | xK_1 :: KeySym
+XMonad.Core | xK_2 | xK_2 :: KeySym
+XMonad.Core | xK_3 | xK_3 :: KeySym
+XMonad.Core | xK_4 | xK_4 :: KeySym
+XMonad.Core | xK_5 | xK_5 :: KeySym
+XMonad.Core | xK_6 | xK_6 :: KeySym
+XMonad.Core | xK_7 | xK_7 :: KeySym
+XMonad.Core | xK_8 | xK_8 :: KeySym
+XMonad.Core | xK_9 | xK_9 :: KeySym
+XMonad.Core | xK_A | xK_A :: KeySym
+XMonad.Core | xK_AE | xK_AE :: KeySym
+XMonad.Core | xK_Aacute | xK_Aacute :: KeySym
+XMonad.Core | xK_Acircumflex | xK_Acircumflex :: KeySym
+XMonad.Core | xK_Adiaeresis | xK_Adiaeresis :: KeySym
+XMonad.Core | xK_Agrave | xK_Agrave :: KeySym
+XMonad.Core | xK_Alt_L | xK_Alt_L :: KeySym
+XMonad.Core | xK_Alt_R | xK_Alt_R :: KeySym
+XMonad.Core | xK_Aring | xK_Aring :: KeySym
+XMonad.Core | xK_Atilde | xK_Atilde :: KeySym
+XMonad.Core | xK_B | xK_B :: KeySym
+XMonad.Core | xK_BackSpace | xK_BackSpace :: KeySym
+XMonad.Core | xK_Begin | xK_Begin :: KeySym
+XMonad.Core | xK_Break | xK_Break :: KeySym
+XMonad.Core | xK_C | xK_C :: KeySym
+XMonad.Core | xK_Cancel | xK_Cancel :: KeySym
+XMonad.Core | xK_Caps_Lock | xK_Caps_Lock :: KeySym
+XMonad.Core | xK_Ccedilla | xK_Ccedilla :: KeySym
+XMonad.Core | xK_Clear | xK_Clear :: KeySym
+XMonad.Core | xK_Codeinput | xK_Codeinput :: KeySym
+XMonad.Core | xK_Control_L | xK_Control_L :: KeySym
+XMonad.Core | xK_Control_R | xK_Control_R :: KeySym
+XMonad.Core | xK_D | xK_D :: KeySym
+XMonad.Core | xK_Delete | xK_Delete :: KeySym
+XMonad.Core | xK_Down | xK_Down :: KeySym
+XMonad.Core | xK_E | xK_E :: KeySym
+XMonad.Core | xK_ETH | xK_ETH :: KeySym
+XMonad.Core | xK_Eacute | xK_Eacute :: KeySym
+XMonad.Core | xK_Ecircumflex | xK_Ecircumflex :: KeySym
+XMonad.Core | xK_Ediaeresis | xK_Ediaeresis :: KeySym
+XMonad.Core | xK_Egrave | xK_Egrave :: KeySym
+XMonad.Core | xK_End | xK_End :: KeySym
+XMonad.Core | xK_Escape | xK_Escape :: KeySym
+XMonad.Core | xK_Eth | xK_Eth :: KeySym
+XMonad.Core | xK_Execute | xK_Execute :: KeySym
+XMonad.Core | xK_F | xK_F :: KeySym
+XMonad.Core | xK_F1 | xK_F1 :: KeySym
+XMonad.Core | xK_F10 | xK_F10 :: KeySym
+XMonad.Core | xK_F11 | xK_F11 :: KeySym
+XMonad.Core | xK_F12 | xK_F12 :: KeySym
+XMonad.Core | xK_F13 | xK_F13 :: KeySym
+XMonad.Core | xK_F14 | xK_F14 :: KeySym
+XMonad.Core | xK_F15 | xK_F15 :: KeySym
+XMonad.Core | xK_F16 | xK_F16 :: KeySym
+XMonad.Core | xK_F17 | xK_F17 :: KeySym
+XMonad.Core | xK_F18 | xK_F18 :: KeySym
+XMonad.Core | xK_F19 | xK_F19 :: KeySym
+XMonad.Core | xK_F2 | xK_F2 :: KeySym
+XMonad.Core | xK_F20 | xK_F20 :: KeySym
+XMonad.Core | xK_F21 | xK_F21 :: KeySym
+XMonad.Core | xK_F22 | xK_F22 :: KeySym
+XMonad.Core | xK_F23 | xK_F23 :: KeySym
+XMonad.Core | xK_F24 | xK_F24 :: KeySym
+XMonad.Core | xK_F25 | xK_F25 :: KeySym
+XMonad.Core | xK_F26 | xK_F26 :: KeySym
+XMonad.Core | xK_F27 | xK_F27 :: KeySym
+XMonad.Core | xK_F28 | xK_F28 :: KeySym
+XMonad.Core | xK_F29 | xK_F29 :: KeySym
+XMonad.Core | xK_F3 | xK_F3 :: KeySym
+XMonad.Core | xK_F30 | xK_F30 :: KeySym
+XMonad.Core | xK_F31 | xK_F31 :: KeySym
+XMonad.Core | xK_F32 | xK_F32 :: KeySym
+XMonad.Core | xK_F33 | xK_F33 :: KeySym
+XMonad.Core | xK_F34 | xK_F34 :: KeySym
+XMonad.Core | xK_F35 | xK_F35 :: KeySym
+XMonad.Core | xK_F4 | xK_F4 :: KeySym
+XMonad.Core | xK_F5 | xK_F5 :: KeySym
+XMonad.Core | xK_F6 | xK_F6 :: KeySym
+XMonad.Core | xK_F7 | xK_F7 :: KeySym
+XMonad.Core | xK_F8 | xK_F8 :: KeySym
+XMonad.Core | xK_F9 | xK_F9 :: KeySym
+XMonad.Core | xK_Find | xK_Find :: KeySym
+XMonad.Core | xK_G | xK_G :: KeySym
+XMonad.Core | xK_H | xK_H :: KeySym
+XMonad.Core | xK_Help | xK_Help :: KeySym
+XMonad.Core | xK_Home | xK_Home :: KeySym
+XMonad.Core | xK_Hyper_L | xK_Hyper_L :: KeySym
+XMonad.Core | xK_Hyper_R | xK_Hyper_R :: KeySym
+XMonad.Core | xK_I | xK_I :: KeySym
+XMonad.Core | xK_Iacute | xK_Iacute :: KeySym
+XMonad.Core | xK_Icircumflex | xK_Icircumflex :: KeySym
+XMonad.Core | xK_Idiaeresis | xK_Idiaeresis :: KeySym
+XMonad.Core | xK_Igrave | xK_Igrave :: KeySym
+XMonad.Core | xK_Insert | xK_Insert :: KeySym
+XMonad.Core | xK_J | xK_J :: KeySym
+XMonad.Core | xK_K | xK_K :: KeySym
+XMonad.Core | xK_KP_0 | xK_KP_0 :: KeySym
+XMonad.Core | xK_KP_1 | xK_KP_1 :: KeySym
+XMonad.Core | xK_KP_2 | xK_KP_2 :: KeySym
+XMonad.Core | xK_KP_3 | xK_KP_3 :: KeySym
+XMonad.Core | xK_KP_4 | xK_KP_4 :: KeySym
+XMonad.Core | xK_KP_5 | xK_KP_5 :: KeySym
+XMonad.Core | xK_KP_6 | xK_KP_6 :: KeySym
+XMonad.Core | xK_KP_7 | xK_KP_7 :: KeySym
+XMonad.Core | xK_KP_8 | xK_KP_8 :: KeySym
+XMonad.Core | xK_KP_9 | xK_KP_9 :: KeySym
+XMonad.Core | xK_KP_Add | xK_KP_Add :: KeySym
+XMonad.Core | xK_KP_Begin | xK_KP_Begin :: KeySym
+XMonad.Core | xK_KP_Decimal | xK_KP_Decimal :: KeySym
+XMonad.Core | xK_KP_Delete | xK_KP_Delete :: KeySym
+XMonad.Core | xK_KP_Divide | xK_KP_Divide :: KeySym
+XMonad.Core | xK_KP_Down | xK_KP_Down :: KeySym
+XMonad.Core | xK_KP_End | xK_KP_End :: KeySym
+XMonad.Core | xK_KP_Enter | xK_KP_Enter :: KeySym
+XMonad.Core | xK_KP_Equal | xK_KP_Equal :: KeySym
+XMonad.Core | xK_KP_F1 | xK_KP_F1 :: KeySym
+XMonad.Core | xK_KP_F2 | xK_KP_F2 :: KeySym
+XMonad.Core | xK_KP_F3 | xK_KP_F3 :: KeySym
+XMonad.Core | xK_KP_F4 | xK_KP_F4 :: KeySym
+XMonad.Core | xK_KP_Home | xK_KP_Home :: KeySym
+XMonad.Core | xK_KP_Insert | xK_KP_Insert :: KeySym
+XMonad.Core | xK_KP_Left | xK_KP_Left :: KeySym
+XMonad.Core | xK_KP_Multiply | xK_KP_Multiply :: KeySym
+XMonad.Core | xK_KP_Next | xK_KP_Next :: KeySym
+XMonad.Core | xK_KP_Page_Down | xK_KP_Page_Down :: KeySym
+XMonad.Core | xK_KP_Page_Up | xK_KP_Page_Up :: KeySym
+XMonad.Core | xK_KP_Prior | xK_KP_Prior :: KeySym
+XMonad.Core | xK_KP_Right | xK_KP_Right :: KeySym
+XMonad.Core | xK_KP_Separator | xK_KP_Separator :: KeySym
+XMonad.Core | xK_KP_Space | xK_KP_Space :: KeySym
+XMonad.Core | xK_KP_Subtract | xK_KP_Subtract :: KeySym
+XMonad.Core | xK_KP_Tab | xK_KP_Tab :: KeySym
+XMonad.Core | xK_KP_Up | xK_KP_Up :: KeySym
+XMonad.Core | xK_L | xK_L :: KeySym
+XMonad.Core | xK_L1 | xK_L1 :: KeySym
+XMonad.Core | xK_L10 | xK_L10 :: KeySym
+XMonad.Core | xK_L2 | xK_L2 :: KeySym
+XMonad.Core | xK_L3 | xK_L3 :: KeySym
+XMonad.Core | xK_L4 | xK_L4 :: KeySym
+XMonad.Core | xK_L5 | xK_L5 :: KeySym
+XMonad.Core | xK_L6 | xK_L6 :: KeySym
+XMonad.Core | xK_L7 | xK_L7 :: KeySym
+XMonad.Core | xK_L8 | xK_L8 :: KeySym
+XMonad.Core | xK_L9 | xK_L9 :: KeySym
+XMonad.Core | xK_Left | xK_Left :: KeySym
+XMonad.Core | xK_Linefeed | xK_Linefeed :: KeySym
+XMonad.Core | xK_M | xK_M :: KeySym
+XMonad.Core | xK_Menu | xK_Menu :: KeySym
+XMonad.Core | xK_Meta_L | xK_Meta_L :: KeySym
+XMonad.Core | xK_Meta_R | xK_Meta_R :: KeySym
+XMonad.Core | xK_Mode_switch | xK_Mode_switch :: KeySym
+XMonad.Core | xK_Multi_key | xK_Multi_key :: KeySym
+XMonad.Core | xK_MultipleCandidate | xK_MultipleCandidate :: KeySym
+XMonad.Core | xK_N | xK_N :: KeySym
+XMonad.Core | xK_Next | xK_Next :: KeySym
+XMonad.Core | xK_Ntilde | xK_Ntilde :: KeySym
+XMonad.Core | xK_Num_Lock | xK_Num_Lock :: KeySym
+XMonad.Core | xK_O | xK_O :: KeySym
+XMonad.Core | xK_Oacute | xK_Oacute :: KeySym
+XMonad.Core | xK_Ocircumflex | xK_Ocircumflex :: KeySym
+XMonad.Core | xK_Odiaeresis | xK_Odiaeresis :: KeySym
+XMonad.Core | xK_Ograve | xK_Ograve :: KeySym
+XMonad.Core | xK_Ooblique | xK_Ooblique :: KeySym
+XMonad.Core | xK_Otilde | xK_Otilde :: KeySym
+XMonad.Core | xK_P | xK_P :: KeySym
+XMonad.Core | xK_Page_Down | xK_Page_Down :: KeySym
+XMonad.Core | xK_Page_Up | xK_Page_Up :: KeySym
+XMonad.Core | xK_Pause | xK_Pause :: KeySym
+XMonad.Core | xK_PreviousCandidate | xK_PreviousCandidate :: KeySym
+XMonad.Core | xK_Print | xK_Print :: KeySym
+XMonad.Core | xK_Prior | xK_Prior :: KeySym
+XMonad.Core | xK_Q | xK_Q :: KeySym
+XMonad.Core | xK_R | xK_R :: KeySym
+XMonad.Core | xK_R1 | xK_R1 :: KeySym
+XMonad.Core | xK_R10 | xK_R10 :: KeySym
+XMonad.Core | xK_R11 | xK_R11 :: KeySym
+XMonad.Core | xK_R12 | xK_R12 :: KeySym
+XMonad.Core | xK_R13 | xK_R13 :: KeySym
+XMonad.Core | xK_R14 | xK_R14 :: KeySym
+XMonad.Core | xK_R15 | xK_R15 :: KeySym
+XMonad.Core | xK_R2 | xK_R2 :: KeySym
+XMonad.Core | xK_R3 | xK_R3 :: KeySym
+XMonad.Core | xK_R4 | xK_R4 :: KeySym
+XMonad.Core | xK_R5 | xK_R5 :: KeySym
+XMonad.Core | xK_R6 | xK_R6 :: KeySym
+XMonad.Core | xK_R7 | xK_R7 :: KeySym
+XMonad.Core | xK_R8 | xK_R8 :: KeySym
+XMonad.Core | xK_R9 | xK_R9 :: KeySym
+XMonad.Core | xK_Redo | xK_Redo :: KeySym
+XMonad.Core | xK_Return | xK_Return :: KeySym
+XMonad.Core | xK_Right | xK_Right :: KeySym
+XMonad.Core | xK_S | xK_S :: KeySym
+XMonad.Core | xK_Scroll_Lock | xK_Scroll_Lock :: KeySym
+XMonad.Core | xK_Select | xK_Select :: KeySym
+XMonad.Core | xK_Shift_L | xK_Shift_L :: KeySym
+XMonad.Core | xK_Shift_Lock | xK_Shift_Lock :: KeySym
+XMonad.Core | xK_Shift_R | xK_Shift_R :: KeySym
+XMonad.Core | xK_SingleCandidate | xK_SingleCandidate :: KeySym
+XMonad.Core | xK_Super_L | xK_Super_L :: KeySym
+XMonad.Core | xK_Super_R | xK_Super_R :: KeySym
+XMonad.Core | xK_Sys_Req | xK_Sys_Req :: KeySym
+XMonad.Core | xK_T | xK_T :: KeySym
+XMonad.Core | xK_THORN | xK_THORN :: KeySym
+XMonad.Core | xK_Tab | xK_Tab :: KeySym
+XMonad.Core | xK_Thorn | xK_Thorn :: KeySym
+XMonad.Core | xK_U | xK_U :: KeySym
+XMonad.Core | xK_Uacute | xK_Uacute :: KeySym
+XMonad.Core | xK_Ucircumflex | xK_Ucircumflex :: KeySym
+XMonad.Core | xK_Udiaeresis | xK_Udiaeresis :: KeySym
+XMonad.Core | xK_Ugrave | xK_Ugrave :: KeySym
+XMonad.Core | xK_Undo | xK_Undo :: KeySym
+XMonad.Core | xK_Up | xK_Up :: KeySym
+XMonad.Core | xK_V | xK_V :: KeySym
+XMonad.Core | xK_VoidSymbol | xK_VoidSymbol :: KeySym
+XMonad.Core | xK_W | xK_W :: KeySym
+XMonad.Core | xK_X | xK_X :: KeySym
+XMonad.Core | xK_Y | xK_Y :: KeySym
+XMonad.Core | xK_Yacute | xK_Yacute :: KeySym
+XMonad.Core | xK_Z | xK_Z :: KeySym
+XMonad.Core | xK_a | xK_a :: KeySym
+XMonad.Core | xK_aacute | xK_aacute :: KeySym
+XMonad.Core | xK_acircumflex | xK_acircumflex :: KeySym
+XMonad.Core | xK_acute | xK_acute :: KeySym
+XMonad.Core | xK_adiaeresis | xK_adiaeresis :: KeySym
+XMonad.Core | xK_ae | xK_ae :: KeySym
+XMonad.Core | xK_agrave | xK_agrave :: KeySym
+XMonad.Core | xK_ampersand | xK_ampersand :: KeySym
+XMonad.Core | xK_apostrophe | xK_apostrophe :: KeySym
+XMonad.Core | xK_aring | xK_aring :: KeySym
+XMonad.Core | xK_asciicircum | xK_asciicircum :: KeySym
+XMonad.Core | xK_asciitilde | xK_asciitilde :: KeySym
+XMonad.Core | xK_asterisk | xK_asterisk :: KeySym
+XMonad.Core | xK_at | xK_at :: KeySym
+XMonad.Core | xK_atilde | xK_atilde :: KeySym
+XMonad.Core | xK_b | xK_b :: KeySym
+XMonad.Core | xK_backslash | xK_backslash :: KeySym
+XMonad.Core | xK_bar | xK_bar :: KeySym
+XMonad.Core | xK_braceleft | xK_braceleft :: KeySym
+XMonad.Core | xK_braceright | xK_braceright :: KeySym
+XMonad.Core | xK_bracketleft | xK_bracketleft :: KeySym
+XMonad.Core | xK_bracketright | xK_bracketright :: KeySym
+XMonad.Core | xK_brokenbar | xK_brokenbar :: KeySym
+XMonad.Core | xK_c | xK_c :: KeySym
+XMonad.Core | xK_ccedilla | xK_ccedilla :: KeySym
+XMonad.Core | xK_cedilla | xK_cedilla :: KeySym
+XMonad.Core | xK_cent | xK_cent :: KeySym
+XMonad.Core | xK_colon | xK_colon :: KeySym
+XMonad.Core | xK_comma | xK_comma :: KeySym
+XMonad.Core | xK_copyright | xK_copyright :: KeySym
+XMonad.Core | xK_currency | xK_currency :: KeySym
+XMonad.Core | xK_d | xK_d :: KeySym
+XMonad.Core | xK_degree | xK_degree :: KeySym
+XMonad.Core | xK_diaeresis | xK_diaeresis :: KeySym
+XMonad.Core | xK_division | xK_division :: KeySym
+XMonad.Core | xK_dollar | xK_dollar :: KeySym
+XMonad.Core | xK_e | xK_e :: KeySym
+XMonad.Core | xK_eacute | xK_eacute :: KeySym
+XMonad.Core | xK_ecircumflex | xK_ecircumflex :: KeySym
+XMonad.Core | xK_ediaeresis | xK_ediaeresis :: KeySym
+XMonad.Core | xK_egrave | xK_egrave :: KeySym
+XMonad.Core | xK_equal | xK_equal :: KeySym
+XMonad.Core | xK_eth | xK_eth :: KeySym
+XMonad.Core | xK_exclam | xK_exclam :: KeySym
+XMonad.Core | xK_exclamdown | xK_exclamdown :: KeySym
+XMonad.Core | xK_f | xK_f :: KeySym
+XMonad.Core | xK_g | xK_g :: KeySym
+XMonad.Core | xK_grave | xK_grave :: KeySym
+XMonad.Core | xK_greater | xK_greater :: KeySym
+XMonad.Core | xK_guillemotleft | xK_guillemotleft :: KeySym
+XMonad.Core | xK_guillemotright | xK_guillemotright :: KeySym
+XMonad.Core | xK_h | xK_h :: KeySym
+XMonad.Core | xK_hyphen | xK_hyphen :: KeySym
+XMonad.Core | xK_i | xK_i :: KeySym
+XMonad.Core | xK_iacute | xK_iacute :: KeySym
+XMonad.Core | xK_icircumflex | xK_icircumflex :: KeySym
+XMonad.Core | xK_idiaeresis | xK_idiaeresis :: KeySym
+XMonad.Core | xK_igrave | xK_igrave :: KeySym
+XMonad.Core | xK_j | xK_j :: KeySym
+XMonad.Core | xK_k | xK_k :: KeySym
+XMonad.Core | xK_l | xK_l :: KeySym
+XMonad.Core | xK_less | xK_less :: KeySym
+XMonad.Core | xK_m | xK_m :: KeySym
+XMonad.Core | xK_macron | xK_macron :: KeySym
+XMonad.Core | xK_masculine | xK_masculine :: KeySym
+XMonad.Core | xK_minus | xK_minus :: KeySym
+XMonad.Core | xK_mu | xK_mu :: KeySym
+XMonad.Core | xK_multiply | xK_multiply :: KeySym
+XMonad.Core | xK_n | xK_n :: KeySym
+XMonad.Core | xK_nobreakspace | xK_nobreakspace :: KeySym
+XMonad.Core | xK_notsign | xK_notsign :: KeySym
+XMonad.Core | xK_ntilde | xK_ntilde :: KeySym
+XMonad.Core | xK_numbersign | xK_numbersign :: KeySym
+XMonad.Core | xK_o | xK_o :: KeySym
+XMonad.Core | xK_oacute | xK_oacute :: KeySym
+XMonad.Core | xK_ocircumflex | xK_ocircumflex :: KeySym
+XMonad.Core | xK_odiaeresis | xK_odiaeresis :: KeySym
+XMonad.Core | xK_ograve | xK_ograve :: KeySym
+XMonad.Core | xK_onehalf | xK_onehalf :: KeySym
+XMonad.Core | xK_onequarter | xK_onequarter :: KeySym
+XMonad.Core | xK_onesuperior | xK_onesuperior :: KeySym
+XMonad.Core | xK_ordfeminine | xK_ordfeminine :: KeySym
+XMonad.Core | xK_oslash | xK_oslash :: KeySym
+XMonad.Core | xK_otilde | xK_otilde :: KeySym
+XMonad.Core | xK_p | xK_p :: KeySym
+XMonad.Core | xK_paragraph | xK_paragraph :: KeySym
+XMonad.Core | xK_parenleft | xK_parenleft :: KeySym
+XMonad.Core | xK_parenright | xK_parenright :: KeySym
+XMonad.Core | xK_percent | xK_percent :: KeySym
+XMonad.Core | xK_period | xK_period :: KeySym
+XMonad.Core | xK_periodcentered | xK_periodcentered :: KeySym
+XMonad.Core | xK_plus | xK_plus :: KeySym
+XMonad.Core | xK_plusminus | xK_plusminus :: KeySym
+XMonad.Core | xK_q | xK_q :: KeySym
+XMonad.Core | xK_question | xK_question :: KeySym
+XMonad.Core | xK_questiondown | xK_questiondown :: KeySym
+XMonad.Core | xK_quotedbl | xK_quotedbl :: KeySym
+XMonad.Core | xK_quoteleft | xK_quoteleft :: KeySym
+XMonad.Core | xK_quoteright | xK_quoteright :: KeySym
+XMonad.Core | xK_r | xK_r :: KeySym
+XMonad.Core | xK_registered | xK_registered :: KeySym
+XMonad.Core | xK_s | xK_s :: KeySym
+XMonad.Core | xK_script_switch | xK_script_switch :: KeySym
+XMonad.Core | xK_section | xK_section :: KeySym
+XMonad.Core | xK_semicolon | xK_semicolon :: KeySym
+XMonad.Core | xK_slash | xK_slash :: KeySym
+XMonad.Core | xK_space | xK_space :: KeySym
+XMonad.Core | xK_ssharp | xK_ssharp :: KeySym
+XMonad.Core | xK_sterling | xK_sterling :: KeySym
+XMonad.Core | xK_t | xK_t :: KeySym
+XMonad.Core | xK_thorn | xK_thorn :: KeySym
+XMonad.Core | xK_threequarters | xK_threequarters :: KeySym
+XMonad.Core | xK_threesuperior | xK_threesuperior :: KeySym
+XMonad.Core | xK_twosuperior | xK_twosuperior :: KeySym
+XMonad.Core | xK_u | xK_u :: KeySym
+XMonad.Core | xK_uacute | xK_uacute :: KeySym
+XMonad.Core | xK_ucircumflex | xK_ucircumflex :: KeySym
+XMonad.Core | xK_udiaeresis | xK_udiaeresis :: KeySym
+XMonad.Core | xK_ugrave | xK_ugrave :: KeySym
+XMonad.Core | xK_underscore | xK_underscore :: KeySym
+XMonad.Core | xK_v | xK_v :: KeySym
+XMonad.Core | xK_w | xK_w :: KeySym
+XMonad.Core | xK_x | xK_x :: KeySym
+XMonad.Core | xK_y | xK_y :: KeySym
+XMonad.Core | xK_yacute | xK_yacute :: KeySym
+XMonad.Core | xK_ydiaeresis | xK_ydiaeresis :: KeySym
+XMonad.Core | xK_yen | xK_yen :: KeySym
+XMonad.Core | xK_z | xK_z :: KeySym
 XMonad.Core | xfork | xfork :: MonadIO m => IO () -> m ProcessID
 XMonad.Layout | (|||) | (|||) :: l a -> r a -> Choose l r a
 XMonad.Layout | CLR | data CLR = CL | CR

@@ -1,5 +1,5 @@
 --- src/XMonad/Core.hs	2026-08-06 14:14:13.108989784 -0600
-+++ src-river/XMonad/Core.hs	2026-08-06 18:46:35.436723205 -0600
++++ src-river/XMonad/Core.hs	2026-08-06 18:54:09.504678457 -0600
 @@ -16,13 +16,31 @@
  -- Copyright   :  (c) Spencer Janssen 2007
  -- License     :  BSD3-style (see LICENSE)
@@ -36,7 +36,7 @@
  -----------------------------------------------------------------------------
  
  module XMonad.Core (
-@@ -34,15 +52,32 @@
+@@ -34,15 +52,36 @@
      StateExtension(..), ExtensionClass(..), ConfExtension(..),
      runX, catchX, userCode, userCodeDef, io, catchIO, installSignalHandlers, uninstallSignalHandlers,
      withDisplay, withWindowSet, isRoot, runOnWorkspaces,
@@ -54,6 +54,10 @@
 +    -- has to be able to write @LayoutClass l Window@.
 +    Window, Rectangle(..), Position, Dimension, KeyMask, KeySym, Button,
 +    ButtonMask,
++    shiftMask, lockMask, controlMask, mod1Mask, mod2Mask, mod3Mask, mod4Mask,
++    mod5Mask, noModMask,
++    button1, button2, button3, button4, button5,
++    module XMonad.River.Keysym,
 +    SizeHints(..), noSizeHints,
 +    -- * River plumbing
 +    --
@@ -72,7 +76,7 @@
  import Control.Exception (fromException, try, bracket_, throw, finally, SomeException(..))
  import qualified Control.Exception as E
  import Control.Applicative ((<|>), empty)
-@@ -50,13 +85,16 @@
+@@ -50,13 +89,16 @@
  import Control.Monad.Fix (fix)
  import Control.Monad.State
  import Control.Monad.Reader
@@ -90,7 +94,7 @@
  import Data.List (isInfixOf, intercalate, (\\))
  import System.FilePath
  import System.IO
-@@ -69,8 +107,6 @@
+@@ -69,8 +111,6 @@
  import System.Process
  import System.Directory
  import System.Exit
@@ -99,11 +103,12 @@
  import Data.Typeable
  import Data.Maybe (isJust,fromMaybe)
  import Data.Monoid (Ap(..))
-@@ -78,13 +114,44 @@
+@@ -78,13 +118,45 @@
  import qualified Data.Map as M
  import qualified Data.Set as S
  
 +import XMonad.River.Connection (Connection)
++import XMonad.River.Keysym
 +import XMonad.River.Types
 +import XMonad.River.Wire (ObjectId)
 +
@@ -146,7 +151,7 @@
      , extensibleState  :: !(M.Map String (Either String StateExtension))
      -- ^ stores custom state information.
      --
-@@ -94,11 +161,26 @@
+@@ -94,11 +166,26 @@
  
  -- | XConf, the (read-only) window manager configuration.
  data XConf = XConf
@@ -177,7 +182,7 @@
      , keyActions    :: !(M.Map (KeyMask, KeySym) (X ()))
                                        -- ^ a mapping of key presses to actions
      , buttonActions :: !(M.Map (KeyMask, Button) (Window -> X ()))
-@@ -115,10 +197,10 @@
+@@ -115,10 +202,10 @@
  data XConfig l = XConfig
      { normalBorderColor  :: !String              -- ^ Non focused windows border color. Default: \"#dddddd\"
      , focusedBorderColor :: !String              -- ^ Focused windows border color. Default: \"#ff0000\"
@@ -190,7 +195,7 @@
                                                   -- should also be run afterwards. mappend should be used for combining
                                                   -- event hooks in most cases.
      , workspaces         :: ![String]            -- ^ The list of workspaces' names
-@@ -132,8 +214,6 @@
+@@ -132,8 +219,6 @@
      , startupHook        :: !(X ())              -- ^ The action to perform on startup
      , focusFollowsMouse  :: !Bool                -- ^ Whether window entry events can change focus
      , clickJustFocuses   :: !Bool                -- ^ False to make a click which changes focus to be additionally passed to the window
@@ -199,26 +204,51 @@
      , handleExtraArgs    :: !([String] -> XConfig Layout -> IO (XConfig Layout))
                                                   -- ^ Modify the configuration, complain about extra arguments etc. with arguments that are not handled by default
      , extensibleConf     :: !(M.Map TypeRep ConfExtension)
-@@ -143,6 +223,18 @@
-                                                  -- provides additional information and a simple interface for using this.
+@@ -144,6 +229,43 @@
      }
  
-+-- | Modifier masks and keysyms are numerically identical between X11 and
-+-- xkbcommon, and @river_seat_v1.modifiers@ assigns shift=1, ctrl=4, mod1=8,
-+-- mod3=32, mod4=64, mod5=128 -- exactly X11's values.  So a key description
-+-- like @\"M-S-\<Return\>\"@ means the same thing on both sides, and these are
-+-- plain numbers rather than anything river-specific.
-+type KeyMask = Word32
-+type KeySym  = Word32
-+type Button  = Word32
-+
-+-- | X11 spelled the same type two ways depending on what was being masked.
-+-- Kept so that 'XConfig''s field types read exactly as upstream's do.
-+type ButtonMask = KeyMask
  
++-- | The modifier masks, with X11's values -- which are also river's.
++--
++-- @river_seat_v1.modifiers@ assigns shift=1, ctrl=4, mod1=8, mod3=32, mod4=64,
++-- mod5=128, exactly matching @ShiftMask@ and friends.  This is not a
++-- coincidence to be grateful for so much as the reason the port is possible at
++-- all: it means @mod4Mask@ keeps both its value and its meaning, and a keymap
++-- moves across as data.
++--
++-- 'lockMask' and 'mod2Mask' are the exception.  river has no bit for either --
++-- caps lock and num lock are resolved before the window manager sees a
++-- binding -- so they keep their X11 values for arithmetic that combines masks,
++-- but no binding will ever match on them.  'XMonad.Operations.cleanMask' is
++-- the identity here for the same reason.
++shiftMask, lockMask, controlMask, mod1Mask, mod2Mask, mod3Mask, mod4Mask,
++  mod5Mask, noModMask :: KeyMask
++shiftMask   = 1
++lockMask    = 2
++controlMask = 4
++mod1Mask    = 8
++mod2Mask    = 16
++mod3Mask    = 32
++mod4Mask    = 64
++mod5Mask    = 128
++noModMask   = 0
++
++-- | X11 button numbers.
++--
++-- river's pointer bindings take Linux input event codes instead, so these are
++-- translated at the point of use rather than being the same numbers.  They
++-- keep X11's spelling because that is what a config writes.
++button1, button2, button3, button4, button5 :: Button
++button1 = 1
++button2 = 2
++button3 = 3
++button4 = 4
++button5 = 5
++
  type WindowSet   = StackSet  WorkspaceId (Layout Window) Window ScreenId ScreenDetail
  type WindowSpace = Workspace WorkspaceId (Layout Window) Window
-@@ -223,26 +315,15 @@
+ 
+@@ -223,26 +345,15 @@
  withWindowSet :: (WindowSet -> X a) -> X a
  withWindowSet f = gets windowset >>= f
  
@@ -253,7 +283,7 @@
  
  ------------------------------------------------------------------------
  -- LayoutClass handling. See particular instances in Operations.hs
-@@ -273,20 +354,11 @@
+@@ -273,20 +384,11 @@
  -- * 'description'
  --
  -- Note that any code which /uses/ 'LayoutClass' methods should only
@@ -276,7 +306,7 @@
      runLayout :: Workspace WorkspaceId (layout a) a
                -> Rectangle
                -> X ([(a, Rectangle)], Maybe (layout a))
-@@ -294,25 +366,13 @@
+@@ -294,25 +396,13 @@
  
      -- | Given a 'Rectangle' in which to place the windows, and a 'Stack'
      -- of windows, return a list of windows and their corresponding
@@ -305,7 +335,7 @@
      pureLayout  :: layout a -> Rectangle -> Stack a -> [(a, Rectangle)]
      pureLayout _ r s = [(focus s, r)]
  
-@@ -320,28 +380,17 @@
+@@ -320,28 +410,17 @@
      emptyLayout :: layout a -> Rectangle -> X ([(a, Rectangle)], Maybe (layout a))
      emptyLayout _ _ = return ([], Nothing)
  
@@ -337,7 +367,7 @@
      description :: layout a -> String
      description      = show
  
-@@ -374,7 +423,7 @@
+@@ -374,7 +453,7 @@
  fromMessage :: Message m => SomeMessage -> Maybe m
  fromMessage (SomeMessage m) = cast m
  
@@ -346,7 +376,7 @@
  instance Message Event
  
  -- | 'LayoutMessages' are core messages that all layouts (especially stateful
-@@ -398,11 +447,12 @@
+@@ -398,11 +477,12 @@
      -- | Defines an initial value for the state extension
      initialValue :: a
      -- | Specifies whether the state extension should be
@@ -363,7 +393,7 @@
      extensionType :: a -> StateExtension
      extensionType = StateExtension
  
-@@ -417,6 +467,74 @@
+@@ -417,6 +497,74 @@
  data ConfExtension = forall a. Typeable a => ConfExtension a
  
  -- ---------------------------------------------------------------------
@@ -438,7 +468,7 @@
  -- General utilities
  
  -- | If-then-else lifted to a 'Monad'.
-@@ -459,17 +577,6 @@
+@@ -459,17 +607,6 @@
          dupTo fd stdInput
          closeFd fd
  
@@ -456,7 +486,7 @@
  -- | This is basically a map function, running a function in the 'X' monad on
  -- each workspace with the output of that function being the modified workspace.
  runOnWorkspaces :: (WindowSpace -> X WindowSpace) -> X ()
-@@ -494,7 +601,6 @@
+@@ -494,7 +631,6 @@
  -- * @cacheDir@: This directory is used to store temporary files that
  -- can easily be recreated such as the configuration binary and any
  -- intermediate object files generated by GHC.
@@ -464,7 +494,7 @@
  --
  -- For how these directories are chosen, see 'getDirectories'.
  --
-@@ -521,9 +627,6 @@
+@@ -521,9 +657,6 @@
  --    @XDG_CONFIG_HOME@, and @XDG_CACHE_HOME@ (or their respective
  --    fallbacks).  These directories are created if necessary.
  --
@@ -474,7 +504,7 @@
  getDirectories :: IO Directories
  getDirectories = xmEnvDirs <|> xmDirs <|> xdgDirs
    where
-@@ -574,9 +677,8 @@
+@@ -574,9 +707,8 @@
  binFileName  Directories{ cacheDir } = cacheDir </> "xmonad-" <> arch <> "-" <> os
  buildDirName Directories{ cacheDir } = cacheDir </> "build-" <> arch <> "-" <> os
  
@@ -485,7 +515,7 @@
  
  srcFileName, libFileName :: Directories -> FilePath
  srcFileName Directories{ cfgDir } = cfgDir </> "xmonad.hs"
-@@ -798,6 +900,10 @@
+@@ -798,6 +930,10 @@
  
  -- | Check GHC output for deprecation warnings and notify the user if there
  -- were any. Report success otherwise.
@@ -496,7 +526,7 @@
  checkCompileWarnings :: Directories -> IO ()
  checkCompileWarnings dirs = do
      ghcErr <- readFile (errFileName dirs)
-@@ -808,7 +914,6 @@
+@@ -808,7 +944,6 @@
                  ++ lines ghcErr
                  ++ ["","Please correct them or silence using {-# OPTIONS_GHC -Wno-deprecations #-}."]
          trace msg
@@ -504,7 +534,7 @@
        else
          trace "XMonad recompilation process exited with success!"
  
-@@ -820,10 +925,7 @@
+@@ -820,10 +955,7 @@
              ["Errors detected while compiling xmonad config: " <> srcFileName dirs]
              ++ lines (if null ghcErr then show status else ghcErr)
              ++ ["","Please check the file for errors."]
@@ -515,7 +545,7 @@
  
  -- | Recompile the xmonad configuration file when any of the following apply:
  --
-@@ -836,12 +938,8 @@
+@@ -836,12 +968,8 @@
  --
  --  * custom @build@ script is being used
  --
@@ -529,7 +559,7 @@
  --
  -- 'False' is returned if there are compilation errors.
  --
-@@ -869,8 +967,8 @@
+@@ -869,8 +997,8 @@
  whenX :: X Bool -> X () -> X ()
  whenX a f = a >>= \b -> when b f
  

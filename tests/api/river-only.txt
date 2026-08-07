@@ -42,6 +42,17 @@ RestartRequested     The async exception sendRestart throws into the event loop 
 setMainThread        Records which thread the event loop runs on, so sendRestart can reach it.
 exitSession          Ends the Wayland session.  X11's equivalent was exiting and letting the server notice.
 
+# --- Keysym tables --------------------------------------------------------
+#
+# X11 resolved names to keysyms in the server, so xmonad only ever needed
+# stringToKeysym and keysymToString.  River has no such service -- the wire
+# protocol takes a keysym directly -- so the table has to exist on this side,
+# and exposing it is cheaper than making every caller that wants to enumerate
+# keys go through the two conversion functions one name at a time.
+
+keysymTable          Every keysym, keyed by the name X11 gives it.  Backs stringToKeysym.
+reverseKeysymTable   The inverse, for keysymToString.
+
 # --- Diagnostics ------------------------------------------------------------
 
 warnUnimplemented    Warns once per process where a name must stay but the behaviour is partial.

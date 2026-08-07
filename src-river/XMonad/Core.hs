@@ -63,6 +63,10 @@ module XMonad.Core (
     -- has to be able to write @LayoutClass l Window@.
     Window, Rectangle(..), Position, Dimension, KeyMask, KeySym, Button,
     ButtonMask,
+    shiftMask, lockMask, controlMask, mod1Mask, mod2Mask, mod3Mask, mod4Mask,
+    mod5Mask, noModMask,
+    button1, button2, button3, button4, button5,
+    module XMonad.River.Keysym,
     SizeHints(..), noSizeHints,
     -- * River plumbing
     --
@@ -115,6 +119,7 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 
 import XMonad.River.Connection (Connection)
+import XMonad.River.Keysym
 import XMonad.River.Types
 import XMonad.River.Wire (ObjectId)
 
@@ -223,18 +228,43 @@ data XConfig l = XConfig
                                                  -- provides additional information and a simple interface for using this.
     }
 
--- | Modifier masks and keysyms are numerically identical between X11 and
--- xkbcommon, and @river_seat_v1.modifiers@ assigns shift=1, ctrl=4, mod1=8,
--- mod3=32, mod4=64, mod5=128 -- exactly X11's values.  So a key description
--- like @\"M-S-\<Return\>\"@ means the same thing on both sides, and these are
--- plain numbers rather than anything river-specific.
-type KeyMask = Word32
-type KeySym  = Word32
-type Button  = Word32
 
--- | X11 spelled the same type two ways depending on what was being masked.
--- Kept so that 'XConfig''s field types read exactly as upstream's do.
-type ButtonMask = KeyMask
+-- | The modifier masks, with X11's values -- which are also river's.
+--
+-- @river_seat_v1.modifiers@ assigns shift=1, ctrl=4, mod1=8, mod3=32, mod4=64,
+-- mod5=128, exactly matching @ShiftMask@ and friends.  This is not a
+-- coincidence to be grateful for so much as the reason the port is possible at
+-- all: it means @mod4Mask@ keeps both its value and its meaning, and a keymap
+-- moves across as data.
+--
+-- 'lockMask' and 'mod2Mask' are the exception.  river has no bit for either --
+-- caps lock and num lock are resolved before the window manager sees a
+-- binding -- so they keep their X11 values for arithmetic that combines masks,
+-- but no binding will ever match on them.  'XMonad.Operations.cleanMask' is
+-- the identity here for the same reason.
+shiftMask, lockMask, controlMask, mod1Mask, mod2Mask, mod3Mask, mod4Mask,
+  mod5Mask, noModMask :: KeyMask
+shiftMask   = 1
+lockMask    = 2
+controlMask = 4
+mod1Mask    = 8
+mod2Mask    = 16
+mod3Mask    = 32
+mod4Mask    = 64
+mod5Mask    = 128
+noModMask   = 0
+
+-- | X11 button numbers.
+--
+-- river's pointer bindings take Linux input event codes instead, so these are
+-- translated at the point of use rather than being the same numbers.  They
+-- keep X11's spelling because that is what a config writes.
+button1, button2, button3, button4, button5 :: Button
+button1 = 1
+button2 = 2
+button3 = 3
+button4 = 4
+button5 = 5
 
 type WindowSet   = StackSet  WorkspaceId (Layout Window) Window ScreenId ScreenDetail
 type WindowSpace = Workspace WorkspaceId (Layout Window) Window

@@ -11,6 +11,11 @@ module XMonad.River.Types
     Rectangle(..)
   , Position
   , Dimension
+    -- * Input
+  , KeyMask
+  , KeySym
+  , Button
+  , ButtonMask
     -- * Windows
   , Window
     -- * Events
@@ -48,6 +53,22 @@ data Rectangle = Rectangle
   , rect_width  :: !Dimension
   , rect_height :: !Dimension
   } deriving (Eq, Show, Read)
+
+--------------------------------------------------------------------------------
+-- Input
+
+-- | Modifier masks and keysyms are numerically identical between X11 and
+-- xkbcommon, and @river_seat_v1.modifiers@ assigns shift=1, ctrl=4, mod1=8,
+-- mod3=32, mod4=64, mod5=128 -- exactly X11's values.  So a key description
+-- like @"M-S-\<Return\>"@ means the same thing on both sides, and these are
+-- plain numbers rather than anything river-specific.
+type KeyMask = Word32
+type KeySym  = Word32
+type Button  = Word32
+
+-- | X11 spelled the same type two ways depending on what was being masked.
+-- Kept so that 'XMonad.Core.XConfig''s field types read exactly as upstream's.
+type ButtonMask = KeyMask
 
 --------------------------------------------------------------------------------
 -- Windows

@@ -116,6 +116,7 @@ library
     -- for what they are, and a river-specific contrib module has every reason
     -- to import them.
     exposed-modules: XMonad.River.Connection
+                     XMonad.River.Keysym
                      XMonad.River.Protocol.LayerShell
                      XMonad.River.Protocol.WindowManagement
                      XMonad.River.Protocol.XkbBindings
