@@ -33,7 +33,11 @@ consequences matter:
 
 There is no dependency on `libwayland`. None of the river window management
 protocols pass file descriptors, and fd passing (`SCM_RIGHTS`) is the only part
-of the wire format that genuinely needs C. Serialization uses `store-core`,
+of the wire format that genuinely needs C — so the package carries about a
+hundred lines of it in `cbits/wl-fd.c`, reached through `XMonad.River.Socket`,
+rather than the whole of libwayland. That was forced by drawing: a `wl_buffer`
+comes from a `wl_shm_pool`, which comes from `wl_shm.create_pool`, which takes
+a descriptor. Exactly one request in the drawing path does. Serialization uses `store-core`,
 whose `Poke`/`Peek` are host-endian and 32-bit aligned — exactly Wayland's wire
 format. `binary` and `cereal` are big-endian and would route every field
 through an escape hatch.
