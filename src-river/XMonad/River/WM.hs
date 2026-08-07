@@ -328,7 +328,7 @@ run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs 
         -- from any thread and so cannot run 'X' code itself; it must not
         -- therefore be a restart that quietly loses state.
         runX' (broadcastMessage ReleaseResources >> writeStateToFile)
-        writeIORef restartRef (Just (unwords (map shellQuote (exe : args))))
+        writeIORef restartRef (Just (exe, args))
         riverWindowManagerV1Stop conn manager
         loop
 
@@ -355,16 +355,11 @@ restartTarget = do
   ok <- doesFileExist path
   pure (if ok then Just path else Nothing)
 
--- | Quote an argument for the @sh -c@ used to exec the successor.
-shellQuote :: String -> String
-shellQuote a = "'" ++ concatMap escape a ++ "'"
-  where escape c = if c == '\'' then "'\\''" else [c]
-
 --------------------------------------------------------------------------------
 -- Manager events
 
 onManagerEvent
-  :: Connection -> ObjectId -> IORef (Maybe String) -> Runtime
+  :: Connection -> ObjectId -> IORef (Maybe (FilePath, [String])) -> Runtime
   -> (forall a. X a -> IO a)
   -> RiverWindowManagerV1Event -> IO ()
 onManagerEvent conn manager restartRef rt runX' = \case
@@ -376,7 +371,12 @@ onManagerEvent conn manager restartRef rt runX' = \case
   -- restart rather than a logout.
   RiverWindowManagerV1Finished -> readIORef restartRef >>= \case
     Nothing  -> exitSuccess
-    Just cmd -> executeFile "/bin/sh" False ["-c", cmd] Nothing
+    -- Straight to the successor, with no shell in between.  @sh -c@ execs
+    -- only in the narrowest cases and otherwise forks and waits, so it does
+    -- not disappear the way an exec'd process does -- and since each restart
+    -- would inherit the last one's shell, they nested: four M-q presses, four
+    -- idle dash processes, one inside the next.
+    Just (prog, as) -> executeFile prog True as Nothing
   RiverWindowManagerV1ManageStart -> do
     runX' (manageSequence rt)
     riverWindowManagerV1ManageFinish conn manager

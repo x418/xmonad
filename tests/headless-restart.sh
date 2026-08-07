@@ -73,6 +73,7 @@ RT=$(mktemp -d /tmp/xr.XXXXXX)
 chmod 700 "$RT"
 LOG=$RT/river.log
 WMLOG=$RT/wm.log
+PSLOG=$RT/ps.log
 trap 'rm -rf "$RT"' EXIT
 
 # A data directory of our own, so the state file and the pid file cannot touch
@@ -101,6 +102,11 @@ sleep 6
 # four windows instead of two -- and the counts below catch it.
 "$WM" --restart >> "$WMLOG" 2>&1
 sleep 6
+# What the window manager's process tree looks like once the dust settles.
+# A restart that goes through a shell leaves one behind -- sh -c execs only in
+# the narrowest cases and otherwise forks and waits -- and each restart
+# inherits the last one's, so they nest one per M-q.
+ps -o args= -u "\$(id -u)" > "$PSLOG" 2>/dev/null
 EOF
 chmod +x "$RT/init.sh"
 
@@ -165,6 +171,13 @@ starts=$(grep -c "startup hook skipped" "$WMLOG")
 [ "$starts" -eq 3 ] \
     && report "all three window managers completed a manage sequence ($starts)" ok \
     || report "all three window managers completed a manage sequence (got $starts)" no
+
+# The window manager must be the only process running its own path.  Anything
+# else with that path in its argv is a shell that was left holding it.
+leaked=$(grep -F -- "$WM" "$PSLOG" 2>/dev/null | grep -cF -- "sh -c")
+[ "${leaked:-0}" -eq 0 ] \
+    && report "no shell left behind by the restarts" ok \
+    || report "no shell left behind by the restarts (found ${leaked})" no
 
 backend_trouble=$(grep -nE '^xmonad-river:|protocol error|invalid object' "$WMLOG" 2>/dev/null \
                   | grep -v '^[0-9]*:xmonad-river: note:')

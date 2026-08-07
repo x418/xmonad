@@ -618,7 +618,7 @@ restart cmd resume = do
     ref <- asks riverRestart
     broadcastMessage ReleaseResources
     when resume writeStateToFile
-    io (writeIORef ref (Just cmd))
+    io (writeIORef ref (Just (cmd, [])))
     io (riverWindowManagerV1Stop conn manager)
 
 

@@ -176,8 +176,12 @@ data XConf = XConf
       -- be requested with @manage_dirty@
     , inManageSeq   :: !(IORef Bool)
       -- ^ guards requests river only permits during a manage sequence
-    , riverRestart  :: !(IORef (Maybe String))
-      -- ^ command to exec once river confirms this window manager has stopped
+    , riverRestart  :: !(IORef (Maybe (FilePath, [String])))
+      -- ^ program and arguments to exec once river confirms this window
+      -- manager has stopped.  Not a shell command string: @sh -c@ forks
+      -- rather than execs for anything but the simplest word, so routing the
+      -- restart through a shell left one behind on every @M-q@, each the
+      -- parent of the next.
     , riverMailbox :: !(Mailbox (X ()))
       -- ^ How a thread that is not the event loop gets work done.  X11 let a
       -- background thread post a client message to the root window; there is
