@@ -33,12 +33,13 @@ import Control.Monad.Reader (asks)
 import Control.Monad.State (gets, modify)
 import Data.Bits ((.&.))
 import Data.IORef
-import Data.List (sortOn)
+import Data.List (isSuffixOf, sortOn)
 import Data.Monoid (All(..), appEndo)
 import Data.Int (Int32)
 import Data.Word (Word32)
 import Control.Exception (catch)
 import System.Environment (getArgs, getExecutablePath, lookupEnv)
+import System.Directory (doesFileExist)
 import System.Exit (exitFailure, exitSuccess)
 import System.Posix.Process (executeFile)
 import System.IO (hPutStrLn, stderr)
@@ -287,11 +288,45 @@ run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs 
   -- which interrupts the blocking read. Ask river to release us, then keep
   -- dispatching: the 'finished' event does the exec.
   loop `catch` \RestartRequested -> do
-    exe <- getExecutablePath
-    args <- getArgs
-    writeIORef restartRef (Just (unwords (map shellQuote (exe : args))))
-    riverWindowManagerV1Stop conn manager
-    loop
+    mExe <- restartTarget
+    case mExe of
+      -- Nothing to come back as.  Say so and carry on rather than stopping:
+      -- once river has released this window manager there is no way back, and
+      -- a session with an out-of-date window manager beats a session with
+      -- none.
+      Nothing -> do
+        hPutStrLn stderr
+          "xmonad-river: refusing to restart, the executable is gone; \
+          \still running the old one"
+        loop
+      Just exe -> do
+        args <- getArgs
+        writeIORef restartRef (Just (unwords (map shellQuote (exe : args))))
+        riverWindowManagerV1Stop conn manager
+        loop
+
+-- | What to exec on restart, or 'Nothing' if there is nothing to exec.
+--
+-- 'getExecutablePath' reads @\/proc\/self\/exe@, and Linux appends
+-- @\" (deleted)\"@ to that link once the binary has been replaced -- which is
+-- exactly what installing a new build does, since it links a fresh inode over
+-- the old name.  Passing the literal string through means @sh@ looks for a
+-- file whose name ends in @\" (deleted)\"@, does not find it, and the restart
+-- dies /after/ river has already released the window manager: the session is
+-- left with no window manager at all, no keybindings, and no way to ask for
+-- one.
+--
+-- Stripping the suffix gives the path the new build was installed to, which is
+-- what should be exec'd.  Checked for existence first, because the whole point
+-- is not to tear down a working session for a successor that is not there.
+restartTarget :: IO (Maybe FilePath)
+restartTarget = do
+  raw <- getExecutablePath
+  let suffix = " (deleted)"
+      path | suffix `isSuffixOf` raw = take (length raw - length suffix) raw
+           | otherwise = raw
+  ok <- doesFileExist path
+  pure (if ok then Just path else Nothing)
 
 -- | Quote an argument for the @sh -c@ used to exec the successor.
 shellQuote :: String -> String
