@@ -29,14 +29,36 @@
 -- physically cannot touch the wrong connection.  The window manager's loop is
 -- likewise never blocked: it never waits on this thread, and results come back
 -- through the callbacks the caller supplied.
+-- == Never outliving its thread
+--
+-- A client with @keyboard_interactivity = exclusive@ holds the keyboard for as
+-- long as its surface exists.  If the thread that owns it stops without
+-- destroying it -- an exception anywhere in the loop, in a draw callback, in a
+-- key callback -- the compositor keeps handing every keystroke to a surface
+-- nobody is listening to, and the session has no working keyboard until the
+-- window manager is restarted.  This has happened.
+--
+-- So teardown is not on the success path.  'clientMain' runs inside a handler
+-- that destroys the surface and drops the connection whatever happens, and
+-- dropping the connection is the part that actually guarantees it: a
+-- compositor destroys everything a departed client owned, so even a teardown
+-- that is itself broken cannot leave the keyboard grabbed.
+--
+-- 'closeAllClients' is the last resort, for a client that is wedged rather
+-- than dead.  A config should bind it: river matches xkb bindings /before/ it
+-- consults keyboard focus (see @KeyboardGroup.processKey@), so a window
+-- manager binding still fires while a layer surface holds an exclusive grab,
+-- and is the one thing that can still be pressed when a prompt has stopped
+-- responding.
 module XMonad.River.Client
   ( ClientSpec(..)
   , ClientHandle(..)
   , Anchor(..)
   , startClient
+  , closeAllClients
   ) where
 
-import Control.Concurrent (forkIO)
+import Control.Concurrent (ThreadId, forkIO, killThread, myThreadId)
 import Control.Monad (forM_, unless, void, when)
 import Data.Bits ((.|.))
 import Data.IORef
@@ -51,6 +73,8 @@ import qualified XMonad.River.Mailbox as MB
 import XMonad.River.Protocol.Core
 import XMonad.River.Protocol.LayerShellClient
 import XMonad.River.Wire (ObjectId, nullObject)
+import qualified Data.Map.Strict as M
+import System.IO.Unsafe (unsafePerformIO)
 import XMonad.River.Xkb
 import System.IO (hPutStrLn, stderr)
 import System.Posix.IO (closeFd)
@@ -105,11 +129,54 @@ data ClientHandle = ClientHandle
 startClient :: ClientSpec -> IO ClientHandle
 startClient spec = do
   inbox <- MB.newMailbox
-  void . forkIO $ clientMain spec inbox
+  void . forkIO $ withRegistration (clientMain spec inbox)
   pure ClientHandle
     { chRedraw = MB.post inbox Redraw
     , chClose  = MB.post inbox Close
     }
+
+--------------------------------------------------------------------------------
+-- The register of live clients
+
+-- | Every client thread currently running, so that a wedged one can be killed
+-- from outside.
+--
+-- A process-level 'IORef' for the same reason the geometry tables in
+-- "XMonad.River.Runtime" are: there is one window manager per process, and the
+-- caller that needs this -- a panic keybinding -- has nothing to thread it
+-- through.
+{-# NOINLINE liveClients #-}
+liveClients :: IORef (M.Map ThreadId ())
+liveClients = unsafePerformIO (newIORef M.empty)
+
+-- | Run a client thread, registered for the duration and cleaned up however it
+-- ends.
+withRegistration :: IO () -> IO ()
+withRegistration act = do
+  tid <- myThreadId
+  E.bracket_
+    (modifyIORef' liveClients (M.insert tid ()))
+    (modifyIORef' liveClients (M.delete tid))
+    act
+
+-- | Kill every running client, releasing any keyboard grab they hold.
+--
+-- Returns how many there were.  For a keybinding of last resort: a prompt that
+-- has stopped reading its keyboard leaves the compositor delivering every
+-- keystroke to a surface that will never answer, and no amount of typing at it
+-- helps.  This is what gets the keyboard back without restarting the window
+-- manager.
+--
+-- Killing rather than asking politely is the point.  A request posted to the
+-- client's mailbox is only read if its loop is still running, which is exactly
+-- what is in doubt; 'killThread' raises an asynchronous exception, which
+-- interrupts the blocking wait the loop spends its life in and unwinds through
+-- the handler that destroys the surface and drops the connection.
+closeAllClients :: IO Int
+closeAllClients = do
+  tids <- M.keys <$> readIORef liveClients
+  mapM_ killThread tids
+  pure (length tids)
 
 data Request = Redraw | Close
 
@@ -192,7 +259,10 @@ clientMain spec inbox = do
         _ -> pure ()
 
       flush conn
-      loop spec cl inbox
+      -- Everything above has created a surface that may be holding the
+      -- keyboard.  From here on the only acceptable outcome is that it is
+      -- destroyed, so the loop runs under a handler rather than in the open.
+      loop spec cl inbox `E.finally` shutdown spec cl
 
     _ -> do
       hPutStrLn stderr
@@ -237,8 +307,26 @@ setupKeyboard spec cl seat = do
         Just st -> do
           sym <- keycodeToKeysym st code
           txt <- keycodeToUtf8 st code
-          csOnKey spec sym txt
+          guarded "key handler" (csOnKey spec sym txt)
     _ -> pure ()
+
+-- | Run one of the caller's callbacks without letting it take the client down.
+--
+-- These are the one place arbitrary code runs on this thread: a prompt's key
+-- handler and its draw function come from xmonad-contrib and, through the
+-- completion functions and 'XMonad.Prompt.XPrompt' instances, from the
+-- config.  An exception from any of them used to unwind the whole loop, and
+-- the surface holding the keyboard went with it -- except that it did not go,
+-- it stayed, with nothing left running to service it.
+--
+-- Swallowing is the right call here even though it hides a bug.  A prompt that
+-- misdraws one frame or ignores one keystroke is a nuisance; a session with no
+-- keyboard is not, and there is no third option available at this point.  The
+-- diagnostic names the callback so the nuisance is at least traceable.
+guarded :: String -> IO () -> IO ()
+guarded what act = act `E.catch` \e -> hPutStrLn stderr
+  ("xmonad-river: a prompt's " ++ what ++ " raised: "
+     ++ show (e :: E.SomeException))
 
 -- | Read the keymap out of the descriptor the compositor sent.
 --
@@ -283,25 +371,43 @@ redraw spec cl = do
         fresh <- newBuffer (clConn cl) (clShm cl) w h
         writeIORef (clBuffer cl) (Just fresh)
         pure fresh
-    csDraw spec buf
+    guarded "draw" (csDraw spec buf)
     wlSurfaceAttach (clConn cl) (clSurface cl) (bufObject buf) 0 0
     wlSurfaceDamageBuffer (clConn cl) (clSurface cl) 0 0
       (fromIntegral w) (fromIntegral h)
     wlSurfaceCommit (clConn cl) (clSurface cl)
     flush (clConn cl)
 
+-- | Take the surface down and drop the connection.
+--
+-- Idempotent, because it is reached both from the loop -- a @Close@ request or
+-- the compositor closing the surface -- and from the handler that runs when
+-- the thread ends for any other reason.
+--
+-- Every step is individually guarded.  The steps are ordered cheapest-to-lose
+-- first and 'disconnect' last, because 'disconnect' is the one that cannot
+-- fail to work: whatever this process neglects to destroy, the compositor
+-- destroys when the connection goes -- including the keyboard grab, which is
+-- the thing that must not survive.  Letting an earlier step's exception skip
+-- it would defeat the entire point of calling this from a handler.
 shutdown :: ClientSpec -> Client -> IO ()
 shutdown spec cl = do
   alive <- readIORef (clRunning cl)
   when alive $ do
     writeIORef (clRunning cl) False
-    readIORef (clBuffer cl) >>= mapM_ (destroyBuffer (clConn cl))
-    readIORef (clXkb cl) >>= mapM_ freeXkbState
-    zwlrLayerSurfaceV1Destroy (clConn cl) (clLayer cl)
-    wlSurfaceDestroy (clConn cl) (clSurface cl)
-    flush (clConn cl)
-    disconnect (clConn cl)
-    csOnClose spec
+    let step what act = act `E.catch` \e -> hPutStrLn stderr
+          ("xmonad-river: while closing a prompt (" ++ what ++ "): "
+             ++ show (e :: E.SomeException))
+    step "buffer"  (readIORef (clBuffer cl) >>= mapM_ (destroyBuffer (clConn cl)))
+    step "keymap"  (readIORef (clXkb cl) >>= mapM_ freeXkbState)
+    step "surface" $ do
+      zwlrLayerSurfaceV1Destroy (clConn cl) (clLayer cl)
+      wlSurfaceDestroy (clConn cl) (clSurface cl)
+      flush (clConn cl)
+    step "disconnect" (disconnect (clConn cl))
+    -- Last, and outside the connection teardown: this is the caller's code,
+    -- and the keyboard is already released by the time it runs.
+    step "onClose" (csOnClose spec)
 
 -- | The client's own event loop, on its own thread.
 --

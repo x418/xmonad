@@ -61,6 +61,13 @@ module XMonad.River (
     -- for the answer.  See 'submapNextKey'.
     submapNextKey,
 
+    -- * Getting the keyboard back
+    --
+    -- | A prompt holds the keyboard with an exclusive layer-shell grab.  If it
+    -- stops answering, every keystroke goes to it and nothing can be typed
+    -- anywhere.  This is the way out, and it is worth binding.
+    closeAllPrompts,
+
     -- * Lifecycle
     RestartRequested(..), setMainThread, exitSession,
 
@@ -72,10 +79,12 @@ module XMonad.River (
   ) where
 
 import Data.Bits ((.&.))
+import System.IO (hPutStrLn, stderr)
 import Data.IORef (atomicModifyIORef', readIORef, writeIORef)
 import Data.Maybe (fromMaybe, isJust)
 import Data.Word (Word32)
-import Control.Monad (forM, forM_, when)
+import Control.Concurrent (forkIO, threadDelay)
+import Control.Monad (forM, forM_, void, when)
 import Control.Monad.Reader (ask, asks)
 import qualified Data.Map.Strict as M
 
@@ -84,9 +93,10 @@ import XMonad.Operations (applySizeHintsContents)
 import XMonad.River.Keyboard (riverModifiers)
 import XMonad.River.Keysym.Table (keysymTable, reverseKeysymTable)
 import qualified XMonad.River.Mailbox as MB
+import XMonad.River.Client (closeAllClients)
 import XMonad.River.Protocol.WindowManagement
 import XMonad.River.Protocol.XkbBindings
-import XMonad.River.Runtime (RestartRequested(..), setMainThread, warnUnimplemented)
+import XMonad.River.Runtime (RestartRequested(..), currentSubmapGeneration, nextSubmapGeneration, setMainThread, warnUnimplemented)
 import XMonad.River.Types
 
 -- | Run an action on the event loop, from any thread.
@@ -201,6 +211,30 @@ useClientDecorations w = do
     conn <- asks display
     io (riverWindowV1UseCsd conn w)
 
+-- | Close every prompt, releasing any keyboard grab one is holding.
+--
+-- Bind this.  It is the only thing that reliably gets a wedged session back,
+-- and the reason it works is a detail of river worth knowing: river matches
+-- xkb bindings /before/ it consults keyboard focus, so a window manager
+-- binding still fires while a layer surface holds an exclusive keyboard grab.
+-- A prompt that has stopped reading its keyboard cannot be escaped by typing
+-- at it, but it can still be killed by a binding.
+--
+-- > , ((modMask .|. shiftMask, xK_Escape), closeAllPrompts)
+--
+-- Closing is not polite: the client threads are killed rather than asked, on
+-- the grounds that a thread which is not answering is exactly the case this
+-- exists for.  Each unwinds through its own teardown, so the surfaces go and
+-- the connections drop.  A prompt that was working simply disappears, which is
+-- what pressing an escape hatch should do.
+--
+-- Reports how many were closed, so that pressing it when nothing is stuck says
+-- so rather than appearing to do nothing.
+closeAllPrompts :: X ()
+closeAllPrompts = io $ do
+  n <- closeAllClients
+  hPutStrLn stderr $ "xmonad-river: closed " <> show n <> " prompt(s)"
+
 -- | Read one key press and run the action it selects.
 --
 -- This is what "XMonad.Actions.Submap" is built on, and the reason it lives
@@ -232,6 +266,7 @@ submapNextKey
     -> X ()
 submapNextKey subKeys onUnbound = do
     conf <- ask
+    gen <- io nextSubmapGeneration
     let conn = display conf
         bindingsGlobal = riverBindings conf
     seats <- io (readIORef (riverSeats conf))
@@ -276,3 +311,33 @@ submapNextKey subKeys onUnbound = do
     -- submap key is pressed.
     io $ forM_ (M.elems seats) $ \s ->
         forM_ (rsXkbSeat s) (riverXkbBindingsSeatV1EnsureNextKeyEaten conn)
+
+    -- A deadline, because the alternative to one is a session with no
+    -- keybindings at all.
+    --
+    -- Every one of the config's bindings is disabled for as long as this
+    -- submap is open, and the only things that close it are a submap key and
+    -- @ate_unbound_key@.  If neither arrives -- the compositor offers
+    -- @river_xkb_bindings_v1@ version 1, where @ate_unbound_key@ does not
+    -- exist; or the submap was opened by accident and abandoned; or something
+    -- in the teardown went wrong -- the disabling is permanent, and the only
+    -- way out is to kill the window manager from a TTY.
+    --
+    -- Timing out runs the same action an unknown key does, which is the
+    -- honest reading: no key the submap recognised was pressed.  The delay is
+    -- long enough that no deliberate use reaches it and short enough that the
+    -- mistake is a nuisance rather than the end of the session.
+    io $ void $ forkIO $ do
+        threadDelay submapDeadlineMicros
+        stillOurs <- (== gen) <$> currentSubmapGeneration
+        when stillOurs $ do
+            taken <- atomicModifyIORef' (riverSubmap conf) (\s -> (Nothing, s))
+            forM_ taken $ \abandon -> do
+                hPutStrLn stderr
+                  "xmonad-river: submap abandoned after 60s; restoring bindings"
+                MB.post (riverMailbox conf) abandon
+
+-- | How long a submap may stay open before it gives up and restores the
+-- config's bindings.  See 'submapNextKey'.
+submapDeadlineMicros :: Int
+submapDeadlineMicros = 60 * 1000 * 1000

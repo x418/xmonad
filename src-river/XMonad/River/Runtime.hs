@@ -20,6 +20,8 @@ module XMonad.River.Runtime
   , setBorderColor
   , lookupBorderOverride
   , forgetBorderOverride
+  , nextSubmapGeneration
+  , currentSubmapGeneration
   ) where
 
 import Control.Concurrent (ThreadId, myThreadId)
@@ -112,6 +114,22 @@ lookupBorderOverride w = M.findWithDefault (Nothing, Nothing) w <$> readIORef bo
 -- for.
 forgetBorderOverride :: Window -> IO ()
 forgetBorderOverride w = modifyIORef' bordersRef (M.delete w)
+
+{-# NOINLINE submapGenRef #-}
+submapGenRef :: IORef Int
+submapGenRef = unsafePerformIO (newIORef 0)
+
+-- | Claim the next submap generation, for a submap that is about to open.
+--
+-- Exists so that a submap's abandonment timer can tell whether the submap it
+-- was started for is still the one that is open.  Without it, a timer left
+-- over from a submap that ended normally would cancel whichever submap
+-- happened to be open when it fired.
+nextSubmapGeneration :: IO Int
+nextSubmapGeneration = atomicModifyIORef' submapGenRef (\n -> (n + 1, n + 1))
+
+currentSubmapGeneration :: IO Int
+currentSubmapGeneration = readIORef submapGenRef
 
 -- | Thrown into the event loop thread to ask for a restart.
 data RestartRequested = RestartRequested deriving (Show)
