@@ -67,15 +67,8 @@ module XMonad.Core (
     mod5Mask, noModMask,
     button1, button2, button3, button4, button5,
     module XMonad.River.Keysym,
-    SizeHints(..), noSizeHints,
-    -- * River plumbing
-    --
-    -- $river
-    Event(..), RiverWindow(..), RiverOutput(..), RiverSeat(..),
-    LayerFocus(..), layerHasFocus,
-    Connection, Display, BorderColor,
-    manageDirty, RestartRequested(..), sendRestart, setMainThread,
-    warnUnimplemented,
+    SizeHints(..),
+    Event(..), Connection, Display, sendRestart,
   ) where
 
 import XMonad.StackSet hiding (modify)
@@ -120,13 +113,9 @@ import qualified Data.Set as S
 
 import XMonad.River.Connection (Connection)
 import XMonad.River.Keysym
+import XMonad.River.Runtime (sendRestart)
 import XMonad.River.Types
 import XMonad.River.Wire (ObjectId)
-
--- $river
--- These names have no X11 counterpart.  They are exported because a river
--- config legitimately needs them -- 'sendRestart' is what makes @M-q@ work --
--- not as a compatibility surface.
 
 -- | The handle through which the window manager talks to the compositor.
 --
@@ -141,14 +130,6 @@ import XMonad.River.Wire (ObjectId)
 -- Those names are simply absent, so such code fails at the call that is
 -- genuinely unportable rather than here.
 type Display = Connection
-
--- | An RGBA border colour, in the 32-bit-per-channel form
--- @river_window_v1.set_borders@ takes.
---
--- X11 stored a 'Pixel' resolved against the window's colormap.  Wayland has no
--- colormaps and no pixel values, so the honest representation is the one the
--- protocol asks for.
-type BorderColor = (Word32, Word32, Word32, Word32)
 
 -- | XState, the (mutable) window manager state.
 data XState = XState
@@ -495,74 +476,6 @@ data StateExtension =
 
 -- | Existential type to store a config extension.
 data ConfExtension = forall a. Typeable a => ConfExtension a
-
--- ---------------------------------------------------------------------
--- River plumbing
-
--- | Ask the compositor to start a manage sequence, because state it cannot see
--- has changed.
---
--- This is what makes actions triggered from forked threads and timers take
--- effect: river only permits window management state to change during a manage
--- sequence, so something has to ask for one.
-manageDirty :: X ()
-manageDirty = do
-  ref <- asks riverDirty
-  io (writeIORef ref True)
-
--- | Thrown into the event loop thread to ask for a restart.
-data RestartRequested = RestartRequested deriving (Show)
-
-instance E.Exception RestartRequested
-
-{-# NOINLINE mainThreadRef #-}
-mainThreadRef :: IORef (Maybe ThreadId)
-mainThreadRef = unsafePerformIO (newIORef Nothing)
-
--- | Record the thread running the event loop, so 'sendRestart' can reach it.
-setMainThread :: IO ()
-setMainThread = writeIORef mainThreadRef . Just =<< myThreadId
-
--- | Ask the window manager to restart itself, from any thread.
---
--- This exists for the same reason xmonad's does: @restart@ runs in 'X', which
--- is a 'StateT' over the event loop's own state, so a forked thread cannot call
--- it -- and @M-q@ typically forks to run a rebuild script and then wants a
--- restart.
---
--- xmonad solved it by posting a client message to the X11 event queue.  There
--- is no equivalent queue here, but Haskell offers something better: an
--- asynchronous exception thrown into the event loop's thread.  Under the
--- threaded runtime the loop's blocking socket read is interruptible, so this
--- takes effect immediately rather than at the next event.
-sendRestart :: IO ()
-sendRestart = readIORef mainThreadRef >>= \case
-  Just tid -> E.throwTo tid RestartRequested
-  Nothing -> hPutStrLn stderr
-    "xmonad-river: sendRestart called before the event loop started"
-
--- | Complain, once per process, that something is doing less than it says.
---
--- The rule in this backend is that anything which cannot be faithfully ported
--- is not exported at all, so this is deliberately rare -- it is for the cases
--- where the name must stay because it is load-bearing in shared code, but the
--- behaviour is partial.  Silence would be the wrong default: a rule that never
--- fires looks like a bug in the config, and the person debugging it has no
--- reason to suspect the backend.
-warnUnimplemented
-  :: MonadIO m
-  => String  -- ^ what is partial, e.g. @"mouseDrag"@
-  -> String  -- ^ what happens instead, and what to do about it
-  -> m ()
-warnUnimplemented name explanation = io $ do
-  already <- atomicModifyIORef' warnedRef $ \seen ->
-    (S.insert name seen, S.member name seen)
-  unless already $
-    hPutStrLn stderr ("xmonad-river: " ++ name ++ " is not implemented. " ++ explanation)
-
-{-# NOINLINE warnedRef #-}
-warnedRef :: IORef (S.Set String)
-warnedRef = unsafePerformIO (newIORef S.empty)
 
 -- ---------------------------------------------------------------------
 -- General utilities

@@ -17,10 +17,14 @@
 #      The second half matters as much as the first: a stale entry means the
 #      file is describing a backend that no longer exists.
 #
-#   2. Every name river exports that X11 has no counterpart for is justified in
-#      river-only.txt, in both directions likewise.  The comparison is against
-#      the union of X11's own surface and its Graphics.X11 re-exports, so a
-#      name that merely moves between those two files is not flagged.
+#   2. River's eight modules add *nothing* to xmonad's API.  Everything the
+#      river backend offers that xmonad does not lives in XMonad.River, which
+#      this check does not look at -- so a config importing XMonad sees exactly
+#      the names the X11 build offers, minus the unportable ones, and never
+#      more.  A river-specific name appearing in XMonad.Core is a failure whose
+#      fix is to move it to XMonad.River.  The comparison is against the union
+#      of X11's own surface and its Graphics.X11 re-exports, so a name that
+#      merely moves between those two files is not flagged.
 #
 #   3. River re-exports nothing from a Graphics.X11-shaped compat surface.
 #      This is the positive form of the rule the whole backend is built on:
@@ -57,7 +61,6 @@ comm -23 "$tmp/x11-api"  "$tmp/river-api" > "$tmp/missing"
 comm -13 "$tmp/x11-all"  "$tmp/river-api" > "$tmp/added"
 
 listed "$api/unportable.txt" > "$tmp/unportable"
-listed "$api/river-only.txt" > "$tmp/river-only"
 
 status=0
 
@@ -84,8 +87,14 @@ report() {
 
 report "names dropped by river" "$tmp/missing" "$tmp/unportable" \
        "$api/unportable.txt" "not actually dropped"
-report "names added by river"   "$tmp/added"   "$tmp/river-only" \
-       "$api/river-only.txt" "not actually exported"
+
+if [ -s "$tmp/added" ]; then
+    echo "check-subset: these have no X11 counterpart and belong in XMonad.River:" >&2
+    sed 's/^/  /' "$tmp/added" >&2
+    status=1
+else
+    printf 'check-subset: %-34s OK (0)\n' "names added by river"
+fi
 
 if [ -s "$river_reexports" ]; then
     echo "check-subset: river re-exports an X11-shaped compat surface:" >&2

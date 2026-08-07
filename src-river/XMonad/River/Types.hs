@@ -9,6 +9,7 @@
 module XMonad.River.Types
   ( -- * Geometry
     Rectangle(..)
+  , BorderColor
   , Position
   , Dimension
     -- * Input
@@ -53,6 +54,14 @@ data Rectangle = Rectangle
   , rect_width  :: !Dimension
   , rect_height :: !Dimension
   } deriving (Eq, Show, Read)
+
+-- | An RGBA border colour, in the 32-bit-per-channel form
+-- @river_window_v1.set_borders@ takes.
+--
+-- X11 stored a 'Pixel' resolved against the window's colormap.  Wayland has no
+-- colormaps and no pixel values, so the honest representation is the one the
+-- protocol asks for.
+type BorderColor = (Word32, Word32, Word32, Word32)
 
 --------------------------------------------------------------------------------
 -- Input

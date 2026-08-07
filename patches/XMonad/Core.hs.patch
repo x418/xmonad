@@ -1,5 +1,5 @@
 --- src/XMonad/Core.hs	2026-08-06 14:14:13.108989784 -0600
-+++ src-river/XMonad/Core.hs	2026-08-06 18:54:09.504678457 -0600
++++ src-river/XMonad/Core.hs	2026-08-06 21:10:41.439324037 -0600
 @@ -16,13 +16,31 @@
  -- Copyright   :  (c) Spencer Janssen 2007
  -- License     :  BSD3-style (see LICENSE)
@@ -36,7 +36,7 @@
  -----------------------------------------------------------------------------
  
  module XMonad.Core (
-@@ -34,15 +52,36 @@
+@@ -34,15 +52,29 @@
      StateExtension(..), ExtensionClass(..), ConfExtension(..),
      runX, catchX, userCode, userCodeDef, io, catchIO, installSignalHandlers, uninstallSignalHandlers,
      withDisplay, withWindowSet, isRoot, runOnWorkspaces,
@@ -58,15 +58,8 @@
 +    mod5Mask, noModMask,
 +    button1, button2, button3, button4, button5,
 +    module XMonad.River.Keysym,
-+    SizeHints(..), noSizeHints,
-+    -- * River plumbing
-+    --
-+    -- $river
-+    Event(..), RiverWindow(..), RiverOutput(..), RiverSeat(..),
-+    LayerFocus(..), layerHasFocus,
-+    Connection, Display, BorderColor,
-+    manageDirty, RestartRequested(..), sendRestart, setMainThread,
-+    warnUnimplemented,
++    SizeHints(..),
++    Event(..), Connection, Display, sendRestart,
    ) where
  
  import XMonad.StackSet hiding (modify)
@@ -76,7 +69,7 @@
  import Control.Exception (fromException, try, bracket_, throw, finally, SomeException(..))
  import qualified Control.Exception as E
  import Control.Applicative ((<|>), empty)
-@@ -50,13 +89,16 @@
+@@ -50,13 +82,16 @@
  import Control.Monad.Fix (fix)
  import Control.Monad.State
  import Control.Monad.Reader
@@ -94,7 +87,7 @@
  import Data.List (isInfixOf, intercalate, (\\))
  import System.FilePath
  import System.IO
-@@ -69,8 +111,6 @@
+@@ -69,8 +104,6 @@
  import System.Process
  import System.Directory
  import System.Exit
@@ -103,19 +96,15 @@
  import Data.Typeable
  import Data.Maybe (isJust,fromMaybe)
  import Data.Monoid (Ap(..))
-@@ -78,13 +118,45 @@
+@@ -78,13 +111,33 @@
  import qualified Data.Map as M
  import qualified Data.Set as S
  
 +import XMonad.River.Connection (Connection)
 +import XMonad.River.Keysym
++import XMonad.River.Runtime (sendRestart)
 +import XMonad.River.Types
 +import XMonad.River.Wire (ObjectId)
-+
-+-- $river
-+-- These names have no X11 counterpart.  They are exported because a river
-+-- config legitimately needs them -- 'sendRestart' is what makes @M-q@ work --
-+-- not as a compatibility surface.
 +
 +-- | The handle through which the window manager talks to the compositor.
 +--
@@ -131,14 +120,6 @@
 +-- genuinely unportable rather than here.
 +type Display = Connection
 +
-+-- | An RGBA border colour, in the 32-bit-per-channel form
-+-- @river_window_v1.set_borders@ takes.
-+--
-+-- X11 stored a 'Pixel' resolved against the window's colormap.  Wayland has no
-+-- colormaps and no pixel values, so the honest representation is the one the
-+-- protocol asks for.
-+type BorderColor = (Word32, Word32, Word32, Word32)
-+
  -- | XState, the (mutable) window manager state.
  data XState = XState
      { windowset        :: !WindowSet                     -- ^ workspace list
@@ -151,7 +132,7 @@
      , extensibleState  :: !(M.Map String (Either String StateExtension))
      -- ^ stores custom state information.
      --
-@@ -94,11 +166,26 @@
+@@ -94,11 +147,26 @@
  
  -- | XConf, the (read-only) window manager configuration.
  data XConf = XConf
@@ -182,7 +163,7 @@
      , keyActions    :: !(M.Map (KeyMask, KeySym) (X ()))
                                        -- ^ a mapping of key presses to actions
      , buttonActions :: !(M.Map (KeyMask, Button) (Window -> X ()))
-@@ -115,10 +202,10 @@
+@@ -115,10 +183,10 @@
  data XConfig l = XConfig
      { normalBorderColor  :: !String              -- ^ Non focused windows border color. Default: \"#dddddd\"
      , focusedBorderColor :: !String              -- ^ Focused windows border color. Default: \"#ff0000\"
@@ -195,7 +176,7 @@
                                                   -- should also be run afterwards. mappend should be used for combining
                                                   -- event hooks in most cases.
      , workspaces         :: ![String]            -- ^ The list of workspaces' names
-@@ -132,8 +219,6 @@
+@@ -132,8 +200,6 @@
      , startupHook        :: !(X ())              -- ^ The action to perform on startup
      , focusFollowsMouse  :: !Bool                -- ^ Whether window entry events can change focus
      , clickJustFocuses   :: !Bool                -- ^ False to make a click which changes focus to be additionally passed to the window
@@ -204,7 +185,7 @@
      , handleExtraArgs    :: !([String] -> XConfig Layout -> IO (XConfig Layout))
                                                   -- ^ Modify the configuration, complain about extra arguments etc. with arguments that are not handled by default
      , extensibleConf     :: !(M.Map TypeRep ConfExtension)
-@@ -144,6 +229,43 @@
+@@ -144,6 +210,43 @@
      }
  
  
@@ -248,7 +229,7 @@
  type WindowSet   = StackSet  WorkspaceId (Layout Window) Window ScreenId ScreenDetail
  type WindowSpace = Workspace WorkspaceId (Layout Window) Window
  
-@@ -223,26 +345,15 @@
+@@ -223,26 +326,15 @@
  withWindowSet :: (WindowSet -> X a) -> X a
  withWindowSet f = gets windowset >>= f
  
@@ -283,7 +264,7 @@
  
  ------------------------------------------------------------------------
  -- LayoutClass handling. See particular instances in Operations.hs
-@@ -273,20 +384,11 @@
+@@ -273,20 +365,11 @@
  -- * 'description'
  --
  -- Note that any code which /uses/ 'LayoutClass' methods should only
@@ -306,7 +287,7 @@
      runLayout :: Workspace WorkspaceId (layout a) a
                -> Rectangle
                -> X ([(a, Rectangle)], Maybe (layout a))
-@@ -294,25 +396,13 @@
+@@ -294,25 +377,13 @@
  
      -- | Given a 'Rectangle' in which to place the windows, and a 'Stack'
      -- of windows, return a list of windows and their corresponding
@@ -335,7 +316,7 @@
      pureLayout  :: layout a -> Rectangle -> Stack a -> [(a, Rectangle)]
      pureLayout _ r s = [(focus s, r)]
  
-@@ -320,28 +410,17 @@
+@@ -320,28 +391,17 @@
      emptyLayout :: layout a -> Rectangle -> X ([(a, Rectangle)], Maybe (layout a))
      emptyLayout _ _ = return ([], Nothing)
  
@@ -367,7 +348,7 @@
      description :: layout a -> String
      description      = show
  
-@@ -374,7 +453,7 @@
+@@ -374,7 +434,7 @@
  fromMessage :: Message m => SomeMessage -> Maybe m
  fromMessage (SomeMessage m) = cast m
  
@@ -376,7 +357,7 @@
  instance Message Event
  
  -- | 'LayoutMessages' are core messages that all layouts (especially stateful
-@@ -398,11 +477,12 @@
+@@ -398,11 +458,12 @@
      -- | Defines an initial value for the state extension
      initialValue :: a
      -- | Specifies whether the state extension should be
@@ -393,82 +374,7 @@
      extensionType :: a -> StateExtension
      extensionType = StateExtension
  
-@@ -417,6 +497,74 @@
- data ConfExtension = forall a. Typeable a => ConfExtension a
- 
- -- ---------------------------------------------------------------------
-+-- River plumbing
-+
-+-- | Ask the compositor to start a manage sequence, because state it cannot see
-+-- has changed.
-+--
-+-- This is what makes actions triggered from forked threads and timers take
-+-- effect: river only permits window management state to change during a manage
-+-- sequence, so something has to ask for one.
-+manageDirty :: X ()
-+manageDirty = do
-+  ref <- asks riverDirty
-+  io (writeIORef ref True)
-+
-+-- | Thrown into the event loop thread to ask for a restart.
-+data RestartRequested = RestartRequested deriving (Show)
-+
-+instance E.Exception RestartRequested
-+
-+{-# NOINLINE mainThreadRef #-}
-+mainThreadRef :: IORef (Maybe ThreadId)
-+mainThreadRef = unsafePerformIO (newIORef Nothing)
-+
-+-- | Record the thread running the event loop, so 'sendRestart' can reach it.
-+setMainThread :: IO ()
-+setMainThread = writeIORef mainThreadRef . Just =<< myThreadId
-+
-+-- | Ask the window manager to restart itself, from any thread.
-+--
-+-- This exists for the same reason xmonad's does: @restart@ runs in 'X', which
-+-- is a 'StateT' over the event loop's own state, so a forked thread cannot call
-+-- it -- and @M-q@ typically forks to run a rebuild script and then wants a
-+-- restart.
-+--
-+-- xmonad solved it by posting a client message to the X11 event queue.  There
-+-- is no equivalent queue here, but Haskell offers something better: an
-+-- asynchronous exception thrown into the event loop's thread.  Under the
-+-- threaded runtime the loop's blocking socket read is interruptible, so this
-+-- takes effect immediately rather than at the next event.
-+sendRestart :: IO ()
-+sendRestart = readIORef mainThreadRef >>= \case
-+  Just tid -> E.throwTo tid RestartRequested
-+  Nothing -> hPutStrLn stderr
-+    "xmonad-river: sendRestart called before the event loop started"
-+
-+-- | Complain, once per process, that something is doing less than it says.
-+--
-+-- The rule in this backend is that anything which cannot be faithfully ported
-+-- is not exported at all, so this is deliberately rare -- it is for the cases
-+-- where the name must stay because it is load-bearing in shared code, but the
-+-- behaviour is partial.  Silence would be the wrong default: a rule that never
-+-- fires looks like a bug in the config, and the person debugging it has no
-+-- reason to suspect the backend.
-+warnUnimplemented
-+  :: MonadIO m
-+  => String  -- ^ what is partial, e.g. @"mouseDrag"@
-+  -> String  -- ^ what happens instead, and what to do about it
-+  -> m ()
-+warnUnimplemented name explanation = io $ do
-+  already <- atomicModifyIORef' warnedRef $ \seen ->
-+    (S.insert name seen, S.member name seen)
-+  unless already $
-+    hPutStrLn stderr ("xmonad-river: " ++ name ++ " is not implemented. " ++ explanation)
-+
-+{-# NOINLINE warnedRef #-}
-+warnedRef :: IORef (S.Set String)
-+warnedRef = unsafePerformIO (newIORef S.empty)
-+
-+-- ---------------------------------------------------------------------
- -- General utilities
- 
- -- | If-then-else lifted to a 'Monad'.
-@@ -459,17 +607,6 @@
+@@ -459,17 +520,6 @@
          dupTo fd stdInput
          closeFd fd
  
@@ -486,7 +392,7 @@
  -- | This is basically a map function, running a function in the 'X' monad on
  -- each workspace with the output of that function being the modified workspace.
  runOnWorkspaces :: (WindowSpace -> X WindowSpace) -> X ()
-@@ -494,7 +631,6 @@
+@@ -494,7 +544,6 @@
  -- * @cacheDir@: This directory is used to store temporary files that
  -- can easily be recreated such as the configuration binary and any
  -- intermediate object files generated by GHC.
@@ -494,7 +400,7 @@
  --
  -- For how these directories are chosen, see 'getDirectories'.
  --
-@@ -521,9 +657,6 @@
+@@ -521,9 +570,6 @@
  --    @XDG_CONFIG_HOME@, and @XDG_CACHE_HOME@ (or their respective
  --    fallbacks).  These directories are created if necessary.
  --
@@ -504,7 +410,7 @@
  getDirectories :: IO Directories
  getDirectories = xmEnvDirs <|> xmDirs <|> xdgDirs
    where
-@@ -574,9 +707,8 @@
+@@ -574,9 +620,8 @@
  binFileName  Directories{ cacheDir } = cacheDir </> "xmonad-" <> arch <> "-" <> os
  buildDirName Directories{ cacheDir } = cacheDir </> "build-" <> arch <> "-" <> os
  
@@ -515,7 +421,7 @@
  
  srcFileName, libFileName :: Directories -> FilePath
  srcFileName Directories{ cfgDir } = cfgDir </> "xmonad.hs"
-@@ -798,6 +930,10 @@
+@@ -798,6 +843,10 @@
  
  -- | Check GHC output for deprecation warnings and notify the user if there
  -- were any. Report success otherwise.
@@ -526,7 +432,7 @@
  checkCompileWarnings :: Directories -> IO ()
  checkCompileWarnings dirs = do
      ghcErr <- readFile (errFileName dirs)
-@@ -808,7 +944,6 @@
+@@ -808,7 +857,6 @@
                  ++ lines ghcErr
                  ++ ["","Please correct them or silence using {-# OPTIONS_GHC -Wno-deprecations #-}."]
          trace msg
@@ -534,7 +440,7 @@
        else
          trace "XMonad recompilation process exited with success!"
  
-@@ -820,10 +955,7 @@
+@@ -820,10 +868,7 @@
              ["Errors detected while compiling xmonad config: " <> srcFileName dirs]
              ++ lines (if null ghcErr then show status else ghcErr)
              ++ ["","Please check the file for errors."]
@@ -545,7 +451,7 @@
  
  -- | Recompile the xmonad configuration file when any of the following apply:
  --
-@@ -836,12 +968,8 @@
+@@ -836,12 +881,8 @@
  --
  --  * custom @build@ script is being used
  --
@@ -559,7 +465,7 @@
  --
  -- 'False' is returned if there are compilation errors.
  --
-@@ -869,8 +997,8 @@
+@@ -869,8 +910,8 @@
  whenX :: X Bool -> X () -> X ()
  whenX a f = a >>= \b -> when b f
  

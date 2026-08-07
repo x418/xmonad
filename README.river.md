@@ -85,15 +85,19 @@ that error learns something true. A no-op that typechecks teaches them nothing
 until the behaviour is missing at runtime, by which point the backend is the
 last place they will look.
 
-The consequence is that river's API is deliberately a strict subset: 44 names
-the X11 build exports are gone, and the 1458 names `XMonad` re-exports from
-`Graphics.X11` are not re-exported at all. Every one of those omissions is
-justified by name in [`tests/api/unportable.txt`](tests/api/unportable.txt), and
-the 11 river-native additions in
-[`tests/api/river-only.txt`](tests/api/river-only.txt).
-`tests/api/check-subset.sh` requires both lists to match exactly, in both
-directions — a name dropped without an entry fails, and so does a stale entry
-for a name river has since grown.
+The consequence is that river's API is a strict subset in both directions. 26
+names the X11 build exports are gone, each justified by name in
+[`tests/api/unportable.txt`](tests/api/unportable.txt); the 1458 names `XMonad`
+re-exports from `Graphics.X11` are not re-exported at all; and river's eight
+modules add **nothing**. Everything river offers that xmonad does not lives in
+`XMonad.River`, so a config importing `XMonad` sees exactly the names the X11
+build offers minus the unportable ones, and never more. Importing
+`XMonad.River` is a config saying explicitly that it is a river config.
+
+`tests/api/check-subset.sh` enforces all three: a dropped name without an entry
+fails, a stale entry for a name river has since grown fails, and a
+river-specific name appearing in `XMonad.Core` fails with the fix named — move
+it to `XMonad.River`.
 
 This is a real cost, and it falls on xmonad-contrib: a contrib module that
 touches `withDisplay`, size hints, or window properties will not compile against
@@ -117,6 +121,11 @@ this backend. That is the intended outcome, not a regression to be papered over.
 | `M-q` | `sendRestart` throws an async exception into the event loop thread; the loop does `stop` → `finished` → `exec`. river keeps every client alive across the swap. |
 
 ## Known gaps
+
+[`GAPS.md`](GAPS.md) covers what the working prototype this was rewritten from
+learned by actually running: the missing reference window manager, the headless
+test recipe, the hazard of blocking the event loop, that CI never builds this
+backend at all, and the session integration `INSTALL.md` says nothing about.
 
 - **Nothing has run against a live river.** See the status line at the top.
 - **Interactive move and resize are unbound.** river drives these through the

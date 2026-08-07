@@ -46,6 +46,7 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
 import XMonad.Core
+import XMonad.River.Runtime (RestartRequested(..), setMainThread, warnUnimplemented)
 import XMonad.River.Connection
 import XMonad.River.Protocol.WindowManagement
 import XMonad.River.Protocol.LayerShell

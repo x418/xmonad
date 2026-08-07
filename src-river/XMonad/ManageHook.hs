@@ -48,6 +48,7 @@ import qualified Data.ByteString.Char8 as BC
 import qualified Data.Map as M
 
 import XMonad.Core
+import XMonad.River.Types
 import XMonad.Operations (floatLocation, reveal)
 import qualified XMonad.StackSet as W
 

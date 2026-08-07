@@ -66,7 +66,7 @@ module XMonad.Operations (
     mouseDrag, mouseMoveWindow, mouseResizeWindow,
 
     -- * Lifecycle
-    restart, exitSession,
+    restart,
 
     -- * Other Utilities
     pointScreen, screenWorkspace,
@@ -74,6 +74,7 @@ module XMonad.Operations (
     ) where
 
 import XMonad.Core
+import XMonad.River.Types
 import XMonad.River.Protocol.WindowManagement
 import qualified XMonad.StackSet as W
 
@@ -495,12 +496,6 @@ restart cmd _resume = do
     io (writeIORef ref (Just cmd))
     io (riverWindowManagerV1Stop conn manager)
 
--- | End the Wayland session, taking the compositor with it.
-exitSession :: X ()
-exitSession = do
-    conn <- asks display
-    manager <- asks riverManager
-    io (riverWindowManagerV1ExitSession conn manager)
 
 -- ---------------------------------------------------------------------
 -- Support for window size hints

@@ -37,6 +37,7 @@ import Paths_xmonad (version)
 import Data.Version (showVersion)
 
 import XMonad.Core
+import XMonad.River.Runtime (sendRestart)
 import XMonad.River.WM (riverMain)
 
 ------------------------------------------------------------------------

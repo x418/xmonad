@@ -42,6 +42,7 @@ import qualified XMonad.Core as XMonad
 
 import XMonad.Layout
 import XMonad.Operations
+import XMonad.River (exitSession)
 import XMonad.ManageHook
 import qualified XMonad.StackSet as W
 import Data.Bits ((.|.))
