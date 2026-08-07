@@ -34,6 +34,7 @@ import Control.Monad.State (gets, modify)
 import Data.Bits ((.&.))
 import Data.IORef
 import Data.List (isSuffixOf, sortOn)
+import Data.Maybe (isNothing)
 import Data.Monoid (All(..), appEndo)
 import Data.Int (Int32)
 import Data.Word (Word32)
@@ -48,7 +49,7 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
 import XMonad.Core
-import XMonad.Operations (StateFile (..), broadcastMessage, readStateFile, writeStateToFile)
+import XMonad.Operations (StateFile (..), broadcastMessage, focus, readStateFile, writeStateToFile)
 import XMonad.River.Runtime (RestartRequested(..), pidFilePath, publishGeometry, publishSizeHints, sendRestart, setMainThread, warnUnimplemented)
 import XMonad.River.Connection
 import XMonad.River.Keyboard (riverModifiers)
@@ -91,6 +92,12 @@ data Runtime = Runtime
     -- request a manage sequence with @manage_dirty@.
   , rtConn        :: !Connection
     -- ^ Likewise: 'queueAction' has to ask for the sequence it queued into.
+  , rtFollowsMouse :: !Bool
+    -- ^ The config's 'focusFollowsMouse', copied here because @pointer_enter@
+    -- is handled in 'IO' with no 'XConf' to consult -- and consulting it from
+    -- a queued action would be too late: queueing at all asks river for a
+    -- manage sequence, so a config with this off would pay for one on every
+    -- pointer crossing.  Safe to snapshot: it cannot change without a restart.
   , rtStartupDone :: !(IORef Bool)
   , rtRestored    :: !(IORef Bool)
     -- ^ Whether the state file left by a previous window manager has been read
@@ -181,6 +188,7 @@ run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs 
           <*> newIORef Nothing
           <*> pure manager
           <*> pure conn
+          <*> pure (focusFollowsMouse userConfig)
           <*> newIORef False
           <*> newIORef False
           <*> pure layerShell
@@ -509,7 +517,23 @@ addSeat rt seat = do
 
   io $ riverSeatV1Listen conn seat $ \case
     RiverSeatV1Removed -> adjust ref seat $ \s -> s { rsRemoved = True }
-    RiverSeatV1PointerEnter win -> writeIORef (rtHovered rt) (Just win)
+    -- @pointer_enter@ is river's equivalent of X11's @EnterNotify@, and is
+    -- what makes 'focusFollowsMouse' work.  X11 checked @ev_mode ==
+    -- notifyNormal@ to ignore the crossings a grab synthesises; river sends
+    -- this only for genuine pointer movement, so there is nothing to filter.
+    RiverSeatV1PointerEnter win -> do
+      writeIORef (rtHovered rt) (Just win)
+      when (rtFollowsMouse rt) $ queueAction rt $ do
+        -- Both conditions are about the delay.  The action runs at the start
+        -- of the next manage sequence rather than now, so the pointer may
+        -- have moved on -- refocusing to where it used to be would fight the
+        -- crossing that has already been queued behind this one.  And a drag
+        -- in progress owns the focus outright: X11 held a pointer grab for
+        -- the duration, which suppressed crossing events entirely, and there
+        -- is no grab here to do it.
+        stillThere <- io ((== Just win) <$> readIORef (rtHovered rt))
+        drag <- gets dragging
+        when (stillThere && isNothing drag) (focus win)
     RiverSeatV1PointerLeave -> writeIORef (rtHovered rt) Nothing
     RiverSeatV1PointerPosition x y ->
       adjust ref seat $ \s -> s { rsPointer = (x, y) }
