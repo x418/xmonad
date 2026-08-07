@@ -118,6 +118,7 @@ library
     exposed-modules: XMonad.River
                      XMonad.River.Buffer
                      XMonad.River.Connection
+                     XMonad.River.Keyboard
                      XMonad.River.Keysym
                      XMonad.River.Keysym.Table
                      XMonad.River.Mailbox
