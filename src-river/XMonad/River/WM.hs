@@ -1052,9 +1052,12 @@ renderSequence rt = do
     -- 'XMonad.Core.setWindowBorderWidth'.
     (mWidth, mColor) <- io (lookupBorderOverride win)
     let width = fromMaybe bw mWidth
+        -- Widened here rather than stored widened: the colours a config and
+        -- contrib deal in are Pixels, as they were under X11, and the RGBA
+        -- quadruple is the wire format rather than the vocabulary.
         (red, green, blue, alpha) = case mColor of
           Just c  -> c
-          Nothing -> if Just win == mFocus then focusedCol else normalCol
+          Nothing -> pixelColor (if Just win == mFocus then focusedCol else normalCol)
     -- Unconditional, where this used to skip a zero width entirely: an
     -- override *to* zero is how NoBorders removes a border, and skipping the
     -- request would leave the previous one standing.  river reads width 0 as

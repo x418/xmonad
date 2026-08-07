@@ -69,6 +69,8 @@ XMonad | MonadReader | class Monad m => MonadReader r m | m -> r where ask :: m 
 XMonad | MonadReader | type MonadReader :: * -> (* -> *) -> Constraint
 XMonad | MonadState | class Monad m => MonadState s m | m -> s where get :: m s put :: s -> m () state :: (s -> (a, s)) -> m a {-# MINIMAL state | get, put #-}
 XMonad | MonadState | type MonadState :: * -> (* -> *) -> Constraint
+XMonad | Pixel | type Pixel :: *
+XMonad | Pixel | type Pixel = Word32
 XMonad | Position | type Position :: *
 XMonad | Position | type Position = Int32
 XMonad | Query | newtype Query a = Query (ReaderT Window X a)
@@ -108,7 +110,7 @@ XMonad | WorkspaceId | type WorkspaceId = String
 XMonad | X | newtype X a = X (ReaderT XConf (StateT XState IO) a)
 XMonad | X | type X :: * -> *
 XMonad | X | type role X nominal
-XMonad | XConf | data XConf = XConf {display :: Display, config :: (XConfig Layout), riverManager :: ObjectId, riverBindings :: ObjectId, riverCompositor :: (Maybe ObjectId), riverShm :: (Maybe ObjectId), riverWindows :: (IORef (Map ObjectId RiverWindow)), riverOutputs :: (IORef (Map ObjectId RiverOutput)), riverSeats :: (IORef (Map ObjectId RiverSeat)), riverDirty :: (IORef Bool), inManageSeq :: (IORef Bool), riverRestart :: >_N)(IORef (Maybe (FilePath, [String]))), riverMailbox :: (Mailbox (X ())), riverKeyBindings :: )>_N)(IORef (Map ObjectId (X ()))), riverPlacements :: ]>_N)(IORef [(Window, Rectangle)]), riverSubmap :: )>_N)(IORef (Maybe (X ()))), riverDragOrigin :: >_N)(IORef (Position, Position)), normalBorder :: BorderColor, focusedBorder :: BorderColor, keyActions :: (Map (KeyMask, KeySym) (X ())), buttonActions :: (Map (KeyMask, Button) (Window -> X ())), mouseFocused :: Bool, mousePosition :: (Maybe (Position, Position)), currentEvent :: (Maybe Event), directories :: Directories}
+XMonad | XConf | data XConf = XConf {display :: Display, config :: (XConfig Layout), riverManager :: ObjectId, riverBindings :: ObjectId, riverCompositor :: (Maybe ObjectId), riverShm :: (Maybe ObjectId), riverWindows :: (IORef (Map ObjectId RiverWindow)), riverOutputs :: (IORef (Map ObjectId RiverOutput)), riverSeats :: (IORef (Map ObjectId RiverSeat)), riverDirty :: (IORef Bool), inManageSeq :: (IORef Bool), riverRestart :: >_N)(IORef (Maybe (FilePath, [String]))), riverMailbox :: (Mailbox (X ())), riverKeyBindings :: )>_N)(IORef (Map ObjectId (X ()))), riverPlacements :: ]>_N)(IORef [(Window, Rectangle)]), riverSubmap :: )>_N)(IORef (Maybe (X ()))), riverDragOrigin :: >_N)(IORef (Position, Position)), normalBorder :: Pixel, focusedBorder :: Pixel, keyActions :: (Map (KeyMask, KeySym) (X ())), buttonActions :: (Map (KeyMask, Button) (Window -> X ())), mouseFocused :: Bool, mousePosition :: (Maybe (Position, Position)), currentEvent :: (Maybe Event), directories :: Directories}
 XMonad | XConf | type XConf :: *
 XMonad | XConfig | data XConfig l = XConfig {normalBorderColor :: String, focusedBorderColor :: String, terminal :: String, layoutHook :: (l Window), manageHook :: ManageHook, handleEventHook :: (Event -> X All), workspaces :: [String], modMask :: KeyMask, keys :: (XConfig Layout -> Map (ButtonMask, KeySym) (X ())), mouseBindings :: (XConfig Layout -> Map (ButtonMask, Button) (Window -> X ())), borderWidth :: Dimension, logHook :: (X ()), startupHook :: (X ()), focusFollowsMouse :: Bool, clickJustFocuses :: Bool, handleExtraArgs :: ([String] -> XConfig Layout -> IO (XConfig Layout)), extensibleConf :: (Map TypeRep ConfExtension)}
 XMonad | XConfig | type XConfig :: (* -> *) -> *
@@ -207,9 +209,9 @@ XMonad | sendMessage | sendMessage :: Message a => a -> X ()
 XMonad | sendMessageWithNoRefresh | sendMessageWithNoRefresh :: Message a => a -> WindowSpace -> X ()
 XMonad | sendRestart | sendRestart :: IO ()
 XMonad | setLayout | setLayout :: Layout Window -> X ()
-XMonad | setWindowBorder | setWindowBorder :: Display -> Window -> BorderColor -> IO ()
+XMonad | setWindowBorder | setWindowBorder :: Display -> Window -> Pixel -> IO ()
 XMonad | setWindowBorderWidth | setWindowBorderWidth :: Display -> Window -> Dimension -> IO ()
-XMonad | setWindowBorderWithFallback | setWindowBorderWithFallback :: Display -> Window -> String -> BorderColor -> X ()
+XMonad | setWindowBorderWithFallback | setWindowBorderWithFallback :: Display -> Window -> String -> Pixel -> X ()
 XMonad | shiftMask | shiftMask :: KeyMask
 XMonad | spawn | spawn :: MonadIO m => String -> m ()
 XMonad | spawnPID | spawnPID :: MonadIO m => String -> m ProcessID
@@ -632,6 +634,8 @@ XMonad.Core | ManageHook | type ManageHook :: *
 XMonad.Core | ManageHook | type ManageHook = Query (Endo WindowSet)
 XMonad.Core | Message | class Typeable a => Message a
 XMonad.Core | Message | type Message :: * -> Constraint
+XMonad.Core | Pixel | type Pixel :: *
+XMonad.Core | Pixel | type Pixel = Word32
 XMonad.Core | Position | type Position :: *
 XMonad.Core | Position | type Position = Int32
 XMonad.Core | Query | newtype Query a = Query (ReaderT Window X a)
@@ -664,7 +668,7 @@ XMonad.Core | WorkspaceId | type WorkspaceId = String
 XMonad.Core | X | newtype X a = X (ReaderT XConf (StateT XState IO) a)
 XMonad.Core | X | type X :: * -> *
 XMonad.Core | X | type role X nominal
-XMonad.Core | XConf | data XConf = XConf {display :: Display, config :: (XConfig Layout), riverManager :: ObjectId, riverBindings :: ObjectId, riverCompositor :: (Maybe ObjectId), riverShm :: (Maybe ObjectId), riverWindows :: (IORef (Map ObjectId RiverWindow)), riverOutputs :: (IORef (Map ObjectId RiverOutput)), riverSeats :: (IORef (Map ObjectId RiverSeat)), riverDirty :: (IORef Bool), inManageSeq :: (IORef Bool), riverRestart :: >_N)(IORef (Maybe (FilePath, [String]))), riverMailbox :: (Mailbox (X ())), riverKeyBindings :: )>_N)(IORef (Map ObjectId (X ()))), riverPlacements :: ]>_N)(IORef [(Window, Rectangle)]), riverSubmap :: )>_N)(IORef (Maybe (X ()))), riverDragOrigin :: >_N)(IORef (Position, Position)), normalBorder :: BorderColor, focusedBorder :: BorderColor, keyActions :: (Map (KeyMask, KeySym) (X ())), buttonActions :: (Map (KeyMask, Button) (Window -> X ())), mouseFocused :: Bool, mousePosition :: (Maybe (Position, Position)), currentEvent :: (Maybe Event), directories :: Directories}
+XMonad.Core | XConf | data XConf = XConf {display :: Display, config :: (XConfig Layout), riverManager :: ObjectId, riverBindings :: ObjectId, riverCompositor :: (Maybe ObjectId), riverShm :: (Maybe ObjectId), riverWindows :: (IORef (Map ObjectId RiverWindow)), riverOutputs :: (IORef (Map ObjectId RiverOutput)), riverSeats :: (IORef (Map ObjectId RiverSeat)), riverDirty :: (IORef Bool), inManageSeq :: (IORef Bool), riverRestart :: >_N)(IORef (Maybe (FilePath, [String]))), riverMailbox :: (Mailbox (X ())), riverKeyBindings :: )>_N)(IORef (Map ObjectId (X ()))), riverPlacements :: ]>_N)(IORef [(Window, Rectangle)]), riverSubmap :: )>_N)(IORef (Maybe (X ()))), riverDragOrigin :: >_N)(IORef (Position, Position)), normalBorder :: Pixel, focusedBorder :: Pixel, keyActions :: (Map (KeyMask, KeySym) (X ())), buttonActions :: (Map (KeyMask, Button) (Window -> X ())), mouseFocused :: Bool, mousePosition :: (Maybe (Position, Position)), currentEvent :: (Maybe Event), directories :: Directories}
 XMonad.Core | XConf | type XConf :: *
 XMonad.Core | XConfig | data XConfig l = XConfig {normalBorderColor :: String, focusedBorderColor :: String, terminal :: String, layoutHook :: (l Window), manageHook :: ManageHook, handleEventHook :: (Event -> X All), workspaces :: [String], modMask :: KeyMask, keys :: (XConfig Layout -> Map (ButtonMask, KeySym) (X ())), mouseBindings :: (XConfig Layout -> Map (ButtonMask, Button) (Window -> X ())), borderWidth :: Dimension, logHook :: (X ()), startupHook :: (X ()), focusFollowsMouse :: Bool, clickJustFocuses :: Bool, handleExtraArgs :: ([String] -> XConfig Layout -> IO (XConfig Layout)), extensibleConf :: (Map TypeRep ConfExtension)}
 XMonad.Core | XConfig | type XConfig :: (* -> *) -> *
@@ -708,7 +712,7 @@ XMonad.Core | runOnWorkspaces | runOnWorkspaces :: (WindowSpace -> X WindowSpace
 XMonad.Core | runQuery | runQuery :: Query a -> Window -> X a
 XMonad.Core | runX | runX :: XConf -> XState -> X a -> IO (a, XState)
 XMonad.Core | sendRestart | sendRestart :: IO ()
-XMonad.Core | setWindowBorder | setWindowBorder :: Display -> Window -> BorderColor -> IO ()
+XMonad.Core | setWindowBorder | setWindowBorder :: Display -> Window -> Pixel -> IO ()
 XMonad.Core | setWindowBorderWidth | setWindowBorderWidth :: Display -> Window -> Dimension -> IO ()
 XMonad.Core | shiftMask | shiftMask :: KeyMask
 XMonad.Core | spawn | spawn :: MonadIO m => String -> m ()
@@ -1166,7 +1170,7 @@ XMonad.Operations | screenWorkspace | screenWorkspace :: ScreenId -> X (Maybe Wo
 XMonad.Operations | sendMessage | sendMessage :: Message a => a -> X ()
 XMonad.Operations | sendMessageWithNoRefresh | sendMessageWithNoRefresh :: Message a => a -> WindowSpace -> X ()
 XMonad.Operations | setLayout | setLayout :: Layout Window -> X ()
-XMonad.Operations | setWindowBorderWithFallback | setWindowBorderWithFallback :: Display -> Window -> String -> BorderColor -> X ()
+XMonad.Operations | setWindowBorderWithFallback | setWindowBorderWithFallback :: Display -> Window -> String -> Pixel -> X ()
 XMonad.Operations | unmanage | unmanage :: Window -> X ()
 XMonad.Operations | updateLayout | updateLayout :: WorkspaceId -> Maybe (Layout Window) -> X ()
 XMonad.Operations | warpPointer | warpPointer :: Position -> Position -> X ()

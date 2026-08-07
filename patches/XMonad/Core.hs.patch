@@ -1,5 +1,5 @@
 --- src/XMonad/Core.hs	2026-08-06 14:14:13.108989784 -0600
-+++ src-river/XMonad/Core.hs	2026-08-07 14:17:20.320779391 -0600
++++ src-river/XMonad/Core.hs	2026-08-07 14:36:12.359469886 -0600
 @@ -16,13 +16,31 @@
  -- Copyright   :  (c) Spencer Janssen 2007
  -- License     :  BSD3-style (see LICENSE)
@@ -36,7 +36,7 @@
  -----------------------------------------------------------------------------
  
  module XMonad.Core (
-@@ -34,15 +52,54 @@
+@@ -34,15 +52,58 @@
      StateExtension(..), ExtensionClass(..), ConfExtension(..),
      runX, catchX, userCode, userCodeDef, io, catchIO, installSignalHandlers, uninstallSignalHandlers,
      withDisplay, withWindowSet, isRoot, runOnWorkspaces,
@@ -52,7 +52,7 @@
 +    -- that /do/ port faithfully are exported here instead -- a config still
 +    -- has to be able to write @LayoutClass l Window@.
 +    Window, Rectangle(..), Position, Dimension, KeyMask, KeySym, Button,
-+    ButtonMask,
++    ButtonMask, Pixel,
 +    shiftMask, lockMask, controlMask, mod1Mask, mod2Mask, mod3Mask, mod4Mask,
 +    mod5Mask, noModMask,
 +    button1, button2, button3, button4, button5,
@@ -74,6 +74,10 @@
 +    -- state that stuck until something set it again; here they record an
 +    -- override that the render sequence applies.  See
 +    -- 'XMonad.River.Runtime.setBorderWidth' for what that changes.
++    --
++    -- Both take the types X11's did.  A 'Pixel' is a colour rather than a
++    -- colormap index here, but it is still the argument these have always
++    -- taken, and contrib signatures are written in terms of it.
 +    setWindowBorderWidth, setWindowBorder,
 +    -- * Key event types
 +    --
@@ -93,7 +97,7 @@
  import Control.Exception (fromException, try, bracket_, throw, finally, SomeException(..))
  import qualified Control.Exception as E
  import Control.Applicative ((<|>), empty)
-@@ -50,13 +107,16 @@
+@@ -50,13 +111,16 @@
  import Control.Monad.Fix (fix)
  import Control.Monad.State
  import Control.Monad.Reader
@@ -111,7 +115,7 @@
  import Data.List (isInfixOf, intercalate, (\\))
  import System.FilePath
  import System.IO
-@@ -69,8 +129,6 @@
+@@ -69,8 +133,6 @@
  import System.Process
  import System.Directory
  import System.Exit
@@ -120,7 +124,7 @@
  import Data.Typeable
  import Data.Maybe (isJust,fromMaybe)
  import Data.Monoid (Ap(..))
-@@ -78,13 +136,34 @@
+@@ -78,13 +140,34 @@
  import qualified Data.Map as M
  import qualified Data.Set as S
  
@@ -157,7 +161,7 @@
      , extensibleState  :: !(M.Map String (Either String StateExtension))
      -- ^ stores custom state information.
      --
-@@ -94,11 +173,59 @@
+@@ -94,11 +177,59 @@
  
  -- | XConf, the (read-only) window manager configuration.
  data XConf = XConf
@@ -216,12 +220,12 @@
 +      -- ^ Where the pointer was when the current interactive operation began.
 +      -- river reports a drag as a delta from its start; 'mouseDrag' promises
 +      -- its caller an absolute position, so the origin has to be remembered.
-+    , normalBorder  :: !BorderColor   -- ^ border colour of unfocused windows
-+    , focusedBorder :: !BorderColor   -- ^ border colour of the focused window
++    , normalBorder  :: !Pixel         -- ^ border colour of unfocused windows
++    , focusedBorder :: !Pixel         -- ^ border colour of the focused window
      , keyActions    :: !(M.Map (KeyMask, KeySym) (X ()))
                                        -- ^ a mapping of key presses to actions
      , buttonActions :: !(M.Map (KeyMask, Button) (Window -> X ()))
-@@ -115,10 +242,10 @@
+@@ -115,10 +246,10 @@
  data XConfig l = XConfig
      { normalBorderColor  :: !String              -- ^ Non focused windows border color. Default: \"#dddddd\"
      , focusedBorderColor :: !String              -- ^ Focused windows border color. Default: \"#ff0000\"
@@ -234,7 +238,7 @@
                                                   -- should also be run afterwards. mappend should be used for combining
                                                   -- event hooks in most cases.
      , workspaces         :: ![String]            -- ^ The list of workspaces' names
-@@ -132,8 +259,6 @@
+@@ -132,8 +263,6 @@
      , startupHook        :: !(X ())              -- ^ The action to perform on startup
      , focusFollowsMouse  :: !Bool                -- ^ Whether window entry events can change focus
      , clickJustFocuses   :: !Bool                -- ^ False to make a click which changes focus to be additionally passed to the window
@@ -243,7 +247,7 @@
      , handleExtraArgs    :: !([String] -> XConfig Layout -> IO (XConfig Layout))
                                                   -- ^ Modify the configuration, complain about extra arguments etc. with arguments that are not handled by default
      , extensibleConf     :: !(M.Map TypeRep ConfExtension)
-@@ -144,6 +269,43 @@
+@@ -144,6 +273,43 @@
      }
  
  
@@ -287,7 +291,7 @@
  type WindowSet   = StackSet  WorkspaceId (Layout Window) Window ScreenId ScreenDetail
  type WindowSpace = Workspace WorkspaceId (Layout Window) Window
  
-@@ -223,26 +385,89 @@
+@@ -223,26 +389,91 @@
  withWindowSet :: (WindowSet -> X a) -> X a
  withWindowSet f = gets windowset >>= f
  
@@ -339,12 +343,14 @@
 +
 +-- | Override the colour of one window's border.
 +--
-+-- X11 took a 'Graphics.X11.Pixel', resolved against the window's colormap.
-+-- Wayland has neither, so this takes the RGBA form
-+-- @river_window_v1.set_borders@ asks for -- the same substitution 'XConf'
-+-- already makes for @normalBorder@ and @focusedBorder@.
-+setWindowBorder :: Display -> Window -> BorderColor -> IO ()
-+setWindowBorder _ = setBorderColor
++-- Takes a 'Pixel', as X11 did.  What a 'Pixel' /is/ differs -- there is no
++-- colormap to index into, so it is the packed colour itself -- but the
++-- signature and the meaning at the call site are unchanged.  Border colours
++-- reach the compositor as RGBA, so this widens; a caller that wants to say
++-- something a 'Pixel' cannot, such as a transparent border, wants
++-- 'XMonad.River.Types.BorderColor' and 'XMonad.River.Runtime.setBorderColor'.
++setWindowBorder :: Display -> Window -> Pixel -> IO ()
++setWindowBorder _ w = setBorderColor w . pixelColor
 +
 +-- | X11's event type tag, kept for the handful of signatures that name it.
 +type EventType = Word32
@@ -393,7 +399,7 @@
  
  ------------------------------------------------------------------------
  -- LayoutClass handling. See particular instances in Operations.hs
-@@ -273,20 +498,11 @@
+@@ -273,20 +504,11 @@
  -- * 'description'
  --
  -- Note that any code which /uses/ 'LayoutClass' methods should only
@@ -416,7 +422,7 @@
      runLayout :: Workspace WorkspaceId (layout a) a
                -> Rectangle
                -> X ([(a, Rectangle)], Maybe (layout a))
-@@ -294,25 +510,13 @@
+@@ -294,25 +516,13 @@
  
      -- | Given a 'Rectangle' in which to place the windows, and a 'Stack'
      -- of windows, return a list of windows and their corresponding
@@ -445,7 +451,7 @@
      pureLayout  :: layout a -> Rectangle -> Stack a -> [(a, Rectangle)]
      pureLayout _ r s = [(focus s, r)]
  
-@@ -320,28 +524,17 @@
+@@ -320,28 +530,17 @@
      emptyLayout :: layout a -> Rectangle -> X ([(a, Rectangle)], Maybe (layout a))
      emptyLayout _ _ = return ([], Nothing)
  
@@ -477,7 +483,7 @@
      description :: layout a -> String
      description      = show
  
-@@ -374,7 +567,7 @@
+@@ -374,7 +573,7 @@
  fromMessage :: Message m => SomeMessage -> Maybe m
  fromMessage (SomeMessage m) = cast m
  
@@ -486,7 +492,7 @@
  instance Message Event
  
  -- | 'LayoutMessages' are core messages that all layouts (especially stateful
-@@ -398,11 +591,11 @@
+@@ -398,11 +597,11 @@
      -- | Defines an initial value for the state extension
      initialValue :: a
      -- | Specifies whether the state extension should be
@@ -502,7 +508,7 @@
      extensionType :: a -> StateExtension
      extensionType = StateExtension
  
-@@ -459,17 +652,6 @@
+@@ -459,17 +658,6 @@
          dupTo fd stdInput
          closeFd fd
  
@@ -520,7 +526,7 @@
  -- | This is basically a map function, running a function in the 'X' monad on
  -- each workspace with the output of that function being the modified workspace.
  runOnWorkspaces :: (WindowSpace -> X WindowSpace) -> X ()
-@@ -494,7 +676,6 @@
+@@ -494,7 +682,6 @@
  -- * @cacheDir@: This directory is used to store temporary files that
  -- can easily be recreated such as the configuration binary and any
  -- intermediate object files generated by GHC.
@@ -528,7 +534,7 @@
  --
  -- For how these directories are chosen, see 'getDirectories'.
  --
-@@ -521,9 +702,6 @@
+@@ -521,9 +708,6 @@
  --    @XDG_CONFIG_HOME@, and @XDG_CACHE_HOME@ (or their respective
  --    fallbacks).  These directories are created if necessary.
  --
@@ -538,7 +544,7 @@
  getDirectories :: IO Directories
  getDirectories = xmEnvDirs <|> xmDirs <|> xdgDirs
    where
-@@ -798,6 +976,10 @@
+@@ -798,6 +982,10 @@
  
  -- | Check GHC output for deprecation warnings and notify the user if there
  -- were any. Report success otherwise.
@@ -549,7 +555,7 @@
  checkCompileWarnings :: Directories -> IO ()
  checkCompileWarnings dirs = do
      ghcErr <- readFile (errFileName dirs)
-@@ -808,7 +990,6 @@
+@@ -808,7 +996,6 @@
                  ++ lines ghcErr
                  ++ ["","Please correct them or silence using {-# OPTIONS_GHC -Wno-deprecations #-}."]
          trace msg
@@ -557,7 +563,7 @@
        else
          trace "XMonad recompilation process exited with success!"
  
-@@ -820,10 +1001,7 @@
+@@ -820,10 +1007,7 @@
              ["Errors detected while compiling xmonad config: " <> srcFileName dirs]
              ++ lines (if null ghcErr then show status else ghcErr)
              ++ ["","Please check the file for errors."]
@@ -568,7 +574,7 @@
  
  -- | Recompile the xmonad configuration file when any of the following apply:
  --
-@@ -836,12 +1014,8 @@
+@@ -836,12 +1020,8 @@
  --
  --  * custom @build@ script is being used
  --
@@ -582,7 +588,7 @@
  --
  -- 'False' is returned if there are compilation errors.
  --
-@@ -869,8 +1043,8 @@
+@@ -869,8 +1049,8 @@
  whenX :: X Bool -> X () -> X ()
  whenX a f = a >>= \b -> when b f
  

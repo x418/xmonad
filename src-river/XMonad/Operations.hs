@@ -74,6 +74,7 @@ module XMonad.Operations (
     ) where
 
 import XMonad.Core
+import XMonad.River.Runtime (setBorderColor)
 import XMonad.River.Types
 import XMonad.River.Protocol.WindowManagement
 import qualified XMonad.StackSet as W
@@ -175,16 +176,18 @@ reveal w = whenX (isClient w) $
     modify (\s -> s { mapped = S.insert w (mapped s) })
 
 -- | Set the border colour of a window from a colour name, falling back to a
--- 'BorderColor' if the name does not parse.
+-- 'Pixel' if the name does not parse.
 --
 -- X11's fallback existed because @initColor@ asked the server to allocate the
 -- colour and that could fail for reasons a config could not predict -- a full
 -- colormap, an unknown name from @rgb.txt@.  Here the only way to fail is a
 -- string that is not @\"#rrggbb\"@, since nothing is allocated and there is no
 -- server to ask.  The fallback is still used, just for a narrower reason.
-setWindowBorderWithFallback :: Display -> Window -> String -> BorderColor -> X ()
-setWindowBorderWithFallback dpy w color fallback =
-    io (setWindowBorder dpy w (fromMaybe fallback (parseColorMaybe color)))
+--
+-- The signature is X11's exactly, 'Pixel' and all.
+setWindowBorderWithFallback :: Display -> Window -> String -> Pixel -> X ()
+setWindowBorderWithFallback _ w color fallback =
+    io (setBorderColor w (pixelColor (fromMaybe fallback (parseColorMaybe color))))
 
 -- | Is the window under management by xmonad?
 isClient :: Window -> X Bool

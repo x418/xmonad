@@ -62,7 +62,7 @@ module XMonad.Core (
     -- that /do/ port faithfully are exported here instead -- a config still
     -- has to be able to write @LayoutClass l Window@.
     Window, Rectangle(..), Position, Dimension, KeyMask, KeySym, Button,
-    ButtonMask,
+    ButtonMask, Pixel,
     shiftMask, lockMask, controlMask, mod1Mask, mod2Mask, mod3Mask, mod4Mask,
     mod5Mask, noModMask,
     button1, button2, button3, button4, button5,
@@ -84,6 +84,10 @@ module XMonad.Core (
     -- state that stuck until something set it again; here they record an
     -- override that the render sequence applies.  See
     -- 'XMonad.River.Runtime.setBorderWidth' for what that changes.
+    --
+    -- Both take the types X11's did.  A 'Pixel' is a colour rather than a
+    -- colormap index here, but it is still the argument these have always
+    -- taken, and contrib signatures are written in terms of it.
     setWindowBorderWidth, setWindowBorder,
     -- * Key event types
     --
@@ -224,8 +228,8 @@ data XConf = XConf
       -- ^ Where the pointer was when the current interactive operation began.
       -- river reports a drag as a delta from its start; 'mouseDrag' promises
       -- its caller an absolute position, so the origin has to be remembered.
-    , normalBorder  :: !BorderColor   -- ^ border colour of unfocused windows
-    , focusedBorder :: !BorderColor   -- ^ border colour of the focused window
+    , normalBorder  :: !Pixel         -- ^ border colour of unfocused windows
+    , focusedBorder :: !Pixel         -- ^ border colour of the focused window
     , keyActions    :: !(M.Map (KeyMask, KeySym) (X ()))
                                       -- ^ a mapping of key presses to actions
     , buttonActions :: !(M.Map (KeyMask, Button) (Window -> X ()))
@@ -429,12 +433,14 @@ setWindowBorderWidth _ = setBorderWidth
 
 -- | Override the colour of one window's border.
 --
--- X11 took a 'Graphics.X11.Pixel', resolved against the window's colormap.
--- Wayland has neither, so this takes the RGBA form
--- @river_window_v1.set_borders@ asks for -- the same substitution 'XConf'
--- already makes for @normalBorder@ and @focusedBorder@.
-setWindowBorder :: Display -> Window -> BorderColor -> IO ()
-setWindowBorder _ = setBorderColor
+-- Takes a 'Pixel', as X11 did.  What a 'Pixel' /is/ differs -- there is no
+-- colormap to index into, so it is the packed colour itself -- but the
+-- signature and the meaning at the call site are unchanged.  Border colours
+-- reach the compositor as RGBA, so this widens; a caller that wants to say
+-- something a 'Pixel' cannot, such as a transparent border, wants
+-- 'XMonad.River.Types.BorderColor' and 'XMonad.River.Runtime.setBorderColor'.
+setWindowBorder :: Display -> Window -> Pixel -> IO ()
+setWindowBorder _ w = setBorderColor w . pixelColor
 
 -- | X11's event type tag, kept for the handful of signatures that name it.
 type EventType = Word32

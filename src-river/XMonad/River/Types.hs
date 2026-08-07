@@ -10,6 +10,7 @@ module XMonad.River.Types
   ( -- * Geometry
     Rectangle(..)
   , BorderColor
+  , Pixel, pixelColor
   , parseColor, parseColorMaybe
   , Position
   , Dimension
@@ -67,8 +68,30 @@ data Rectangle = Rectangle
 -- protocol asks for.
 type BorderColor = (Word32, Word32, Word32, Word32)
 
+-- | A packed @0xRRGGBB@ colour.
+--
+-- X11's 'Pixel' was an index into a colormap, resolved by the server, and
+-- 'Word64' wide.  There are no colormaps here and nothing to allocate against,
+-- so this is the colour itself rather than a handle to one -- which is also
+-- why it is narrower.
+--
+-- It exists because a config reaches it through @import XMonad@ on the X11
+-- build, by way of the @Graphics.X11@ re-export, and several xmonad-contrib
+-- modules name it in their own signatures.  The operations that /produced/ one
+-- -- @initColor@, @allocNamedColor@ -- are absent; a colour is parsed straight
+-- to 'BorderColor' by 'parseColorMaybe'.
+type Pixel = Word32
+
+-- | Widen a packed @0xRRGGBB@ colour into the form @set_borders@ takes.
+pixelColor :: Pixel -> BorderColor
+pixelColor p = (chan 16, chan 8, chan 0, maxBound)
+  where
+    -- Replicated rather than shifted, so 0xff becomes 0xffffffff rather than
+    -- 0xff000000 -- the same widening 'parseColorMaybe' does.
+    chan n = ((p `div` (256 ^ (n `div` 8 :: Int))) `mod` 256) * 0x01010101
+
 -- | Parse @\"#rrggbb\"@ into the 32-bit channel values river's @set_borders@
--- takes.
+-- takes, packed into a 'Pixel'.
 --
 -- 'Nothing' for anything that is not a colour, which is what lets
 -- 'XMonad.Operations.setWindowBorderWithFallback' have a fallback to fall back
@@ -77,15 +100,12 @@ type BorderColor = (Word32, Word32, Word32, Word32)
 -- Trailing characters are ignored rather than rejected, which is what the
 -- total version has always done: @\"#rrggbbaa\"@ is a colour a config might
 -- reasonably write, and dropping the alpha beats refusing the whole string.
-parseColorMaybe :: String -> Maybe BorderColor
+parseColorMaybe :: String -> Maybe Pixel
 parseColorMaybe ('#':r1:r2:g1:g2:b1:b2:_) =
     case traverse hexPair [[r1,r2],[g1,g2],[b1,b2]] of
-      Just [r, g, b] -> Just (scale r, scale g, scale b, maxBound)
+      Just [r, g, b] -> Just (r * 65536 + g * 256 + b)
       _              -> Nothing
   where
-    -- river takes 32-bit channels; 8-bit values are widened by replication so
-    -- that 0xff maps to 0xffffffff rather than 0xff000000.
-    scale v = v * 0x01010101
     hexPair [a, b] = (\x y -> x * 16 + y) <$> hexDigit a <*> hexDigit b
     hexPair _ = Nothing
     hexDigit c
@@ -95,11 +115,11 @@ parseColorMaybe ('#':r1:r2:g1:g2:b1:b2:_) =
       | otherwise = Nothing
 parseColorMaybe _ = Nothing
 
--- | 'parseColorMaybe', with unparseable colours becoming opaque black.
-parseColor :: String -> BorderColor
+-- | 'parseColorMaybe', with unparseable colours becoming black.
+parseColor :: String -> Pixel
 parseColor s = case parseColorMaybe s of
   Just c  -> c
-  Nothing -> (0, 0, 0, maxBound)
+  Nothing -> 0
 
 --------------------------------------------------------------------------------
 -- Input
