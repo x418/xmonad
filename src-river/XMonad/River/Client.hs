@@ -54,6 +54,8 @@ import XMonad.River.Wire (ObjectId, nullObject)
 import XMonad.River.Xkb
 import System.IO (hPutStrLn, stderr)
 import System.Posix.IO (closeFd)
+import qualified Control.Exception as E
+import System.IO.Error (isEOFError)
 import System.Posix.IO.ByteString (fdRead)
 import System.Posix.Types (Fd)
 
@@ -120,6 +122,15 @@ data Client = Client
   , clSize    :: !(IORef (Int, Int))
   , clXkb     :: !(IORef (Maybe XkbState))
   , clRunning :: !(IORef Bool)
+  , clConfigured :: !(IORef Bool)
+    -- ^ Whether the compositor has sent a @configure@ and it has been acked.
+    --
+    -- Attaching a buffer before that is a protocol error -- wlroots says
+    -- \"layer_surface has never been configured\" and drops the connection --
+    -- and it is easy to hit by accident, because the caller creates a prompt
+    -- and asks it to draw in the same breath, which races the compositor's
+    -- reply.  Nothing is lost by skipping such a redraw: the configure handler
+    -- draws as soon as it arrives, from whatever state the prompt has by then.
   }
 
 clientMain :: ClientSpec -> Mailbox Request -> IO ()
@@ -161,7 +172,9 @@ clientMain spec inbox = do
       sizeRef <- newIORef (csWidth spec, csHeight spec)
       xkbRef <- newIORef Nothing
       running <- newIORef True
+      configured <- newIORef False
       let cl = Client conn shm surface layer bufRef sizeRef xkbRef running
+                      configured
 
       when (csKeyboard spec) $
         forM_ mSeat $ \(seat, _) -> setupKeyboard spec cl seat
@@ -173,6 +186,7 @@ clientMain spec inbox = do
           when (w > 0 && h > 0) $
             writeIORef sizeRef (fromIntegral w, fromIntegral h)
           zwlrLayerSurfaceV1AckConfigure conn layer serial
+          writeIORef configured True
           redraw spec cl
         ZwlrLayerSurfaceV1Closed -> shutdown spec cl
         _ -> pure ()
@@ -240,7 +254,13 @@ readFdText fd size = BC.unpack <$> go size BS.empty
   where
     go 0 acc = pure acc
     go n acc = do
-      chunk <- fdRead fd (fromIntegral (min n 4096))
+      -- fdRead throws on end-of-file rather than returning empty, so a
+      -- descriptor holding fewer bytes than the event advertised -- or one
+      -- whose connection has since died -- has to be caught rather than
+      -- tested for.  A truncated keymap is still worth parsing; throwing here
+      -- would take the prompt down.
+      chunk <- E.catch (fdRead fd (fromIntegral (min n 4096)))
+                       (\e -> if isEOFError e then pure BS.empty else E.throwIO e)
       if BS.null chunk
         then pure acc
         else go (n - BS.length chunk) (acc <> chunk)
@@ -248,7 +268,8 @@ readFdText fd size = BC.unpack <$> go size BS.empty
 redraw :: ClientSpec -> Client -> IO ()
 redraw spec cl = do
   alive <- readIORef (clRunning cl)
-  when alive $ do
+  ready <- readIORef (clConfigured cl)
+  when (alive && ready) $ do
     (w, h) <- readIORef (clSize cl)
     existing <- readIORef (clBuffer cl)
     buf <- case existing of
@@ -293,6 +314,11 @@ loop spec cl inbox = go
     go = do
       alive <- readIORef (clRunning cl)
       when alive $ do
+        -- Flush before waiting, for the same reason the window manager's loop
+        -- does: a redraw drained from the inbox only queues its attach and
+        -- commit, and waiting first means the compositor is never told, so
+        -- nothing comes back to wake us and the prompt hangs unpainted.
+        flush (clConn cl)
         sockFd <- connectionFd (clConn cl)
         r <- MB.waitEither sockFd (MB.mailboxFd inbox)
         case r of
