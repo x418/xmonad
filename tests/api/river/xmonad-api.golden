@@ -21,6 +21,8 @@ XMonad | ConfExtension | data ConfExtension = forall a. Typeable a => ConfExtens
 XMonad | ConfExtension | type ConfExtension :: *
 XMonad | Connection | data Connection = Connection {connSocket :: Socket, connNextId :: ! (IORef Word32), connFreeIds :: ! (IORef [Word32]), connOut :: ! (IORef Encoded), connIn :: ! (IORef ByteString), connListeners :: ! (IORef (IntMap Listener))}
 XMonad | Connection | type Connection :: *
+XMonad | D | type D :: *
+XMonad | D | type D = (Dimension, Dimension)
 XMonad | Default | type Default :: * -> Constraint
 XMonad | Dimension | type Dimension :: *
 XMonad | Dimension | type Dimension = Word32
@@ -78,14 +80,16 @@ XMonad | RestartRequested | data RestartRequested = RestartRequested
 XMonad | RestartRequested | type RestartRequested :: *
 XMonad | RiverOutput | data RiverOutput = RiverOutput {roObject :: ! ObjectId, roPosition :: (Int32, Int32), roSize :: (Int32, Int32), roRemoved :: !Bool, roLayerObject :: !(Maybe ObjectId), roLayerArea :: !(Maybe Rectangle)}
 XMonad | RiverOutput | type RiverOutput :: *
-XMonad | RiverSeat | data RiverSeat = RiverSeat {rsObject :: ! ObjectId, rsRemoved :: !Bool, rsLayerObject :: !(Maybe ObjectId), rsLayerFocus :: !LayerFocus}
+XMonad | RiverSeat | data RiverSeat = RiverSeat {rsObject :: ! ObjectId, rsRemoved :: !Bool, rsLayerObject :: !(Maybe ObjectId), rsLayerFocus :: !LayerFocus, rsPointer :: (Position, Position)}
 XMonad | RiverSeat | type RiverSeat :: *
-XMonad | RiverWindow | data RiverWindow = RiverWindow {rwObject :: ! ObjectId, rwNode :: ! ObjectId, rwAppId :: !(Maybe ByteString), rwTitle :: !(Maybe ByteString), rwPid :: !(Maybe Int32), rwIdentifier :: !(Maybe ByteString), rwParent :: !(Maybe ObjectId), rwDimensions :: (Int32, Int32), rwNew :: !Bool, rwClosed :: !Bool, rwHidden :: !Bool}
+XMonad | RiverWindow | data RiverWindow = RiverWindow {rwObject :: ! ObjectId, rwNode :: ! ObjectId, rwAppId :: !(Maybe ByteString), rwTitle :: !(Maybe ByteString), rwPid :: !(Maybe Int32), rwIdentifier :: !(Maybe ByteString), rwParent :: !(Maybe ObjectId), rwDimensions :: (Int32, Int32), rwSizeHints :: SizeHints, rwNew :: !Bool, rwClosed :: !Bool, rwHidden :: !Bool}
 XMonad | RiverWindow | type RiverWindow :: *
 XMonad | ScreenDetail | newtype ScreenDetail = SD {screenRect :: Rectangle}
 XMonad | ScreenDetail | type ScreenDetail :: *
 XMonad | ScreenId | newtype ScreenId = S Int
 XMonad | ScreenId | type ScreenId :: *
+XMonad | SizeHints | data SizeHints = SizeHints {sh_min_size :: Maybe (Dimension, Dimension), sh_max_size :: Maybe (Dimension, Dimension), sh_resize_inc :: Maybe (Dimension, Dimension), sh_aspect :: Maybe ((Dimension, Dimension), (Dimension, Dimension)), sh_base_size :: Maybe (Dimension, Dimension)}
+XMonad | SizeHints | type SizeHints :: *
 XMonad | SomeMessage | data SomeMessage = forall a. Message a => SomeMessage a
 XMonad | SomeMessage | type SomeMessage :: *
 XMonad | StateExtension | data StateExtension = forall a. ExtensionClass a => StateExtension a | forall a. (Read a, Show a, ExtensionClass a) => PersistentExtension a
@@ -106,7 +110,7 @@ XMonad | WorkspaceId | type WorkspaceId = String
 XMonad | X | newtype X a = X (ReaderT XConf (StateT XState IO) a)
 XMonad | X | type X :: * -> *
 XMonad | X | type role X nominal
-XMonad | XConf | data XConf = XConf {config :: (XConfig Layout), riverConn :: Connection, riverManager :: ! ObjectId, riverBindings :: ! ObjectId, riverWindows :: ! (IORef (Map ObjectId RiverWindow)), riverOutputs :: ! (IORef (Map ObjectId RiverOutput)), riverSeats :: ! (IORef (Map ObjectId RiverSeat)), riverDirty :: ! (IORef Bool), inManageSeq :: ! (IORef Bool), riverRestart :: ! (IORef (Maybe String)), normalBorder :: BorderColor, focusedBorder :: BorderColor, keyActions :: !(Map (KeyMask, KeySym) (X ())), buttonActions :: !(Map (KeyMask, Button) (Window -> X ())), mouseFocused :: !Bool, mousePosition :: !(Maybe (Position, Position)), currentEvent :: !(Maybe Event), directories :: Directories}
+XMonad | XConf | data XConf = XConf {config :: (XConfig Layout), riverConn :: Connection, riverManager :: ! ObjectId, riverBindings :: ! ObjectId, riverWindows :: ! (IORef (Map ObjectId RiverWindow)), riverOutputs :: ! (IORef (Map ObjectId RiverOutput)), riverSeats :: ! (IORef (Map ObjectId RiverSeat)), riverDirty :: ! (IORef Bool), inManageSeq :: ! (IORef Bool), riverRestart :: ! (IORef (Maybe String)), riverDragOrigin :: ! >_N)(IORef (Position, Position)), normalBorder :: BorderColor, focusedBorder :: BorderColor, keyActions :: !(Map (KeyMask, KeySym) (X ())), buttonActions :: !(Map (KeyMask, Button) (Window -> X ())), mouseFocused :: !Bool, mousePosition :: !(Maybe (Position, Position)), currentEvent :: !(Maybe Event), directories :: Directories}
 XMonad | XConf | type XConf :: *
 XMonad | XConfig | data XConfig l = XConfig {normalBorderColor :: !String, focusedBorderColor :: !String, terminal :: !String, layoutHook :: !(l Window), manageHook :: !ManageHook, handleEventHook :: !(Event -> X All), workspaces :: ![String], modMask :: KeyMask, keys :: !(XConfig Layout -> Map (KeyMask, KeySym) (X ())), mouseBindings :: !(XConfig Layout -> Map (KeyMask, Button) (Window -> X ())), borderWidth :: Dimension, logHook :: !(X ()), startupHook :: !(X ()), focusFollowsMouse :: !Bool, clickJustFocuses :: !Bool, handleExtraArgs :: !([String] -> XConfig Layout -> IO (XConfig Layout)), extensibleConf :: !(Map TypeRep ConfExtension)}
 XMonad | XConfig | type XConfig :: (* -> *) -> *
@@ -114,6 +118,12 @@ XMonad | XState | data XState = XState {windowset :: WindowSet, mapped :: !(Set 
 XMonad | XState | type XState :: *
 XMonad | a | class Default a where def :: a default def :: (Generic a, GDefault (Rep a)) => a
 XMonad | appName | appName :: Query String
+XMonad | applyAspectHint | applyAspectHint :: (D, D) -> D -> D
+XMonad | applyMaxSizeHint | applyMaxSizeHint :: D -> D -> D
+XMonad | applyResizeIncHint | applyResizeIncHint :: D -> D -> D
+XMonad | applySizeHints | applySizeHints :: Integral a => Dimension -> SizeHints -> (a, a) -> D
+XMonad | applySizeHints' | applySizeHints' :: SizeHints -> D -> D
+XMonad | applySizeHintsContents | applySizeHintsContents :: Integral a => SizeHints -> (a, a) -> D
 XMonad | asks | asks :: MonadReader r m => (r -> a) -> m a
 XMonad | binFileName | binFileName :: Directories -> FilePath
 XMonad | broadcastMessage | broadcastMessage :: Message a => a -> X ()
@@ -132,6 +142,7 @@ XMonad | float | float :: Window -> X ()
 XMonad | floatLocation | floatLocation :: Window -> X (ScreenId, RationalRect)
 XMonad | focus | focus :: Window -> X ()
 XMonad | fromMessage | fromMessage :: Message m => SomeMessage -> Maybe m
+XMonad | getCleanedScreenInfo | getCleanedScreenInfo :: X [Rectangle]
 XMonad | getDirectories | getDirectories :: IO Directories
 XMonad | getXMonadCacheDir | getXMonadCacheDir :: X String
 XMonad | getXMonadDataDir | getXMonadDataDir :: X String
@@ -143,6 +154,7 @@ XMonad | ifM | ifM :: Monad m => m Bool -> m a -> m a -> m a
 XMonad | installSignalHandlers | installSignalHandlers :: MonadIO m => m ()
 XMonad | io | io :: MonadIO m => IO a -> m a
 XMonad | isClient | isClient :: Window -> X Bool
+XMonad | isFixedSizeOrTransient | isFixedSizeOrTransient :: Window -> X Bool
 XMonad | kill | kill :: X ()
 XMonad | killWindow | killWindow :: Window -> X ()
 XMonad | launch | launch :: (LayoutClass l Window, Read (l Window)) => XConfig l -> Directories -> IO ()
@@ -150,8 +162,13 @@ XMonad | layerHasFocus | layerHasFocus :: LayerFocus -> Bool
 XMonad | liftX | liftX :: X a -> Query a
 XMonad | manageDirty | manageDirty :: X ()
 XMonad | mirrorRect | mirrorRect :: Rectangle -> Rectangle
+XMonad | mkAdjust | mkAdjust :: Window -> X (D -> D)
 XMonad | modify | modify :: MonadState s m => (s -> s) -> m ()
 XMonad | modifyWindowSet | modifyWindowSet :: (WindowSet -> WindowSet) -> X ()
+XMonad | mouseDrag | mouseDrag :: (Position -> Position -> X ()) -> X () -> X ()
+XMonad | mouseMoveWindow | mouseMoveWindow :: Window -> X ()
+XMonad | mouseResizeWindow | mouseResizeWindow :: Window -> X ()
+XMonad | noSizeHints | noSizeHints :: SizeHints
 XMonad | nubScreens | nubScreens :: [Rectangle] -> [Rectangle]
 XMonad | pointScreen | pointScreen :: Position -> Position -> X (Maybe (Screen WorkspaceId (Layout Window) Window ScreenId ScreenDetail))
 XMonad | pointWithin | pointWithin :: Position -> Position -> Rectangle -> Bool
@@ -248,14 +265,16 @@ XMonad.Core | RestartRequested | data RestartRequested = RestartRequested
 XMonad.Core | RestartRequested | type RestartRequested :: *
 XMonad.Core | RiverOutput | data RiverOutput = RiverOutput {roObject :: ! ObjectId, roPosition :: (Int32, Int32), roSize :: (Int32, Int32), roRemoved :: !Bool, roLayerObject :: !(Maybe ObjectId), roLayerArea :: !(Maybe Rectangle)}
 XMonad.Core | RiverOutput | type RiverOutput :: *
-XMonad.Core | RiverSeat | data RiverSeat = RiverSeat {rsObject :: ! ObjectId, rsRemoved :: !Bool, rsLayerObject :: !(Maybe ObjectId), rsLayerFocus :: !LayerFocus}
+XMonad.Core | RiverSeat | data RiverSeat = RiverSeat {rsObject :: ! ObjectId, rsRemoved :: !Bool, rsLayerObject :: !(Maybe ObjectId), rsLayerFocus :: !LayerFocus, rsPointer :: (Position, Position)}
 XMonad.Core | RiverSeat | type RiverSeat :: *
-XMonad.Core | RiverWindow | data RiverWindow = RiverWindow {rwObject :: ! ObjectId, rwNode :: ! ObjectId, rwAppId :: !(Maybe ByteString), rwTitle :: !(Maybe ByteString), rwPid :: !(Maybe Int32), rwIdentifier :: !(Maybe ByteString), rwParent :: !(Maybe ObjectId), rwDimensions :: (Int32, Int32), rwNew :: !Bool, rwClosed :: !Bool, rwHidden :: !Bool}
+XMonad.Core | RiverWindow | data RiverWindow = RiverWindow {rwObject :: ! ObjectId, rwNode :: ! ObjectId, rwAppId :: !(Maybe ByteString), rwTitle :: !(Maybe ByteString), rwPid :: !(Maybe Int32), rwIdentifier :: !(Maybe ByteString), rwParent :: !(Maybe ObjectId), rwDimensions :: (Int32, Int32), rwSizeHints :: SizeHints, rwNew :: !Bool, rwClosed :: !Bool, rwHidden :: !Bool}
 XMonad.Core | RiverWindow | type RiverWindow :: *
 XMonad.Core | ScreenDetail | newtype ScreenDetail = SD {screenRect :: Rectangle}
 XMonad.Core | ScreenDetail | type ScreenDetail :: *
 XMonad.Core | ScreenId | newtype ScreenId = S Int
 XMonad.Core | ScreenId | type ScreenId :: *
+XMonad.Core | SizeHints | data SizeHints = SizeHints {sh_min_size :: Maybe (Dimension, Dimension), sh_max_size :: Maybe (Dimension, Dimension), sh_resize_inc :: Maybe (Dimension, Dimension), sh_aspect :: Maybe ((Dimension, Dimension), (Dimension, Dimension)), sh_base_size :: Maybe (Dimension, Dimension)}
+XMonad.Core | SizeHints | type SizeHints :: *
 XMonad.Core | SomeMessage | data SomeMessage = forall a. Message a => SomeMessage a
 XMonad.Core | SomeMessage | type SomeMessage :: *
 XMonad.Core | StateExtension | data StateExtension = forall a. ExtensionClass a => StateExtension a | forall a. (Read a, Show a, ExtensionClass a) => PersistentExtension a
@@ -273,7 +292,7 @@ XMonad.Core | WorkspaceId | type WorkspaceId = String
 XMonad.Core | X | newtype X a = X (ReaderT XConf (StateT XState IO) a)
 XMonad.Core | X | type X :: * -> *
 XMonad.Core | X | type role X nominal
-XMonad.Core | XConf | data XConf = XConf {config :: (XConfig Layout), riverConn :: Connection, riverManager :: ! ObjectId, riverBindings :: ! ObjectId, riverWindows :: ! (IORef (Map ObjectId RiverWindow)), riverOutputs :: ! (IORef (Map ObjectId RiverOutput)), riverSeats :: ! (IORef (Map ObjectId RiverSeat)), riverDirty :: ! (IORef Bool), inManageSeq :: ! (IORef Bool), riverRestart :: ! (IORef (Maybe String)), normalBorder :: BorderColor, focusedBorder :: BorderColor, keyActions :: !(Map (KeyMask, KeySym) (X ())), buttonActions :: !(Map (KeyMask, Button) (Window -> X ())), mouseFocused :: !Bool, mousePosition :: !(Maybe (Position, Position)), currentEvent :: !(Maybe Event), directories :: Directories}
+XMonad.Core | XConf | data XConf = XConf {config :: (XConfig Layout), riverConn :: Connection, riverManager :: ! ObjectId, riverBindings :: ! ObjectId, riverWindows :: ! (IORef (Map ObjectId RiverWindow)), riverOutputs :: ! (IORef (Map ObjectId RiverOutput)), riverSeats :: ! (IORef (Map ObjectId RiverSeat)), riverDirty :: ! (IORef Bool), inManageSeq :: ! (IORef Bool), riverRestart :: ! (IORef (Maybe String)), riverDragOrigin :: ! >_N)(IORef (Position, Position)), normalBorder :: BorderColor, focusedBorder :: BorderColor, keyActions :: !(Map (KeyMask, KeySym) (X ())), buttonActions :: !(Map (KeyMask, Button) (Window -> X ())), mouseFocused :: !Bool, mousePosition :: !(Maybe (Position, Position)), currentEvent :: !(Maybe Event), directories :: Directories}
 XMonad.Core | XConf | type XConf :: *
 XMonad.Core | XConfig | data XConfig l = XConfig {normalBorderColor :: !String, focusedBorderColor :: !String, terminal :: !String, layoutHook :: !(l Window), manageHook :: !ManageHook, handleEventHook :: !(Event -> X All), workspaces :: ![String], modMask :: KeyMask, keys :: !(XConfig Layout -> Map (KeyMask, KeySym) (X ())), mouseBindings :: !(XConfig Layout -> Map (KeyMask, Button) (Window -> X ())), borderWidth :: Dimension, logHook :: !(X ()), startupHook :: !(X ()), focusFollowsMouse :: !Bool, clickJustFocuses :: !Bool, handleExtraArgs :: !([String] -> XConfig Layout -> IO (XConfig Layout)), extensibleConf :: !(Map TypeRep ConfExtension)}
 XMonad.Core | XConfig | type XConfig :: (* -> *) -> *
@@ -292,6 +311,7 @@ XMonad.Core | installSignalHandlers | installSignalHandlers :: MonadIO m => m ()
 XMonad.Core | io | io :: MonadIO m => IO a -> m a
 XMonad.Core | layerHasFocus | layerHasFocus :: LayerFocus -> Bool
 XMonad.Core | manageDirty | manageDirty :: X ()
+XMonad.Core | noSizeHints | noSizeHints :: SizeHints
 XMonad.Core | readsLayout | readsLayout :: Layout a -> String -> [(Layout a, String)]
 XMonad.Core | recompile | recompile :: MonadIO m => Directories -> Bool -> m Bool
 XMonad.Core | runOnWorkspaces | runOnWorkspaces :: (WindowSpace -> X WindowSpace) -> X ()
@@ -359,17 +379,31 @@ XMonad.ManageHook | liftX | liftX :: X a -> Query a
 XMonad.ManageHook | resource | resource :: Query String
 XMonad.ManageHook | title | title :: Query String
 XMonad.ManageHook | willFloat | willFloat :: Query Bool
+XMonad.Operations | D | type D :: *
+XMonad.Operations | D | type D = (Dimension, Dimension)
+XMonad.Operations | applyAspectHint | applyAspectHint :: (D, D) -> D -> D
+XMonad.Operations | applyMaxSizeHint | applyMaxSizeHint :: D -> D -> D
+XMonad.Operations | applyResizeIncHint | applyResizeIncHint :: D -> D -> D
+XMonad.Operations | applySizeHints | applySizeHints :: Integral a => Dimension -> SizeHints -> (a, a) -> D
+XMonad.Operations | applySizeHints' | applySizeHints' :: SizeHints -> D -> D
+XMonad.Operations | applySizeHintsContents | applySizeHintsContents :: Integral a => SizeHints -> (a, a) -> D
 XMonad.Operations | broadcastMessage | broadcastMessage :: Message a => a -> X ()
 XMonad.Operations | containedIn | containedIn :: Rectangle -> Rectangle -> Bool
 XMonad.Operations | exitSession | exitSession :: X ()
 XMonad.Operations | float | float :: Window -> X ()
 XMonad.Operations | floatLocation | floatLocation :: Window -> X (ScreenId, RationalRect)
 XMonad.Operations | focus | focus :: Window -> X ()
+XMonad.Operations | getCleanedScreenInfo | getCleanedScreenInfo :: X [Rectangle]
 XMonad.Operations | hide | hide :: Window -> X ()
 XMonad.Operations | isClient | isClient :: Window -> X Bool
+XMonad.Operations | isFixedSizeOrTransient | isFixedSizeOrTransient :: Window -> X Bool
 XMonad.Operations | kill | kill :: X ()
 XMonad.Operations | killWindow | killWindow :: Window -> X ()
+XMonad.Operations | mkAdjust | mkAdjust :: Window -> X (D -> D)
 XMonad.Operations | modifyWindowSet | modifyWindowSet :: (WindowSet -> WindowSet) -> X ()
+XMonad.Operations | mouseDrag | mouseDrag :: (Position -> Position -> X ()) -> X () -> X ()
+XMonad.Operations | mouseMoveWindow | mouseMoveWindow :: Window -> X ()
+XMonad.Operations | mouseResizeWindow | mouseResizeWindow :: Window -> X ()
 XMonad.Operations | nubScreens | nubScreens :: [Rectangle] -> [Rectangle]
 XMonad.Operations | pointScreen | pointScreen :: Position -> Position -> X (Maybe (Screen WorkspaceId (Layout Window) Window ScreenId ScreenDetail))
 XMonad.Operations | pointWithin | pointWithin :: Position -> Position -> Rectangle -> Bool

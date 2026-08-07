@@ -17,62 +17,7 @@
 
 
 ################################################################################
-# 1. Implementable today -- river already exposes what is needed
-#
-# These were dropped for lack of implementation, not lack of protocol.  Each
-# names the river facility that would carry it.
-
-# --- Interactive pointer operations -----------------------------------------
-#
-# river drives these through the seat rather than by letting the window manager
-# grab the pointer: river_seat_v1.op_start_pointer begins an operation, op_delta
-# reports the total offset since it began, op_release fires when the button goes
-# up, and op_end ends it.  That is the same shape as mouseDrag's
-# (motion, cleanup) pair, so the port is mechanical -- the missing piece is
-# routing those three events into XConf, which currently has nowhere to put
-# them.  river_window_v1.pointer_move_requested and pointer_resize_requested
-# additionally let a client ask for the drag, which X11 had no equivalent of.
-#
-# This is the largest single gap: it is what makes mod-drag do nothing.
-
-mouseDrag               FIX: wire river_seat_v1 op_start_pointer/op_delta/op_release into XConf, as the dragging field.
-mouseMoveWindow         FIX: as mouseDrag, then float the window and apply op_delta to its position.
-mouseResizeWindow       FIX: as mouseDrag, applying op_delta to dimensions via propose_dimensions.
-
-# --- Size hints -------------------------------------------------------------
-#
-# Not as absent as it first appears.  river_window_v1.dimensions_hint carries
-# min_width, min_height, max_width and max_height, and set_dimension_bounds
-# lets the window manager push bounds back.  What genuinely has no Wayland
-# counterpart is resize increments, aspect ratios and base size.
-#
-# So the fix is a river SizeHints whose sh_min_size and sh_max_size come from
-# dimensions_hint and whose sh_resize_inc, sh_aspect and sh_base_size are
-# always Nothing.  The arithmetic below is pure and backend-independent: it
-# already does the right thing with hints that are absent, so it stays correct
-# rather than becoming a stub.  Exporting it is then faithful.
-
-applySizeHints          FIX: define SizeHints from dimensions_hint; the arithmetic is pure and needs no change.
-applySizeHints'         FIX: as applySizeHints.
-applySizeHintsContents  FIX: as applySizeHints.
-applyMaxSizeHint        FIX: as applySizeHints.  max_width/max_height come straight from dimensions_hint.
-applyResizeIncHint      FIX: pure arithmetic, correct as written.  Will simply never fire: no Wayland resize increments.
-applyAspectHint         FIX: pure arithmetic, correct as written.  Will simply never fire: no Wayland aspect hint.
-mkAdjust                FIX: as applySizeHints, reading the window's hint out of RiverWindow.
-D                       FIX: the (width, height) alias returns with the functions above.
-isFixedSizeOrTransient  FIX: dimensions_hint min == max gives fixed-size; river_window_v1.parent gives transient.
-
-# --- Screen enumeration -----------------------------------------------------
-#
-# Already computed, just not exported under this name.  XMonad.River.WM.syncScreens
-# builds exactly this list from river_output_v1.position and .dimensions every
-# manage sequence, including the nubScreens-equivalent filtering.
-
-getCleanedScreenInfo    FIX: export what syncScreens already computes.  Signature loses its Display argument.
-
-
-################################################################################
-# 2. Implementable, but the timing semantics differ and that needs deciding
+# 1. Implementable, but the timing semantics differ and that needs deciding
 #
 # river permits window management state to change only during a manage
 # sequence, and applies rendering state only at render_finish.  Upstream these
@@ -92,7 +37,7 @@ setInitialProperties    FIX: set_borders + set_tiled + set_capabilities at adopt
 
 
 ################################################################################
-# 3. State across a restart -- the one worth raising upstream
+# 2. State across a restart -- the one worth raising upstream
 #
 # river object ids are per-connection and recycled after wl_display.delete_id,
 # so an id written by one window manager is meaningless to its successor.
@@ -113,7 +58,7 @@ stateFileName           FIX: returns with the rest; it is only a path.
 
 
 ################################################################################
-# 4. A degenerate answer would be truthful
+# 3. A degenerate answer would be truthful
 #
 # These have an obviously correct implementation under river, because the thing
 # they guard against cannot happen.  Exporting them is defensible: `pure ()` is
@@ -135,7 +80,7 @@ setButtonGrab           FIX: `pure ()` -- pointer bindings are objects and are a
 
 
 ################################################################################
-# 5. No fix -- Wayland has no such concept
+# 4. No fix -- Wayland has no such concept
 #
 # Where a name's *purpose* survives under a different spelling, that is noted.
 

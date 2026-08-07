@@ -1,5 +1,5 @@
---- src/XMonad/Layout.hs	2026-08-06 13:48:47.931613303 -0600
-+++ src-river/XMonad/Layout.hs	2026-08-06 18:14:31.106190712 -0600
+--- src/XMonad/Layout.hs	2026-08-06 18:16:26.319788823 -0600
++++ src-river/XMonad/Layout.hs	2026-08-06 18:16:26.226973436 -0600
 @@ -28,8 +28,7 @@
  
  import XMonad.Core

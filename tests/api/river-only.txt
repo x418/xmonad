@@ -23,6 +23,9 @@ RiverSeat            Likewise for a seat.
 LayerFocus           Whether a seat's keyboard has gone to a layer surface.
 layerHasFocus        Predicate on LayerFocus.  Focus requests must not be made while one holds.
 BorderColor          RGBA, as river_window_v1.set_borders takes it.  X11 used a Pixel and a colormap.
+noSizeHints          A window that has stated no preferred size.  X11 had no need: XGetWMNormalHints
+                   # always returned a SizeHints, with each field independently present or absent.
+                   # river reports the whole hint or nothing, so the empty case wants a name.
 
 # --- Driving the manage sequence --------------------------------------------
 #

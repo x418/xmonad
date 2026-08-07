@@ -19,12 +19,11 @@
 -- The 'X' monad, a state monad transformer over 'IO', for the window
 -- manager state, and support routines.
 --
--- This is the river backend's copy, shadowing @src\/XMonad\/Core.hs@ by
--- @hs-source-dirs@ precedence.  It is deliberately kept as close to that file
--- as it can be, because the difference between the two is the thing a reviewer
--- has to be able to see.  @diff src/XMonad/Core.hs src-river/XMonad/Core.hs@
--- should be readable in one sitting; if it stops being readable, something has
--- drifted that should not have.
+-- This is the river backend's copy of @src\/XMonad\/Core.hs@.  It is
+-- deliberately kept as close to that file as it can be -- 84% of it is shared,
+-- and the divergence is tracked as @patches\/XMonad\/Core.hs.patch@ so that an
+-- upstream change either applies cleanly or conflicts loudly.  See
+-- tests/check-copies.sh.
 --
 -- What differs, and only what differs:
 --
@@ -60,6 +59,7 @@ module XMonad.Core (
     -- that /do/ port faithfully are exported here instead -- a config still
     -- has to be able to write @LayoutClass l Window@.
     Window, Rectangle(..), Position, Dimension, KeyMask, KeySym, Button,
+    SizeHints(..), noSizeHints,
     -- * River plumbing
     --
     -- $river
@@ -157,6 +157,10 @@ data XConf = XConf
       -- ^ guards requests river only permits during a manage sequence
     , riverRestart  :: !(IORef (Maybe String))
       -- ^ command to exec once river confirms this window manager has stopped
+    , riverDragOrigin :: !(IORef (Position, Position))
+      -- ^ Where the pointer was when the current interactive operation began.
+      -- river reports a drag as a delta from its start; 'mouseDrag' promises
+      -- its caller an absolute position, so the origin has to be remembered.
     , normalBorder  :: !BorderColor   -- ^ border colour of unfocused windows
     , focusedBorder :: !BorderColor   -- ^ border colour of the focused window
     , keyActions    :: !(M.Map (KeyMask, KeySym) (X ()))

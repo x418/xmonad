@@ -1,6 +1,6 @@
 --- src/XMonad/Core.hs	2026-08-06 14:14:13.108989784 -0600
-+++ src-river/XMonad/Core.hs	2026-08-06 15:37:17.396906519 -0600
-@@ -16,13 +16,29 @@
++++ src-river/XMonad/Core.hs	2026-08-06 18:28:02.804029231 -0600
+@@ -16,13 +16,28 @@
  -- Copyright   :  (c) Spencer Janssen 2007
  -- License     :  BSD3-style (see LICENSE)
  --
@@ -11,12 +11,11 @@
  -- The 'X' monad, a state monad transformer over 'IO', for the window
  -- manager state, and support routines.
  --
-+-- This is the river backend's copy, shadowing @src\/XMonad\/Core.hs@ by
-+-- @hs-source-dirs@ precedence.  It is deliberately kept as close to that file
-+-- as it can be, because the difference between the two is the thing a reviewer
-+-- has to be able to see.  @diff src/XMonad/Core.hs src-river/XMonad/Core.hs@
-+-- should be readable in one sitting; if it stops being readable, something has
-+-- drifted that should not have.
++-- This is the river backend's copy of @src\/XMonad\/Core.hs@.  It is
++-- deliberately kept as close to that file as it can be -- 84% of it is shared,
++-- and the divergence is tracked as @patches\/XMonad\/Core.hs.patch@ so that an
++-- upstream change either applies cleanly or conflicts loudly.  See
++-- tests/check-copies.sh.
 +--
 +-- What differs, and only what differs:
 +--
@@ -34,7 +33,7 @@
  -----------------------------------------------------------------------------
  
  module XMonad.Core (
-@@ -33,16 +49,31 @@
+@@ -33,16 +48,32 @@
      SomeMessage(..), fromMessage, LayoutMessages(..),
      StateExtension(..), ExtensionClass(..), ConfExtension(..),
      runX, catchX, userCode, userCodeDef, io, catchIO, installSignalHandlers, uninstallSignalHandlers,
@@ -53,6 +52,7 @@
 +    -- that /do/ port faithfully are exported here instead -- a config still
 +    -- has to be able to write @LayoutClass l Window@.
 +    Window, Rectangle(..), Position, Dimension, KeyMask, KeySym, Button,
++    SizeHints(..), noSizeHints,
 +    -- * River plumbing
 +    --
 +    -- $river
@@ -130,7 +130,7 @@
      , extensibleState  :: !(M.Map String (Either String StateExtension))
      -- ^ stores custom state information.
      --
-@@ -94,11 +143,22 @@
+@@ -94,11 +143,26 @@
  
  -- | XConf, the (read-only) window manager configuration.
  data XConf = XConf
@@ -153,12 +153,16 @@
 +      -- ^ guards requests river only permits during a manage sequence
 +    , riverRestart  :: !(IORef (Maybe String))
 +      -- ^ command to exec once river confirms this window manager has stopped
++    , riverDragOrigin :: !(IORef (Position, Position))
++      -- ^ Where the pointer was when the current interactive operation began.
++      -- river reports a drag as a delta from its start; 'mouseDrag' promises
++      -- its caller an absolute position, so the origin has to be remembered.
 +    , normalBorder  :: !BorderColor   -- ^ border colour of unfocused windows
 +    , focusedBorder :: !BorderColor   -- ^ border colour of the focused window
      , keyActions    :: !(M.Map (KeyMask, KeySym) (X ()))
                                        -- ^ a mapping of key presses to actions
      , buttonActions :: !(M.Map (KeyMask, Button) (Window -> X ()))
-@@ -115,25 +175,23 @@
+@@ -115,25 +179,23 @@
  data XConfig l = XConfig
      { normalBorderColor  :: !String              -- ^ Non focused windows border color. Default: \"#dddddd\"
      , focusedBorderColor :: !String              -- ^ Focused windows border color. Default: \"#ff0000\"
@@ -188,7 +192,7 @@
      , handleExtraArgs    :: !([String] -> XConfig Layout -> IO (XConfig Layout))
                                                   -- ^ Modify the configuration, complain about extra arguments etc. with arguments that are not handled by default
      , extensibleConf     :: !(M.Map TypeRep ConfExtension)
-@@ -143,6 +201,14 @@
+@@ -143,6 +205,14 @@
                                                   -- provides additional information and a simple interface for using this.
      }
  
@@ -203,7 +207,7 @@
  
  type WindowSet   = StackSet  WorkspaceId (Layout Window) Window ScreenId ScreenDetail
  type WindowSpace = Workspace WorkspaceId (Layout Window) Window
-@@ -215,35 +281,10 @@
+@@ -215,35 +285,10 @@
  -- ---------------------------------------------------------------------
  -- Convenient wrappers to state
  
@@ -239,7 +243,7 @@
  ------------------------------------------------------------------------
  -- LayoutClass handling. See particular instances in Operations.hs
  
-@@ -273,20 +314,11 @@
+@@ -273,20 +318,11 @@
  -- * 'description'
  --
  -- Note that any code which /uses/ 'LayoutClass' methods should only
@@ -262,7 +266,7 @@
      runLayout :: Workspace WorkspaceId (layout a) a
                -> Rectangle
                -> X ([(a, Rectangle)], Maybe (layout a))
-@@ -294,25 +326,13 @@
+@@ -294,25 +330,13 @@
  
      -- | Given a 'Rectangle' in which to place the windows, and a 'Stack'
      -- of windows, return a list of windows and their corresponding
@@ -291,7 +295,7 @@
      pureLayout  :: layout a -> Rectangle -> Stack a -> [(a, Rectangle)]
      pureLayout _ r s = [(focus s, r)]
  
-@@ -320,28 +340,17 @@
+@@ -320,28 +344,17 @@
      emptyLayout :: layout a -> Rectangle -> X ([(a, Rectangle)], Maybe (layout a))
      emptyLayout _ _ = return ([], Nothing)
  
@@ -323,7 +327,7 @@
      description :: layout a -> String
      description      = show
  
-@@ -374,7 +383,7 @@
+@@ -374,7 +387,7 @@
  fromMessage :: Message m => SomeMessage -> Maybe m
  fromMessage (SomeMessage m) = cast m
  
@@ -332,7 +336,7 @@
  instance Message Event
  
  -- | 'LayoutMessages' are core messages that all layouts (especially stateful
-@@ -398,11 +407,12 @@
+@@ -398,11 +411,12 @@
      -- | Defines an initial value for the state extension
      initialValue :: a
      -- | Specifies whether the state extension should be
@@ -349,7 +353,7 @@
      extensionType :: a -> StateExtension
      extensionType = StateExtension
  
-@@ -417,6 +427,74 @@
+@@ -417,6 +431,74 @@
  data ConfExtension = forall a. Typeable a => ConfExtension a
  
  -- ---------------------------------------------------------------------
@@ -424,7 +428,7 @@
  -- General utilities
  
  -- | If-then-else lifted to a 'Monad'.
-@@ -459,17 +537,6 @@
+@@ -459,17 +541,6 @@
          dupTo fd stdInput
          closeFd fd
  
@@ -442,7 +446,7 @@
  -- | This is basically a map function, running a function in the 'X' monad on
  -- each workspace with the output of that function being the modified workspace.
  runOnWorkspaces :: (WindowSpace -> X WindowSpace) -> X ()
-@@ -494,7 +561,6 @@
+@@ -494,7 +565,6 @@
  -- * @cacheDir@: This directory is used to store temporary files that
  -- can easily be recreated such as the configuration binary and any
  -- intermediate object files generated by GHC.
@@ -450,7 +454,7 @@
  --
  -- For how these directories are chosen, see 'getDirectories'.
  --
-@@ -521,9 +587,6 @@
+@@ -521,9 +591,6 @@
  --    @XDG_CONFIG_HOME@, and @XDG_CACHE_HOME@ (or their respective
  --    fallbacks).  These directories are created if necessary.
  --
@@ -460,7 +464,7 @@
  getDirectories :: IO Directories
  getDirectories = xmEnvDirs <|> xmDirs <|> xdgDirs
    where
-@@ -574,9 +637,8 @@
+@@ -574,9 +641,8 @@
  binFileName  Directories{ cacheDir } = cacheDir </> "xmonad-" <> arch <> "-" <> os
  buildDirName Directories{ cacheDir } = cacheDir </> "build-" <> arch <> "-" <> os
  
@@ -471,7 +475,7 @@
  
  srcFileName, libFileName :: Directories -> FilePath
  srcFileName Directories{ cfgDir } = cfgDir </> "xmonad.hs"
-@@ -798,6 +860,10 @@
+@@ -798,6 +864,10 @@
  
  -- | Check GHC output for deprecation warnings and notify the user if there
  -- were any. Report success otherwise.
@@ -482,7 +486,7 @@
  checkCompileWarnings :: Directories -> IO ()
  checkCompileWarnings dirs = do
      ghcErr <- readFile (errFileName dirs)
-@@ -808,7 +874,6 @@
+@@ -808,7 +878,6 @@
                  ++ lines ghcErr
                  ++ ["","Please correct them or silence using {-# OPTIONS_GHC -Wno-deprecations #-}."]
          trace msg
@@ -490,7 +494,7 @@
        else
          trace "XMonad recompilation process exited with success!"
  
-@@ -820,10 +885,7 @@
+@@ -820,10 +889,7 @@
              ["Errors detected while compiling xmonad config: " <> srcFileName dirs]
              ++ lines (if null ghcErr then show status else ghcErr)
              ++ ["","Please check the file for errors."]
@@ -501,7 +505,7 @@
  
  -- | Recompile the xmonad configuration file when any of the following apply:
  --
-@@ -836,12 +898,8 @@
+@@ -836,12 +902,8 @@
  --
  --  * custom @build@ script is being used
  --
@@ -515,7 +519,7 @@
  --
  -- 'False' is returned if there are compilation errors.
  --
-@@ -869,8 +927,8 @@
+@@ -869,8 +931,8 @@
  whenX :: X Bool -> X () -> X ()
  whenX a f = a >>= \b -> when b f
  

@@ -1,11 +1,11 @@
--- | The vocabulary shared between the river backend and the modules it shares
--- with the X11 backend.
+-- | The vocabulary the river backend is built on.
 --
--- Three of these names -- 'Rectangle', 'Window' and 'Event' -- are re-exported
--- under their X11 spellings by the "Graphics.X11" and "Graphics.X11.Xlib.Extras"
--- shims, purely so that @src\/XMonad\/Layout.hs@ compiles unmodified under both
--- backends.  They are the only X11 names river reproduces, and they are
--- reproduced because they port without compromise, not for appearance's sake.
+-- Several names here -- 'Rectangle', 'Window', 'Event', 'SizeHints' -- keep
+-- their X11 spellings.  That is not imitation: each is a concept river has
+-- too, and keeping the name means the layout arithmetic and the manage-hook
+-- algebra are the same code on both backends rather than two copies that drift.
+-- Where river's version is narrower than X11's, the type says so and the
+-- haddock says why.
 module XMonad.River.Types
   ( -- * Geometry
     Rectangle(..)
@@ -15,6 +15,9 @@ module XMonad.River.Types
   , Window
     -- * Events
   , Event(..)
+    -- * Size hints
+  , SizeHints(..)
+  , noSizeHints
     -- * Accumulated compositor state
   , RiverWindow(..)
   , RiverOutput(..)
@@ -88,6 +91,47 @@ data Event
   deriving (Eq, Show)
 
 --------------------------------------------------------------------------------
+-- Size hints
+
+-- | What river tells the window manager about a window's preferred size.
+--
+-- Shaped like X11's @SizeHints@ so that the size-hint arithmetic in
+-- "XMonad.Operations" is the same pure code on both backends, and deliberately
+-- narrower: 'river_window_v1.dimensions_hint' carries a minimum and a maximum
+-- and nothing else.
+--
+-- The three fields that are always 'Nothing' are not oversights.  Wayland has
+-- no resize increments, no aspect ratio hint and no base size; there is
+-- nothing for them to be read from, on any compositor.  They are kept so that
+-- the arithmetic -- which already does the right thing with an absent hint --
+-- needs no river-specific variant, and so that a layout written against
+-- xmonad's 'SizeHints' still typechecks.
+--
+-- X11's @sh_win_gravity@ is absent entirely: gravity describes how a window
+-- moves when its parent resizes, and Wayland has neither the parent
+-- relationship nor the concept.
+data SizeHints = SizeHints
+  { sh_min_size    :: Maybe (Dimension, Dimension)
+  , sh_max_size    :: Maybe (Dimension, Dimension)
+  , sh_resize_inc  :: Maybe (Dimension, Dimension)
+    -- ^ Always 'Nothing'; Wayland has no resize increment hint.
+  , sh_aspect      :: Maybe ((Dimension, Dimension), (Dimension, Dimension))
+    -- ^ Always 'Nothing'; Wayland has no aspect ratio hint.
+  , sh_base_size   :: Maybe (Dimension, Dimension)
+    -- ^ Always 'Nothing'; Wayland has no base size.
+  } deriving (Eq, Show, Read)
+
+-- | A window that has told us nothing about its preferred size.
+noSizeHints :: SizeHints
+noSizeHints = SizeHints
+  { sh_min_size   = Nothing
+  , sh_max_size   = Nothing
+  , sh_resize_inc = Nothing
+  , sh_aspect     = Nothing
+  , sh_base_size  = Nothing
+  }
+
+--------------------------------------------------------------------------------
 -- Accumulated compositor state
 
 -- | Everything the compositor has told us about one window.
@@ -105,6 +149,9 @@ data RiverWindow = RiverWindow
   , rwIdentifier :: !(Maybe ByteString)
   , rwParent     :: !(Maybe ObjectId)
   , rwDimensions :: !(Int32, Int32)
+  , rwSizeHints  :: !SizeHints
+    -- ^ From @river_window_v1.dimensions_hint@.  A zero or negative bound
+    -- means the window did not state one, and becomes 'Nothing'.
   , rwNew        :: !Bool
   , rwClosed     :: !Bool
   , rwHidden     :: !Bool
@@ -129,6 +176,11 @@ data RiverSeat = RiverSeat
   , rsRemoved     :: !Bool
   , rsLayerObject :: !(Maybe ObjectId)
   , rsLayerFocus  :: !LayerFocus
+  , rsPointer     :: !(Position, Position)
+    -- ^ Latest @river_seat_v1.pointer_position@, in the compositor's logical
+    -- coordinate space.  Recorded because an interactive drag reports a delta
+    -- from where it started, and 'XMonad.Operations.mouseDrag' promises its
+    -- caller an absolute position.
   } deriving (Eq, Show)
 
 -- | Whether a seat's keyboard currently belongs to a layer surface.

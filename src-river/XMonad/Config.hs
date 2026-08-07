@@ -10,19 +10,19 @@
 -- Copyright   :  (c) Spencer Janssen 2007
 -- License     :  BSD3-style (see LICENSE)
 --
--- The default configuration, shadowing @src\/XMonad\/Config.hs@.
+-- The river backend's copy of @src\/XMonad\/Config.hs@.
 --
 -- Differences from the X11 default, and only these:
 --
 -- * There are no event masks to select, so @clientMask@ and @rootMask@ are
 --   gone from 'XConfig' and from here.
--- * The default terminal follows the Wayland convention.
+-- * The default terminal and launcher follow the Wayland convention.
 -- * @mod-q@ restarts through 'sendRestart' rather than shelling out to
 --   @xmonad --restart@, and the help binding writes to stderr instead of
 --   spawning an @xmessage@, which is an X11 client.
--- * @mod-button1@ and @mod-button3@ are unbound: interactive move and resize
---   go through river's seat pointer-operation cycle, which is not wired up.
---   Binding them to something inert would be worse than leaving them free.
+-- * @mod-shift-q@ ends the Wayland session rather than exiting the process,
+--   because under river exiting only hands the seat to the next window
+--   manager -- the compositor keeps running.
 --
 ------------------------------------------------------------------------------
 
@@ -162,8 +162,10 @@ xK_r        = 0x0072
 xK_t        = 0x0074
 xK_w        = 0x0077
 
-button2 :: Button
+button1, button2, button3 :: Button
+button1 = 1
 button2 = 2
+button3 = 3
 
 -- | The xmonad key bindings. Add, modify or remove key bindings here.
 keys :: XConfig Layout -> M.Map (KeyMask, KeySym) (X ())
@@ -229,15 +231,20 @@ keys conf@XConfig {XMonad.modMask = modMask} = M.fromList $
 
 -- | Mouse bindings: default actions bound to mouse events.
 --
--- Only the raise binding survives.  Interactive move and resize are driven by
--- river through the seat's @op_start_pointer@ \/ @op_delta@ \/ @op_release@
--- cycle rather than by the window manager grabbing the pointer, and that is
--- not wired into 'XConf' yet.  Leaving mod-button1 and mod-button3 unbound is
--- better than binding them to something that does nothing.
+-- Interactive move and resize run over river's seat operation cycle
+-- (@op_start_pointer@ \/ @op_delta@ \/ @op_release@) rather than by the window
+-- manager grabbing the pointer, but the bindings are the ones xmonad has
+-- always had.
 mouseBindings :: XConfig Layout -> M.Map (KeyMask, Button) (Window -> X ())
 mouseBindings XConfig {XMonad.modMask = modMask} = M.fromList
+    -- mod-button1 %! Set the window to floating mode and move by dragging
+    [ ((modMask, button1), \w -> focus w >> mouseMoveWindow w
+                                         >> windows W.shiftMaster)
     -- mod-button2 %! Raise the window to the top of the stack
-    [ ((modMask, button2), windows . (W.shiftMaster .) . W.focusWindow)
+    , ((modMask, button2), windows . (W.shiftMaster .) . W.focusWindow)
+    -- mod-button3 %! Set the window to floating mode and resize by dragging
+    , ((modMask, button3), \w -> focus w >> mouseResizeWindow w
+                                         >> windows W.shiftMaster)
     ]
 
 instance (a ~ Choose Tall (Choose (Mirror Tall) Full)) => Default (XConfig a) where
@@ -315,4 +322,6 @@ help = unlines ["The default modifier key is 'alt'. Default keybindings:",
     "mod-Shift-{w,e,r}  Move client to screen 1, 2, or 3",
     "",
     "-- Mouse bindings: default actions bound to mouse events",
-    "mod-button2  Raise the window to the top of the stack"]
+    "mod-button1  Set the window to floating mode and move by dragging",
+    "mod-button2  Raise the window to the top of the stack",
+    "mod-button3  Set the window to floating mode and resize by dragging"]

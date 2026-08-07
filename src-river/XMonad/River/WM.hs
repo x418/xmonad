@@ -35,6 +35,7 @@ import Data.Bits ((.&.))
 import Data.IORef
 import Data.List (sortOn)
 import Data.Monoid (All(..), appEndo)
+import Data.Int (Int32)
 import Data.Word (Word32)
 import Control.Exception (catch)
 import System.Environment (getArgs, getExecutablePath)
@@ -72,6 +73,8 @@ data Runtime = Runtime
   , rtManager     :: !ObjectId
     -- ^ Needed by binding callbacks, which run outside the 'X' monad and must
     -- request a manage sequence with @manage_dirty@.
+  , rtConn        :: !Connection
+    -- ^ Likewise: 'queueAction' has to ask for the sequence it queued into.
   , rtStartupDone :: !(IORef Bool)
   , rtLayerShell  :: !(Maybe ObjectId)
     -- ^ The @river_layer_shell_v1@ global, when the compositor offers it.
@@ -124,6 +127,7 @@ run conn manager bindings layerShell userConfig dirs = do
   dirtyRef   <- newIORef False
   manageRef  <- newIORef False
   restartRef <- newIORef Nothing
+  dragOrigin <- newIORef (0, 0)
   rt <- Runtime
           <$> newIORef []
           <*> newIORef M.empty
@@ -133,6 +137,7 @@ run conn manager bindings layerShell userConfig dirs = do
           <*> newIORef S.empty
           <*> newIORef Nothing
           <*> pure manager
+          <*> pure conn
           <*> newIORef False
           <*> pure layerShell
           <*> newIORef Nothing
@@ -161,6 +166,7 @@ run conn manager bindings layerShell userConfig dirs = do
         , riverDirty = dirtyRef
         , inManageSeq = manageRef
         , riverRestart = restartRef
+        , riverDragOrigin = dragOrigin
         , normalBorder = parseColor (normalBorderColor userConfig)
         , focusedBorder = parseColor (focusedBorderColor userConfig)
         , keyActions = keys userConfig userConfig
@@ -269,6 +275,7 @@ addWindow win = do
     , rwAppId = Nothing, rwTitle = Nothing, rwPid = Nothing
     , rwIdentifier = Nothing, rwParent = Nothing
     , rwDimensions = (0, 0)
+    , rwSizeHints = noSizeHints
     , rwNew = True, rwClosed = False, rwHidden = False
     }
   io $ riverWindowV1Listen conn win $ \case
@@ -281,6 +288,15 @@ addWindow win = do
       w { rwParent = if isNullObject p then Nothing else Just p }
     RiverWindowV1Dimensions width height ->
       adjust ref win $ \w -> w { rwDimensions = (width, height) }
+    -- A bound of zero or less means the window did not state one.
+    RiverWindowV1DimensionsHint minW minH maxW maxH ->
+      adjust ref win $ \w -> w { rwSizeHints = SizeHints
+        { sh_min_size   = sizeBound minW minH
+        , sh_max_size   = sizeBound maxW maxH
+        , sh_resize_inc = Nothing
+        , sh_aspect     = Nothing
+        , sh_base_size  = Nothing
+        } }
     RiverWindowV1PointerMoveRequested _ -> pure ()
     _ -> pure ()
 
@@ -329,11 +345,27 @@ addSeat rt seat = do
 
   io $ modifyIORef' ref $ M.insert seat RiverSeat
     { rsObject = seat, rsRemoved = False
-    , rsLayerObject = mLayer, rsLayerFocus = LayerFocusNone }
+    , rsLayerObject = mLayer, rsLayerFocus = LayerFocusNone
+    , rsPointer = (0, 0) }
   io $ riverSeatV1Listen conn seat $ \case
     RiverSeatV1Removed -> adjust ref seat $ \s -> s { rsRemoved = True }
     RiverSeatV1PointerEnter win -> writeIORef (rtHovered rt) (Just win)
     RiverSeatV1PointerLeave -> writeIORef (rtHovered rt) Nothing
+    RiverSeatV1PointerPosition x y ->
+      adjust ref seat $ \s -> s { rsPointer = (x, y) }
+    -- An interactive operation reports the total offset since it began.
+    -- XMonad.Operations.mouseDrag stashed where the pointer was at the time,
+    -- so the absolute position its caller expects is origin + delta.
+    RiverSeatV1OpDelta dx dy -> queueAction rt $ do
+      drag <- gets dragging
+      whenJust drag $ \(motion, _) -> do
+        (ox, oy) <- io . readIORef =<< asks riverDragOrigin
+        motion (ox + dx) (oy + dy)
+    RiverSeatV1OpRelease -> do
+      riverSeatV1OpEnd conn seat
+      queueAction rt $ do
+        drag <- gets dragging
+        whenJust drag $ \(_, cleanup) -> cleanup
     _ -> pure ()
 
 --------------------------------------------------------------------------------
@@ -568,8 +600,16 @@ linuxButton = \case
   n -> 0x110 + fromIntegral n
 
 -- | Queue an action to run at the start of the next manage sequence.
+-- | Queue an action to run at the start of the next manage sequence, and ask
+-- river for one.
+--
+-- Everything that fires outside a sequence -- bindings, and the deltas of an
+-- interactive drag -- has to go through here, because river only permits
+-- window management state to change during a sequence.
 queueAction :: Runtime -> X () -> IO ()
-queueAction rt act = modifyIORef' (rtPending rt) (act :)
+queueAction rt act = do
+  modifyIORef' (rtPending rt) (act :)
+  riverWindowManagerV1ManageDirty (rtConn rt) (rtManager rt)
 
 runPending :: Runtime -> X ()
 runPending rt = do
@@ -660,6 +700,12 @@ renderSequence rt = do
   -- Stacking order: the layout list is in the desired bottom-to-top order.
   forM_ placements $ \(win, _) -> forM_ (M.lookup win known) $ \w ->
     io (riverNodeV1PlaceTop conn (rwNode w))
+
+-- | A dimension bound river reports as zero or less was not stated.
+sizeBound :: Int32 -> Int32 -> Maybe (Dimension, Dimension)
+sizeBound w h
+  | w > 0 && h > 0 = Just (fromIntegral w, fromIntegral h)
+  | otherwise      = Nothing
 
 allEdges :: Word32
 allEdges = riverWindowV1EdgesTop + riverWindowV1EdgesBottom

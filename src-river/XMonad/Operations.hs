@@ -38,7 +38,7 @@ module XMonad.Operations (
     -- * Manage One Window
     unmanage, killWindow, kill, isClient,
     hide, reveal,
-    focus,
+    focus, isFixedSizeOrTransient,
 
     -- * Manage Windows
     windows, refresh, rescreen, modifyWindowSet, windowBracket, windowBracket_,
@@ -50,11 +50,17 @@ module XMonad.Operations (
     -- * Floating Layer
     float, floatLocation,
 
+    -- * Window Size Hints
+    D, mkAdjust, applySizeHints, applySizeHints', applySizeHintsContents,
+    applyAspectHint, applyResizeIncHint, applyMaxSizeHint,
+
     -- * Rectangles
     containedIn, nubScreens, pointWithin, scaleRationalRect,
+    getCleanedScreenInfo,
 
     -- * Pointer
     warpPointer,
+    mouseDrag, mouseMoveWindow, mouseResizeWindow,
 
     -- * Lifecycle
     restart, exitSession,
@@ -69,7 +75,7 @@ import XMonad.River.Protocol.WindowManagement
 import qualified XMonad.StackSet as W
 
 import Data.IORef (readIORef, writeIORef)
-import Data.List            (find, nub)
+import Data.List            (find, nub, sortOn)
 import Data.Maybe
 import Data.Monoid          (Any(..))
 import Data.Ratio           ((%))
@@ -206,6 +212,31 @@ containedIn r1@(Rectangle x1 y1 w1 h1) r2@(Rectangle x2 y2 w2 h2)
 nubScreens :: [Rectangle] -> [Rectangle]
 nubScreens xs = nub . filter (\x -> not $ any (x `containedIn`) xs) $ xs
 
+-- | The screen rectangles, cleaned according to the rules for 'nubScreens'.
+--
+-- Under X11 this queried xinerama and therefore needed a 'Display'.  Here the
+-- outputs are already known, so the argument is gone.  Removed outputs and
+-- zero-sized ones are skipped, and an output's layer-shell area is preferred
+-- to its raw rectangle where one has been reported, so that a bar or dock
+-- claiming an exclusive zone shrinks the tiling area rather than being tiled
+-- over.
+--
+-- Ordering is by position, which is what keeps screen ids stable across a
+-- monitor being unplugged and replugged.
+getCleanedScreenInfo :: X [Rectangle]
+getCleanedScreenInfo = do
+    outs <- io . readIORef =<< asks riverOutputs
+    pure $ nubScreens
+        [ rect
+        | o <- sortOn roPosition (filter (not . roRemoved) (M.elems outs))
+        , let (x, y) = roPosition o
+        , let (width, height) = roSize o
+        , width > 0 && height > 0
+        , let rect = case roLayerArea o of
+                Just a | rect_width a > 0 && rect_height a > 0 -> a
+                _ -> Rectangle x y (fromIntegral width) (fromIntegral height)
+        ]
+
 -- | Given a point, determine the screen (if any) that contains it.
 pointScreen :: Position -> Position
             -> X (Maybe (W.Screen WorkspaceId (Layout Window) Window ScreenId ScreenDetail))
@@ -324,6 +355,74 @@ warpPointer x y = do
     seats <- io . readIORef =<< asks riverSeats
     forM_ (M.keys seats) $ \seat -> io (riverSeatV1PointerWarp conn seat x y)
 
+-- | Accumulate mouse motion events.
+--
+-- river drives interactive operations through the seat rather than by letting
+-- the window manager grab the pointer: @op_start_pointer@ begins one,
+-- @op_delta@ reports the total offset since it began, and @op_release@ fires
+-- when the button goes up.  "XMonad.River.WM" routes those two events back
+-- here, so the @(motion, cleanup)@ contract is the one xmonad has always had.
+--
+-- The offset is turned back into an absolute position by adding the pointer
+-- position recorded when the operation started, so the callback still receives
+-- root coordinates.
+mouseDrag :: (Position -> Position -> X ()) -> X () -> X ()
+mouseDrag f done = do
+    drag <- gets dragging
+    case drag of
+        Just _ -> return () -- already dragging
+        Nothing -> do
+            conn <- asks riverConn
+            seats <- io . readIORef =<< asks riverSeats
+            case M.elems seats of
+                [] -> return ()
+                (s:_) -> do
+                    origin <- asks riverDragOrigin
+                    io (writeIORef origin (rsPointer s))
+                    io (riverSeatV1OpStartPointer conn (rsObject s))
+                    modify $ \st -> st { dragging = Just (f, cleanup) }
+  where
+    cleanup = do
+        modify $ \st -> st { dragging = Nothing }
+        done
+
+-- | Drag the window under the cursor with the mouse while it is dragged.
+mouseMoveWindow :: Window -> X ()
+mouseMoveWindow w = whenX (isClient w) $ do
+    known <- io . readIORef =<< asks riverWindows
+    ws <- gets windowset
+    let sr = screenRect (W.screenDetail (W.current ws))
+    forM_ (M.lookup w known) $ \_ -> do
+        (ox, oy) <- io . readIORef =<< asks riverDragOrigin
+        mouseDrag
+            (\ex ey -> do
+                node <- io . readIORef =<< asks riverWindows
+                conn <- asks riverConn
+                forM_ (M.lookup w node) $ \rw ->
+                    io $ riverNodeV1SetPosition conn (rwNode rw)
+                           (rect_x sr + (ex - ox)) (rect_y sr + (ey - oy))
+                float w)
+            (float w)
+
+-- | Resize the window under the cursor with the mouse while it is dragged.
+mouseResizeWindow :: Window -> X ()
+mouseResizeWindow w = whenX (isClient w) $ do
+    known <- io . readIORef =<< asks riverWindows
+    forM_ (M.lookup w known) $ \rw0 -> do
+        let (w0, h0) = rwDimensions rw0
+            hints = rwSizeHints rw0
+        (ox, oy) <- io . readIORef =<< asks riverDragOrigin
+        mouseDrag
+            (\ex ey -> do
+                conn <- asks riverConn
+                let (width, height) = applySizeHintsContents hints
+                        ( fromIntegral w0 + (ex - ox)
+                        , fromIntegral h0 + (ey - oy) )
+                io $ riverWindowV1ProposeDimensions conn w
+                       (fromIntegral width) (fromIntegral height)
+                float w)
+            (float w)
+
 -- ---------------------------------------------------------------------
 -- Lifecycle
 
@@ -358,3 +457,89 @@ exitSession = do
     conn <- asks riverConn
     manager <- asks riverManager
     io (riverWindowManagerV1ExitSession conn manager)
+
+-- ---------------------------------------------------------------------
+-- Support for window size hints
+--
+-- The arithmetic below is exactly upstream's, unchanged, and that is the
+-- point: it is pure, it already treats every hint as optional, and river's
+-- 'SizeHints' simply has fewer of them populated.  A hint river cannot report
+-- leaves the corresponding function as the identity, which is what it always
+-- did for a window that declared no such hint under X11 either.
+
+-- | An alias for a (width, height) pair
+type D = (Dimension, Dimension)
+
+-- | Detect whether a window has fixed size or is transient.
+--
+-- Fixed size is @dimensions_hint@ reporting an equal minimum and maximum;
+-- transient is @river_window_v1.parent@, which is @xdg_toplevel.set_parent@ --
+-- the faithful translation of X11's @WM_TRANSIENT_FOR@.
+isFixedSizeOrTransient :: Window -> X Bool
+isFixedSizeOrTransient w = do
+    known <- io . readIORef =<< asks riverWindows
+    pure $ case M.lookup w known of
+        Nothing -> False
+        Just rw ->
+            let sh = rwSizeHints rw
+                isFixedSize = isJust (sh_min_size sh) && sh_min_size sh == sh_max_size sh
+                isTransient = isJust (rwParent rw)
+            in isFixedSize || isTransient
+
+-- | Given a window, build an adjuster function that will reduce the given
+-- dimensions according to the window's border width and size hints.
+mkAdjust :: Window -> X (D -> D)
+mkAdjust w = do
+    known <- io . readIORef =<< asks riverWindows
+    bw <- asks (borderWidth . config)
+    pure $ case M.lookup w known of
+        Nothing -> id
+        Just rw -> applySizeHints bw (rwSizeHints rw)
+
+-- | Reduce the dimensions if needed to comply to the given SizeHints, taking
+-- window borders into account.
+applySizeHints :: Integral a => Dimension -> SizeHints -> (a, a) -> D
+applySizeHints bw sh =
+    tmap (+ 2 * bw) . applySizeHintsContents sh . tmap (subtract $ 2 * fromIntegral bw)
+    where
+    tmap f (x, y) = (f x, f y)
+
+-- | Reduce the dimensions if needed to comply to the given SizeHints.
+applySizeHintsContents :: Integral a => SizeHints -> (a, a) -> D
+applySizeHintsContents sh (w, h) =
+    applySizeHints' sh (fromIntegral $ max 1 w, fromIntegral $ max 1 h)
+
+-- | Use size hints to scale a pair of dimensions.
+applySizeHints' :: SizeHints -> D -> D
+applySizeHints' sh =
+      maybe id applyMaxSizeHint                   (sh_max_size   sh)
+    . maybe id (\(bw, bh) (w, h) -> (w+bw, h+bh)) (sh_base_size  sh)
+    . maybe id applyResizeIncHint                 (sh_resize_inc sh)
+    . maybe id applyAspectHint                    (sh_aspect     sh)
+    . maybe id (\(bw,bh) (w,h)   -> (w-bw, h-bh)) (sh_base_size  sh)
+
+-- | Reduce the dimensions so their aspect ratio falls between the two given
+-- aspect ratios.
+--
+-- Correct as written, and under river it never fires: Wayland has no aspect
+-- ratio hint, so 'sh_aspect' is always 'Nothing'.
+applyAspectHint :: (D, D) -> D -> D
+applyAspectHint ((minx, miny), (maxx, maxy)) x@(w,h)
+    | or [minx < 1, miny < 1, maxx < 1, maxy < 1] = x
+    | w * maxy > h * maxx                         = (h * maxx `div` maxy, h)
+    | w * miny < h * minx                         = (w, w * miny `div` minx)
+    | otherwise                                   = x
+
+-- | Reduce the dimensions so they are a multiple of the size increments.
+--
+-- As 'applyAspectHint': correct, and never fires under river.
+applyResizeIncHint :: D -> D -> D
+applyResizeIncHint (iw,ih) x@(w,h) =
+    if iw > 0 && ih > 0 then (w - w `mod` iw, h - h `mod` ih) else x
+
+-- | Reduce the dimensions if they exceed the given maximum dimensions.
+--
+-- This one does fire: @dimensions_hint@ carries a maximum.
+applyMaxSizeHint  :: D -> D -> D
+applyMaxSizeHint (mw,mh) x@(w,h) =
+    if mw > 0 && mh > 0 then (min w mw,min h mh) else x
