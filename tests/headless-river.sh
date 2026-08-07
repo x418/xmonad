@@ -65,13 +65,17 @@ for c in foot alacritty kitty weston-terminal; do
     command -v "$c" >/dev/null && { CLIENT=$c; break; }
 done
 
-WM=$(find .stack-work/install -path '*9.10*' -name xmonad -type f -perm -u+x 2>/dev/null | head -1)
+# A config of your own can be tested by pointing this at its binary, which is
+# how xmonad-contrib gets exercised: build a config that imports the modules
+# you care about and run it here.
+WM=${XMONAD_RIVER_WM:-}
+[ -n "$WM" ] || WM=$(find .stack-work/install -path '*9.10*' -name xmonad -type f -perm -u+x 2>/dev/null | head -1)
 if [ -z "$WM" ]; then
     echo "headless-river: no river build found; run" >&2
     echo "  stack build --flag xmonad:river" >&2
     exit 1
 fi
-WM=$PWD/$WM
+case "$WM" in /*) ;; *) WM=$PWD/$WM ;; esac
 
 # Short, for the sockaddr_un limit above.
 RT=$(mktemp -d /tmp/xr.XXXXXX)
@@ -85,6 +89,8 @@ cat > "$RT/init.sh" <<EOF
 # river runs this instead of the default init.  It starts the window manager,
 # which connects back as a client, then a client to give it something to do.
 "$WM" > "$WMLOG" 2>&1 &
+sleep 3
+${CLIENT:+$CLIENT >> "$WMLOG" 2>&1 &}
 sleep 3
 ${CLIENT:+$CLIENT >> "$WMLOG" 2>&1 &}
 sleep $DURATION
@@ -133,6 +139,11 @@ if [ -n "$CLIENT" ]; then
     [ "$configures" -gt 0 ] \
         && report "river configured a window from the layout ($configures)" ok \
         || report "river configured a window from the layout (got 0)" no
+    # Two windows configured in one sequence is the layout tiling rather than
+    # merely placing: both were given geometry from the same run of it.
+    [ "$configures" -gt 1 ] \
+        && report "the layout tiled two windows at once ($configures)" ok \
+        || report "the layout tiled two windows at once (got $configures)" no
 fi
 
 if [ "$status" -ne 0 ]; then
