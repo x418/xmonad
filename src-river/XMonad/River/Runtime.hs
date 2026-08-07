@@ -16,6 +16,10 @@ module XMonad.River.Runtime
   , lookupGeometry
   , publishSizeHints
   , lookupSizeHints
+  , setBorderWidth
+  , setBorderColor
+  , lookupBorderOverride
+  , forgetBorderOverride
   ) where
 
 import Control.Concurrent (ThreadId, myThreadId)
@@ -29,7 +33,7 @@ import qualified Control.Exception as E
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
-import XMonad.River.Types (Window, WindowAttributes, SizeHints, noSizeHints)
+import XMonad.River.Types (BorderColor, Dimension, Window, WindowAttributes, SizeHints, noSizeHints)
 
 {-# NOINLINE geometryRef #-}
 geometryRef :: IORef (M.Map Window WindowAttributes)
@@ -71,6 +75,43 @@ publishSizeHints = writeIORef hintsRef
 -- correct total answer here and no reason to make callers handle a failure.
 lookupSizeHints :: Window -> IO SizeHints
 lookupSizeHints w = M.findWithDefault noSizeHints w <$> readIORef hintsRef
+
+{-# NOINLINE bordersRef #-}
+bordersRef :: IORef (M.Map Window (Maybe Dimension, Maybe BorderColor))
+bordersRef = unsafePerformIO (newIORef M.empty)
+
+-- | Override the border width of one window, or its colour.
+--
+-- X11 had no state to keep for this: @setWindowBorderWidth@ was a call on the
+-- server, and the value stuck until something set it again.  river has no such
+-- memory -- borders are rendering state, reapplied from scratch during every
+-- render sequence -- so the override has to be remembered here for
+-- "XMonad.River.WM" to apply.
+--
+-- One consequence is worth stating: an override set here is /sticky/, where
+-- X11's colour was overwritten by the next @windows@ call.  It has to be.  A
+-- non-sticky override under river would last until the next render sequence,
+-- which is to say no time at all.
+setBorderWidth :: Window -> Dimension -> IO ()
+setBorderWidth w n = modifyIORef' bordersRef $
+  M.alter (\o -> Just (Just n, maybe Nothing snd o)) w
+
+setBorderColor :: Window -> BorderColor -> IO ()
+setBorderColor w c = modifyIORef' bordersRef $
+  M.alter (\o -> Just (maybe Nothing fst o, Just c)) w
+
+-- | What has been overridden for one window.  Total: no override is
+-- @(Nothing, Nothing)@.
+lookupBorderOverride :: Window -> IO (Maybe Dimension, Maybe BorderColor)
+lookupBorderOverride w = M.findWithDefault (Nothing, Nothing) w <$> readIORef bordersRef
+
+-- | Drop a window's overrides, once river says it is gone.
+--
+-- Not housekeeping that can be skipped: river recycles object ids, so an entry
+-- left behind would reappear on an unrelated window as a border nobody asked
+-- for.
+forgetBorderOverride :: Window -> IO ()
+forgetBorderOverride w = modifyIORef' bordersRef (M.delete w)
 
 -- | Thrown into the event loop thread to ask for a restart.
 data RestartRequested = RestartRequested deriving (Show)

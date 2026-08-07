@@ -203,6 +203,9 @@ XMonad | sendMessage | sendMessage :: Message a => a -> X ()
 XMonad | sendMessageWithNoRefresh | sendMessageWithNoRefresh :: Message a => a -> WindowSpace -> X ()
 XMonad | sendRestart | sendRestart :: IO ()
 XMonad | setLayout | setLayout :: Layout Window -> X ()
+XMonad | setWindowBorder | setWindowBorder :: Display -> Window -> BorderColor -> IO ()
+XMonad | setWindowBorderWidth | setWindowBorderWidth :: Display -> Window -> Dimension -> IO ()
+XMonad | setWindowBorderWithFallback | setWindowBorderWithFallback :: Display -> Window -> String -> BorderColor -> X ()
 XMonad | shiftMask | shiftMask :: KeyMask
 XMonad | spawn | spawn :: MonadIO m => String -> m ()
 XMonad | spawnPID | spawnPID :: MonadIO m => String -> m ProcessID
@@ -697,6 +700,8 @@ XMonad.Core | runOnWorkspaces | runOnWorkspaces :: (WindowSpace -> X WindowSpace
 XMonad.Core | runQuery | runQuery :: Query a -> Window -> X a
 XMonad.Core | runX | runX :: XConf -> XState -> X a -> IO (a, XState)
 XMonad.Core | sendRestart | sendRestart :: IO ()
+XMonad.Core | setWindowBorder | setWindowBorder :: Display -> Window -> BorderColor -> IO ()
+XMonad.Core | setWindowBorderWidth | setWindowBorderWidth :: Display -> Window -> Dimension -> IO ()
 XMonad.Core | shiftMask | shiftMask :: KeyMask
 XMonad.Core | spawn | spawn :: MonadIO m => String -> m ()
 XMonad.Core | spawnPID | spawnPID :: MonadIO m => String -> m ProcessID
@@ -1153,6 +1158,7 @@ XMonad.Operations | screenWorkspace | screenWorkspace :: ScreenId -> X (Maybe Wo
 XMonad.Operations | sendMessage | sendMessage :: Message a => a -> X ()
 XMonad.Operations | sendMessageWithNoRefresh | sendMessageWithNoRefresh :: Message a => a -> WindowSpace -> X ()
 XMonad.Operations | setLayout | setLayout :: Layout Window -> X ()
+XMonad.Operations | setWindowBorderWithFallback | setWindowBorderWithFallback :: Display -> Window -> String -> BorderColor -> X ()
 XMonad.Operations | unmanage | unmanage :: Window -> X ()
 XMonad.Operations | updateLayout | updateLayout :: WorkspaceId -> Maybe (Layout Window) -> X ()
 XMonad.Operations | warpPointer | warpPointer :: Position -> Position -> X ()

@@ -37,7 +37,7 @@
 module XMonad.Operations (
     -- * Manage One Window
     unmanage, killWindow, kill, isClient,
-    hide, reveal,
+    hide, reveal, setWindowBorderWithFallback,
     focus, isFixedSizeOrTransient,
 
     -- * Manage Windows
@@ -173,6 +173,18 @@ hide w = whenX (gets (S.member w . mapped)) $
 reveal :: Window -> X ()
 reveal w = whenX (isClient w) $
     modify (\s -> s { mapped = S.insert w (mapped s) })
+
+-- | Set the border colour of a window from a colour name, falling back to a
+-- 'BorderColor' if the name does not parse.
+--
+-- X11's fallback existed because @initColor@ asked the server to allocate the
+-- colour and that could fail for reasons a config could not predict -- a full
+-- colormap, an unknown name from @rgb.txt@.  Here the only way to fail is a
+-- string that is not @\"#rrggbb\"@, since nothing is allocated and there is no
+-- server to ask.  The fallback is still used, just for a narrower reason.
+setWindowBorderWithFallback :: Display -> Window -> String -> BorderColor -> X ()
+setWindowBorderWithFallback dpy w color fallback =
+    io (setWindowBorder dpy w (fromMaybe fallback (parseColorMaybe color)))
 
 -- | Is the window under management by xmonad?
 isClient :: Window -> X Bool

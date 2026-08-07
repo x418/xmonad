@@ -19,6 +19,11 @@ module XMonad.River (
     RiverWindow(..), RiverOutput(..), RiverSeat(..),
     LayerFocus(..), layerHasFocus,
     BorderColor,
+    -- | @\"#rrggbb\"@ to the RGBA form river wants.  X11 resolved a colour
+    -- name against the server's colormap and could fail for reasons a config
+    -- could not see; here the only failure is a string that is not a colour,
+    -- and 'parseColor' answers with opaque black rather than failing at all.
+    parseColor, parseColorMaybe,
     noSizeHints,
 
     -- * Working off the event loop

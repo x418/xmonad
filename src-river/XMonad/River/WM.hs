@@ -34,7 +34,7 @@ import Control.Monad.State (gets, modify)
 import Data.Bits ((.&.))
 import Data.IORef
 import Data.List (isSuffixOf, sortOn)
-import Data.Maybe (isNothing)
+import Data.Maybe (fromMaybe, isNothing)
 import Data.Monoid (All(..), appEndo)
 import Data.Int (Int32)
 import Data.Word (Word32)
@@ -50,7 +50,7 @@ import qualified Data.Set as S
 
 import XMonad.Core
 import XMonad.Operations (StateFile (..), broadcastMessage, focus, readStateFile, writeStateToFile)
-import XMonad.River.Runtime (RestartRequested(..), pidFilePath, publishGeometry, publishSizeHints, sendRestart, setMainThread, warnUnimplemented)
+import XMonad.River.Runtime (RestartRequested(..), forgetBorderOverride, lookupBorderOverride, pidFilePath, publishGeometry, publishSizeHints, sendRestart, setMainThread, warnUnimplemented)
 import XMonad.River.Connection
 import XMonad.River.Keyboard (riverModifiers)
 import qualified XMonad.River.Mailbox as MB
@@ -638,6 +638,7 @@ reapClosed = do
   forM_ closed $ \w -> do
     modify $ \st -> st { windowset = W.delete (rwObject w) (windowset st) }
     io $ do
+      forgetBorderOverride (rwObject w)
       riverNodeV1Destroy conn (rwNode w)
       riverWindowV1Destroy conn (rwObject w)
       modifyIORef' ref (M.delete (rwObject w))
@@ -992,11 +993,21 @@ renderSequence rt = do
 
   forM_ placements $ \(win, r) -> forM_ (M.lookup win known) $ \w -> do
     io $ riverNodeV1SetPosition conn (rwNode w) (rect_x r) (rect_y r)
-    when (bw > 0) $ do
-      let (red, green, blue, alpha) =
-            if Just win == mFocus then focusedCol else normalCol
-      io $ riverWindowV1SetBorders conn win allEdges (fromIntegral bw)
-             red green blue alpha
+    -- Borders are rendering state, so river keeps no memory of them: every
+    -- render sequence states them again from scratch.  That is why a
+    -- per-window override has to be stored rather than issued directly -- see
+    -- 'XMonad.Core.setWindowBorderWidth'.
+    (mWidth, mColor) <- io (lookupBorderOverride win)
+    let width = fromMaybe bw mWidth
+        (red, green, blue, alpha) = case mColor of
+          Just c  -> c
+          Nothing -> if Just win == mFocus then focusedCol else normalCol
+    -- Unconditional, where this used to skip a zero width entirely: an
+    -- override *to* zero is how NoBorders removes a border, and skipping the
+    -- request would leave the previous one standing.  river reads width 0 as
+    -- "no borders", so the two cases need no distinguishing here.
+    io $ riverWindowV1SetBorders conn win allEdges (fromIntegral width)
+           red green blue alpha
     when (rwHidden w) $ do
       io (riverWindowV1Show conn win)
       io $ adjust winRef win $ \x -> x { rwHidden = False }
@@ -1023,26 +1034,3 @@ allEdges :: Word32
 allEdges = riverWindowV1EdgesTop + riverWindowV1EdgesBottom
          + riverWindowV1EdgesLeft + riverWindowV1EdgesRight
 
---------------------------------------------------------------------------------
--- Colours
-
--- | Parse @\"#rrggbb\"@ into the 32-bit channel values river's @set_borders@
--- takes. Unparseable colours become opaque black rather than an error, since a
--- typo in a config should not stop the window manager starting.
-parseColor :: String -> (Word32, Word32, Word32, Word32)
-parseColor ('#':r1:r2:g1:g2:b1:b2:_) =
-  case mapM hexPair [[r1,r2],[g1,g2],[b1,b2]] of
-    Just [r, g, b] -> (scale r, scale g, scale b, maxBound)
-    _              -> (0, 0, 0, maxBound)
-  where
-    -- river takes 32-bit channels; 8-bit values are widened by replication so
-    -- that 0xff maps to 0xffffffff rather than 0xff000000.
-    scale v = v * 0x01010101
-    hexPair [a, b] = (\x y -> x * 16 + y) <$> hexDigit a <*> hexDigit b
-    hexPair _ = Nothing
-    hexDigit c
-      | c >= '0' && c <= '9' = Just (fromIntegral (fromEnum c - fromEnum '0'))
-      | c >= 'a' && c <= 'f' = Just (fromIntegral (fromEnum c - fromEnum 'a' + 10))
-      | c >= 'A' && c <= 'F' = Just (fromIntegral (fromEnum c - fromEnum 'A' + 10))
-      | otherwise = Nothing
-parseColor _ = (0, 0, 0, maxBound)

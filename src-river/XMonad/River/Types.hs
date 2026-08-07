@@ -10,6 +10,7 @@ module XMonad.River.Types
   ( -- * Geometry
     Rectangle(..)
   , BorderColor
+  , parseColor, parseColorMaybe
   , Position
   , Dimension
     -- * Input
@@ -65,6 +66,40 @@ data Rectangle = Rectangle
 -- colormaps and no pixel values, so the honest representation is the one the
 -- protocol asks for.
 type BorderColor = (Word32, Word32, Word32, Word32)
+
+-- | Parse @\"#rrggbb\"@ into the 32-bit channel values river's @set_borders@
+-- takes.
+--
+-- 'Nothing' for anything that is not a colour, which is what lets
+-- 'XMonad.Operations.setWindowBorderWithFallback' have a fallback to fall back
+-- to.  'parseColor' is the total version, for the config's own border colours:
+-- a typo there should not stop the window manager starting.
+-- Trailing characters are ignored rather than rejected, which is what the
+-- total version has always done: @\"#rrggbbaa\"@ is a colour a config might
+-- reasonably write, and dropping the alpha beats refusing the whole string.
+parseColorMaybe :: String -> Maybe BorderColor
+parseColorMaybe ('#':r1:r2:g1:g2:b1:b2:_) =
+    case traverse hexPair [[r1,r2],[g1,g2],[b1,b2]] of
+      Just [r, g, b] -> Just (scale r, scale g, scale b, maxBound)
+      _              -> Nothing
+  where
+    -- river takes 32-bit channels; 8-bit values are widened by replication so
+    -- that 0xff maps to 0xffffffff rather than 0xff000000.
+    scale v = v * 0x01010101
+    hexPair [a, b] = (\x y -> x * 16 + y) <$> hexDigit a <*> hexDigit b
+    hexPair _ = Nothing
+    hexDigit c
+      | c >= '0' && c <= '9' = Just (fromIntegral (fromEnum c - fromEnum '0'))
+      | c >= 'a' && c <= 'f' = Just (fromIntegral (fromEnum c - fromEnum 'a' + 10))
+      | c >= 'A' && c <= 'F' = Just (fromIntegral (fromEnum c - fromEnum 'A' + 10))
+      | otherwise = Nothing
+parseColorMaybe _ = Nothing
+
+-- | 'parseColorMaybe', with unparseable colours becoming opaque black.
+parseColor :: String -> BorderColor
+parseColor s = case parseColorMaybe s of
+  Just c  -> c
+  Nothing -> (0, 0, 0, maxBound)
 
 --------------------------------------------------------------------------------
 -- Input

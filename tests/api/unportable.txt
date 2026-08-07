@@ -110,8 +110,7 @@ atom_WM_TAKE_FOCUS      NO FIX: as getAtom.  Purpose survives as river_seat_v1.f
 stringProperty          NO FIX: no window properties at all.  Nearest: app_id, title, unreliable_pid, identifier.
 getStringProperty       NO FIX: as stringProperty.
 setWMState              NO FIX: WM_STATE is X11's.  Purpose survives as hide/show, which is how workspaces work.
-initColor               NO FIX: no colormap to allocate against.  Colours are parsed straight to RGBA.
-setWindowBorderWithFallback  NO FIX: the fallback exists because colormap allocation can fail.  set_borders cannot.
+initColor               NO FIX: no colormap to allocate against.  XMonad.River.parseColorMaybe answers the same question -- is this a usable colour -- without one, and is what setWindowBorderWithFallback (which is back, taking BorderColor where X11 took Pixel) falls back from.
 mkGrabs                 NO FIX: returns KeyCodes, which need the keymap.  river_xkb_config_v1.create_keymap
                       # passes an fd, and this backend speaks the wire protocol directly precisely because
                       # nothing else in it needs SCM_RIGHTS.  Bindings are river objects instead; see WM.bindSeat.

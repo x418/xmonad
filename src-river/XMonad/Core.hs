@@ -77,6 +77,14 @@ module XMonad.Core (
     -- answered.
     WindowAttributes(..), waIsUnmapped, waIsUnviewable, waIsViewable,
     withWindowAttributes, getWindowAttributes, getGeometry, getWMNormalHints,
+    -- * Window borders
+    --
+    -- | Per-window overrides of the border the window manager would otherwise
+    -- draw.  X11 got these from @Graphics.X11@ as well, and they set server
+    -- state that stuck until something set it again; here they record an
+    -- override that the render sequence applies.  See
+    -- 'XMonad.River.Runtime.setBorderWidth' for what that changes.
+    setWindowBorderWidth, setWindowBorder,
     Event(..), Connection, Display, sendRestart,
   ) where
 
@@ -123,7 +131,7 @@ import qualified Data.Set as S
 import XMonad.River.Connection (Connection)
 import XMonad.River.Keysym
 import XMonad.River.Mailbox (Mailbox)
-import XMonad.River.Runtime (lookupGeometry, lookupSizeHints, sendRestart)
+import XMonad.River.Runtime (lookupGeometry, lookupSizeHints, sendRestart, setBorderColor, setBorderWidth)
 import XMonad.River.Types
 import XMonad.River.Wire (ObjectId, nullObject)
 
@@ -401,6 +409,25 @@ getWindowAttributes _ win = lookupGeometry win >>= \case
 -- Same signature as X11's, so @io $ getWMNormalHints d w@ still compiles.
 -- River reports a minimum and a maximum and nothing else; see
 -- 'XMonad.River.Types.SizeHints' for what the remaining fields do.
+-- | Override how wide a border the window manager draws around one window.
+--
+-- Zero removes it, which is what "XMonad.Layout.NoBorders" is built on.
+--
+-- The 'Display' is accepted and unused, as elsewhere: there is one connection
+-- and 'XConf' already has it.  Keeping the parameter lets a call site written
+-- for X11 compile unchanged.
+setWindowBorderWidth :: Display -> Window -> Dimension -> IO ()
+setWindowBorderWidth _ = setBorderWidth
+
+-- | Override the colour of one window's border.
+--
+-- X11 took a 'Graphics.X11.Pixel', resolved against the window's colormap.
+-- Wayland has neither, so this takes the RGBA form
+-- @river_window_v1.set_borders@ asks for -- the same substitution 'XConf'
+-- already makes for @normalBorder@ and @focusedBorder@.
+setWindowBorder :: Display -> Window -> BorderColor -> IO ()
+setWindowBorder _ = setBorderColor
+
 getWMNormalHints :: Display -> Window -> IO SizeHints
 getWMNormalHints _ = lookupSizeHints
 
