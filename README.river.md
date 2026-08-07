@@ -128,11 +128,12 @@ test recipe, the hazard of blocking the event loop, that CI never builds this
 backend at all, and the session integration `INSTALL.md` says nothing about.
 
 - **Nothing has run against a live river.** See the status line at the top.
-- **Interactive move and resize are unbound.** river drives these through the
-  seat's `op_start_pointer` / `op_delta` / `op_release` cycle rather than by the
-  window manager grabbing the pointer, and that cycle is not wired into `XConf`.
-  `mod-button1` and `mod-button3` are left free rather than bound to something
-  inert.
+- **Interactive move and resize are wired but untested.** They run over river's
+  seat operation cycle (`op_start_pointer` / `op_delta` / `op_release`) rather
+  than by grabbing the pointer. `mouseDrag` turns river's *total offset since
+  the drag began* back into the absolute position its callers expect, by adding
+  the pointer position recorded at `op_start`. That assumes `pointer_position`
+  has arrived by then, which is the part no unit test can check.
 - **Multi-key submaps.** Needs a transient binding set installed for the prefix,
   using `ensure_next_key_eaten` so an unbound key cancels cleanly.
 - **Floating geometry** is tracked in the `StackSet` but not yet applied during

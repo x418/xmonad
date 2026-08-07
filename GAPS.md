@@ -6,11 +6,15 @@ tree, tracked `patches/`, API goldens, no inert exports — but it was written
 from the prototype's *design*, not its *operational experience*. The prototype
 has since run against a live river, headless and on real hardware.
 
-This records what that turned up. Scope note: the keybinding vocabulary gap —
-no config being able to name `mod4Mask` or any keysym — was being closed while
-this was written (`XMonad.Core` now exports the modifier masks, and
-`XMonad.River.Keysym` the keysym table and `stringToKeysym`), so it is not
-covered. Neither is the absent contrib layer, which is known and deferred.
+This records what that turned up.
+
+Two scope notes. The keybinding vocabulary gap — no config being able to name
+`mod4Mask` or any keysym — is **closed**: `XMonad.Core` exports the nine
+modifier masks, the five button numbers and 347 keysyms, and
+`XMonad.River.Keysym` exports `stringToKeysym`/`keysymToString`, with the
+lookup tables reachable through `XMonad.River`. The contrib layer is no longer
+absent either — `../xmonad-contrib-river` builds upstream contrib against this
+backend, and 103 of its 328 modules compile; see its `SURVEY.md`.
 
 ## 1. No reference window manager
 
@@ -30,15 +34,17 @@ established that
 
 Both were misdiagnosed first and cost real time.
 
-It also covers protocol surface `XMonad.River.WM` does not exercise: the full
-`op_start_pointer`/`op_delta`/`op_release` cycle,
-`inform_resize_start`/`inform_resize_end`, edge-aware resize origin correction,
-and `pointer_move_requested`/`pointer_resize_requested`.
+It also covers protocol surface `XMonad.River.WM` does not exercise. That list
+has shrunk: `op_start_pointer`/`op_delta`/`op_release` is now wired up and
+backs `mouseDrag`, `mouseMoveWindow` and `mouseResizeWindow`. Still unexercised
+are `inform_resize_start`/`inform_resize_end`, edge-aware resize origin
+correction, and `pointer_move_requested`/`pointer_resize_requested` — the
+client-initiated half, which X11 had no equivalent of.
 
 ## 2. No runtime harness
 
-Per `README.river.md:8`, nothing has run against a live river; everything above
-the wire codec is unverified.
+Per the status line at the top of `README.river.md`, nothing has run against a
+live river; everything above the wire codec is unverified.
 
 The prototype's reusable asset is a recipe. Run river under
 `WLR_BACKENDS=headless` with `-c <init-script>`, then assert on its debug log:
@@ -56,8 +62,8 @@ reached the compositor. No display, no hardware, CI-able.
 Two findings no unit test would have caught:
 
 - **Layer shell must be bound or river closes every layer surface on sight.**
-  Already carried over (`README.river.md:114`). Worth knowing the symptom was
-  silent: prompts simply never appeared, and the only evidence anywhere was one
+  Already carried over — see the layer shell row in `README.river.md`. Worth
+  knowing the symptom was silent: prompts simply never appeared, and the only evidence anywhere was one
   `info(wm)` line in river's log.
 - **fuzzel does not exit when its layer surface is closed.** It hangs
   indefinitely rather than treating `closed` as fatal. See §3.
@@ -81,7 +87,7 @@ sequence compounds it — river's watchdog is held open for the whole prompt.
 Design conclusions, which apply here unchanged:
 
 - **Blocking actions do not need the manage sequence.**
-  `src-river/XMonad/Operations.hs:101-114` — `windows` already requests
+  `windows` in `src-river/XMonad/Operations.hs` already requests
   `manage_dirty` when `inManageSeq` is false. Running actions after
   `manage_finish` costs one round trip and keeps the compositor healthy.
 - **That alone does not fix the wedge.** The structural fix is for the loop
@@ -103,13 +109,13 @@ Design conclusions, which apply here unchanged:
 - `.github/workflows/haskell-ci.yml` — zero occurrences of "river".
 - `cabal.haskell-ci` — `+pedantic` only.
 
-So all 6,753 lines under `src-river/` are never compiled in CI, and the
-`river-wire` suite never runs (`xmonad.cabal:212`, `buildable: False` unless
-the flag is on).
+So all 6,894 lines under `src-river/` are never compiled in CI, and the
+`river-wire` suite never runs — its stanza in `xmonad.cabal` is
+`buildable: False` unless the flag is on.
 
 Separately, **none of the four consistency scripts runs anywhere**:
-`tests/check-copies.sh`, `tests/check-x11-source.sh`, `tests/api/check-api.sh`,
-`tests/api/check-subset.sh`. The rebase-safety and API-subset apparatus is this
+`tests/check-copies.sh`, `tests/check-x11-source.sh`, `tests/api/check-api.sh`
+(twice, once per backend) and `tests/api/check-subset.sh`. The rebase-safety and API-subset apparatus is this
 repo's best idea, and today it only protects the tree when someone remembers to
 run it by hand.
 
