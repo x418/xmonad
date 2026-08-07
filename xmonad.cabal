@@ -95,18 +95,27 @@ library
   -- nothing is worse than a name that is absent -- absent fails at the call
   -- site, at compile time, with the file and line in the error.  So river's
   -- API is deliberately a strict subset of the X11 one, and
-  -- tests/api/unportable.txt is where each omission has to be justified.
+  -- tests/api/unportable.txt is where each omission has to be justified, name
+  -- by name, or tests/api/check-subset.sh fails.
   --
-  -- Consequently river does *not* re-export Graphics.X11.  The two shims it
-  -- does supply are other-modules, reachable only from inside this package:
-  -- they exist so that src/XMonad/Layout.hs -- 258 lines of layout arithmetic
-  -- that both backends want, and that would otherwise drift -- can be shared
-  -- unmodified.  Everything whose export list has to shrink is shadowed.
+  -- The two trees are entirely separate: src-river carries its own copy of
+  -- every module, and the flag-off build never looks at it.  That costs two
+  -- copies of XMonad.StackSet and XMonad.Layout, which are backend-independent
+  -- and could in principle be shared; the alternative was to let src-river
+  -- shadow src by hs-source-dirs precedence, which makes any given module's
+  -- provenance depend on a flag and on directory order.  Two honest copies
+  -- read better than one file that means different things on different days,
+  -- and the API goldens are what hold them in step.
+  --
+  -- Nothing here is named Graphics.X11.  River does not re-export it and does
+  -- not imitate it; src-river/XMonad/Layout.hs imports XMonad.River.Types for
+  -- the Rectangle and Event it needs.
   if flag(river)
-    hs-source-dirs:  src-river src
-    other-modules:   Graphics.X11
-                     Graphics.X11.Xlib.Extras
-                     XMonad.River.Connection
+    hs-source-dirs:  src-river
+    -- The XMonad.River.* modules are exposed: they are river's own API, named
+    -- for what they are, and a river-specific contrib module has every reason
+    -- to import them.
+    exposed-modules: XMonad.River.Connection
                      XMonad.River.Protocol.LayerShell
                      XMonad.River.Protocol.WindowManagement
                      XMonad.River.Protocol.XkbBindings

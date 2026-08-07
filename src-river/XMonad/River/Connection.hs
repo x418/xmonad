@@ -1,3 +1,7 @@
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections #-}
 -- | Wayland connection management: the socket, object id allocation, request
 -- batching, and the event dispatch loop.
 --

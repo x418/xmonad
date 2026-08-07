@@ -1,0 +1,360 @@
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE PatternGuards #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+
+-- --------------------------------------------------------------------------
+-- |
+-- Module      :  XMonad.Operations
+-- Copyright   :  (c) Spencer Janssen 2007
+-- License     :  BSD3-style (see LICENSE)
+--
+-- Operations, shadowing @src\/XMonad\/Operations.hs@.
+--
+-- This is where the two backends diverge most, and the divergence is not a
+-- matter of a few differing lines: upstream's file is 899 lines of Xlib calls,
+-- this one is a fraction of that, because river does the work.  They are not
+-- two implementations of the same code -- they are different programs that
+-- agree on an interface.
+--
+-- The interface they agree on is smaller here, deliberately.  Everything X11
+-- reached for through the display and cannot be reproduced over Wayland is
+-- absent rather than present and inert.  Each omission is justified in
+-- tests/api/unportable.txt, and tests/api/check-api.sh fails if one appears
+-- that is not.
+--
+-- The single structural difference to understand: __'windows' does not run the
+-- layout.__  river only permits window management state to change during a
+-- manage sequence, so the layout runs once at the end of the current sequence,
+-- after every queued action has had its say.  Called from outside a sequence
+-- -- a timer, a @dbus@ callback, a key binding -- 'windows' asks river to
+-- start one.  Upstream's @windows@ tiles immediately because X11 let it.
+--
+-----------------------------------------------------------------------------
+
+module XMonad.Operations (
+    -- * Manage One Window
+    unmanage, killWindow, kill, isClient,
+    hide, reveal,
+    focus,
+
+    -- * Manage Windows
+    windows, refresh, rescreen, modifyWindowSet, windowBracket, windowBracket_,
+    withFocused, withUnfocused,
+
+    -- * Messages
+    sendMessage, broadcastMessage, sendMessageWithNoRefresh,
+
+    -- * Floating Layer
+    float, floatLocation,
+
+    -- * Rectangles
+    containedIn, nubScreens, pointWithin, scaleRationalRect,
+
+    -- * Pointer
+    warpPointer,
+
+    -- * Lifecycle
+    restart, exitSession,
+
+    -- * Other Utilities
+    pointScreen, screenWorkspace,
+    setLayout, updateLayout,
+    ) where
+
+import XMonad.Core
+import XMonad.River.Protocol.WindowManagement
+import qualified XMonad.StackSet as W
+
+import Data.IORef (readIORef, writeIORef)
+import Data.List            (find, nub)
+import Data.Maybe
+import Data.Monoid          (Any(..))
+import Data.Ratio           ((%))
+import qualified Data.Map as M
+import qualified Data.Set as S
+
+import Control.Monad.Reader
+import Control.Monad.State
+import Control.Monad (forM_, guard, unless, void, when)
+
+-- ---------------------------------------------------------------------
+-- Managing windows
+
+-- | Modify the current window list with a pure function, and arrange for the
+-- result to be applied.
+--
+-- Unlike the X11 version this does not itself run the layout.  See the module
+-- header: layout belongs to the manage sequence, and this function's job is to
+-- make sure one happens.
+windows :: (WindowSet -> WindowSet) -> X ()
+windows f = do
+    modify $ \st -> st { windowset = f (windowset st) }
+    inSeq <- io . readIORef =<< asks inManageSeq
+    unless inSeq requestManageSequence
+    asks (logHook . config) >>= userCodeDef ()
+
+-- | Ask river to start a manage sequence, because state it cannot observe has
+-- changed.
+requestManageSequence :: X ()
+requestManageSequence = do
+    conn <- asks riverConn
+    manager <- asks riverManager
+    io (riverWindowManagerV1ManageDirty conn manager)
+
+-- | Re-run the layout.  Under river this is a request for another manage
+-- sequence; the layout runs there.
+refresh :: X ()
+refresh = windows id
+
+-- | Modify the @WindowSet@ in state with no special handling.
+modifyWindowSet :: (WindowSet -> WindowSet) -> X ()
+modifyWindowSet f = modify $ \xst -> xst { windowset = f (windowset xst) }
+
+-- | Perform an @X@ action and check its return value against a predicate p.
+-- If p holds, unwind changes to the @WindowSet@ and replay them using @windows@.
+windowBracket :: (a -> Bool) -> X a -> X a
+windowBracket p action = withWindowSet $ \old -> do
+  a <- action
+  when (p a) . withWindowSet $ \new -> do
+    modifyWindowSet $ const old
+    windows         $ const new
+  return a
+
+-- | Perform an @X@ action. If it returns @Any True@, unwind the
+-- changes to the @WindowSet@ and replay them using @windows@.
+windowBracket_ :: X Any -> X ()
+windowBracket_ = void . windowBracket getAny
+
+-- | A window no longer exists; remove it from the window list, on whatever
+-- workspace it is.
+unmanage :: Window -> X ()
+unmanage = windows . W.delete
+
+-- | Close the given window.  Politely -- this is @xdg_toplevel.close@, which
+-- the client may ignore or prompt about, exactly as an X11 @WM_DELETE_WINDOW@
+-- could be.
+killWindow :: Window -> X ()
+killWindow w = do
+    conn <- asks riverConn
+    known <- io . readIORef =<< asks riverWindows
+    when (M.member w known) $ io (riverWindowV1Close conn w)
+
+-- | Kill the currently focused client.
+kill :: X ()
+kill = withFocused killWindow
+
+-- | Hide a window, by removing it from the visible set.
+--
+-- The compositor call happens in the render sequence -- river only applies
+-- rendering state at @render_finish@ -- so this records the intent and lets
+-- 'XMonad.River.WM.renderSequence' carry it out.
+hide :: Window -> X ()
+hide w = whenX (gets (S.member w . mapped)) $
+    modify (\s -> s { mapped = S.delete w (mapped s) })
+
+-- | Show a window.  Harmless if it was already visible.
+reveal :: Window -> X ()
+reveal w = whenX (isClient w) $
+    modify (\s -> s { mapped = S.insert w (mapped s) })
+
+-- | Is the window under management by xmonad?
+isClient :: Window -> X Bool
+isClient w = withWindowSet $ return . W.member w
+
+-- | Set focus explicitly to window @w@ if it is managed by us.
+focus :: Window -> X ()
+focus w = local (\c -> c { mouseFocused = True }) $ withWindowSet $ \s ->
+    when (W.member w s && W.peek s /= Just w) $ windows (W.focusWindow w)
+
+-- | Apply an 'X' operation to the currently focused window, if there is one.
+withFocused :: (Window -> X ()) -> X ()
+withFocused f = withWindowSet $ \w -> whenJust (W.peek w) f
+
+-- | Apply an 'X' operation to all unfocused windows on the current workspace.
+withUnfocused :: (Window -> X ()) -> X ()
+withUnfocused f = withWindowSet $ \ws ->
+    whenJust (W.peek ws) $ \w ->
+        let unfocusedWindows = filter (/= w) $ W.index ws
+        in mapM_ f unfocusedWindows
+
+-- ---------------------------------------------------------------------
+-- Screens
+
+-- | The screen configuration may have changed; update the state and refresh.
+--
+-- Under X11 this queried xinerama.  Here the reconciliation against river's
+-- outputs happens at the start of every manage sequence anyway, so this only
+-- has to ask for one.
+rescreen :: X ()
+rescreen = refresh
+
+-- | Returns 'True' if the first rectangle is contained within, but not equal
+-- to the second.
+containedIn :: Rectangle -> Rectangle -> Bool
+containedIn r1@(Rectangle x1 y1 w1 h1) r2@(Rectangle x2 y2 w2 h2)
+ = and [ r1 /= r2
+       , x1 >= x2
+       , y1 >= y2
+       , fromIntegral x1 + w1 <= fromIntegral x2 + w2
+       , fromIntegral y1 + h1 <= fromIntegral y2 + h2 ]
+
+-- | Given a list of screens, remove all duplicated screens and screens that
+-- are entirely contained within another.
+nubScreens :: [Rectangle] -> [Rectangle]
+nubScreens xs = nub . filter (\x -> not $ any (x `containedIn`) xs) $ xs
+
+-- | Given a point, determine the screen (if any) that contains it.
+pointScreen :: Position -> Position
+            -> X (Maybe (W.Screen WorkspaceId (Layout Window) Window ScreenId ScreenDetail))
+pointScreen x y = withWindowSet $ return . find p . W.screens
+  where p = pointWithin x y . screenRect . W.screenDetail
+
+-- | @pointWithin x y r@ returns 'True' if the @(x, y)@ co-ordinate is within
+-- @r@.
+pointWithin :: Position -> Position -> Rectangle -> Bool
+pointWithin x y r = x >= rect_x r &&
+                    x <  rect_x r + fromIntegral (rect_width r) &&
+                    y >= rect_y r &&
+                    y <  rect_y r + fromIntegral (rect_height r)
+
+-- | Produce the actual rectangle from a screen and a ratio on that screen.
+scaleRationalRect :: Rectangle -> W.RationalRect -> Rectangle
+scaleRationalRect (Rectangle sx sy sw sh) (W.RationalRect rx ry rw rh)
+ = Rectangle (sx + scale sw rx) (sy + scale sh ry) (scale sw rw) (scale sh rh)
+ where scale s r = floor (toRational s * r)
+
+-- | Return workspace visible on screen @sc@, or 'Nothing'.
+screenWorkspace :: ScreenId -> X (Maybe WorkspaceId)
+screenWorkspace sc = withWindowSet $ return . W.lookupWorkspace sc
+
+------------------------------------------------------------------------
+-- Message handling
+
+-- | Throw a message to the current 'LayoutClass', possibly modifying how we
+-- lay out the windows, in which case changes are handled through a refresh.
+sendMessage :: Message a => a -> X ()
+sendMessage a = windowBracket_ $ do
+    w <- gets $ W.workspace . W.current . windowset
+    ml' <- handleMessage (W.layout w) (SomeMessage a) `catchX` return Nothing
+    whenJust ml' $ \l' ->
+        modifyWindowSet $ \ws -> ws { W.current = (W.current ws)
+                                { W.workspace = (W.workspace $ W.current ws)
+                                  { W.layout = l' }}}
+    return (Any $ isJust ml')
+
+-- | Send a message to all layouts, without refreshing.
+broadcastMessage :: Message a => a -> X ()
+broadcastMessage a = withWindowSet $ \ws -> do
+    let c = W.workspace . W.current $ ws
+        v = map W.workspace . W.visible $ ws
+        h = W.hidden ws
+    mapM_ (sendMessageWithNoRefresh a) (c : v ++ h)
+
+-- | Send a message to a layout, without refreshing.
+sendMessageWithNoRefresh :: Message a => a -> WindowSpace -> X ()
+sendMessageWithNoRefresh a w =
+    handleMessage (W.layout w) (SomeMessage a) `catchX` return Nothing >>=
+    updateLayout  (W.tag w)
+
+-- | Update the layout field of a workspace.
+updateLayout :: WorkspaceId -> Maybe (Layout Window) -> X ()
+updateLayout i ml = whenJust ml $ \l ->
+    runOnWorkspaces $ \ww -> return $ if W.tag ww == i then ww { W.layout = l} else ww
+
+-- | Set the layout of the currently viewed workspace.
+setLayout :: Layout Window -> X ()
+setLayout l = do
+    ss@W.StackSet{ W.current = c@W.Screen{ W.workspace = ws }} <- gets windowset
+    _ <- handleMessage (W.layout ws) (SomeMessage ReleaseResources)
+    windows $ const $ ss{ W.current = c{ W.workspace = ws{ W.layout = l } } }
+
+------------------------------------------------------------------------
+-- Floating layer support
+
+-- | Given a window, find the screen it is located on, and compute the geometry
+-- of that window with respect to that screen.
+--
+-- X11 read this from the window's attributes and size hints.  River reports a
+-- window's current dimensions directly, and nothing else: there is no position
+-- to read, because under Wayland the compositor owns placement and a client
+-- never had one to report.  So the fraction is computed from the dimensions
+-- against the current screen, and the window is centred.
+floatLocation :: Window -> X (ScreenId, W.RationalRect)
+floatLocation w = do
+    ws <- gets windowset
+    known <- io . readIORef =<< asks riverWindows
+    let sc = W.current ws
+        sr = screenRect (W.screenDetail sc)
+        sw = max 1 (fromIntegral (rect_width sr))
+        sh = max 1 (fromIntegral (rect_height sr))
+    pure $ case M.lookup w known of
+        Nothing -> (W.screen sc, W.RationalRect 0 0 1 1)
+        Just rw ->
+            let (width, height) = rwDimensions rw
+                rwidth  = fromIntegral (max 1 width)  % sw
+                rheight = fromIntegral (max 1 height) % sh
+            in ( W.screen sc
+               , W.RationalRect (0.5 - rwidth / 2) (0.5 - rheight / 2) rwidth rheight )
+
+-- | Make a tiled window floating, using its suggested rectangle.
+float :: Window -> X ()
+float w = do
+    (sc, rr) <- floatLocation w
+    windows $ \ws -> W.float w rr . fromMaybe ws $ do
+        i  <- W.findTag w ws
+        guard $ i `elem` map (W.tag . W.workspace) (W.screens ws)
+        f  <- W.peek ws
+        sw <- W.lookupWorkspace sc ws
+        return (W.focusWindow f . W.shiftWin sw w $ ws)
+
+-- ---------------------------------------------------------------------
+-- Pointer
+
+-- | Move the pointer, in river's global coordinate space.
+--
+-- Wayland forbids ordinary clients from warping the pointer, but the window
+-- manager is not an ordinary client: @river_seat_v1.pointer_warp@ exists
+-- precisely for this.
+warpPointer :: Position -> Position -> X ()
+warpPointer x y = do
+    conn <- asks riverConn
+    seats <- io . readIORef =<< asks riverSeats
+    forM_ (M.keys seats) $ \seat -> io (riverSeatV1PointerWarp conn seat x y)
+
+-- ---------------------------------------------------------------------
+-- Lifecycle
+
+-- | @restart name resume@ restarts the window manager by executing @name@.
+--
+-- This is the river analogue of xmonad's @restart@, and the reason @M-q@
+-- survives the move to Wayland.  The compositor owns the windows, not the
+-- window manager, so tearing the window manager down disturbs nothing: river
+-- supports hot-swapping window managers without restarting itself or any
+-- client.
+--
+-- The sequence is @stop@, wait for @finished@, then exec.  Overlapping the two
+-- is not allowed -- river answers the second connection with @unavailable@ --
+-- so the handover has to be ordered this way.
+--
+-- @resume@ is accepted and ignored.  There is no state file: a river object id
+-- serialised by this process means nothing to its successor, because ids are
+-- per-connection and recycled after @wl_display.delete_id@.  See
+-- README.river.md, which records this as something worth fixing upstream.
+restart :: String -> Bool -> X ()
+restart cmd _resume = do
+    conn <- asks riverConn
+    manager <- asks riverManager
+    ref <- asks riverRestart
+    broadcastMessage ReleaseResources
+    io (writeIORef ref (Just cmd))
+    io (riverWindowManagerV1Stop conn manager)
+
+-- | End the Wayland session, taking the compositor with it.
+exitSession :: X ()
+exitSession = do
+    conn <- asks riverConn
+    manager <- asks riverManager
+    io (riverWindowManagerV1ExitSession conn manager)

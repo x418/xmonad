@@ -1,0 +1,464 @@
+XMonad | (-->) | (-->) :: (Monad m, Monoid a) => m Bool -> m a -> m a
+XMonad | (<&&>) | (<&&>) :: Monad m => m Bool -> m Bool -> m Bool
+XMonad | (<+>) | (<+>) :: Monoid m => m -> m -> m
+XMonad | (<||>) | (<||>) :: Monad m => m Bool -> m Bool -> m Bool
+XMonad | (=?) | (=?) :: Eq a => Query a -> a -> Query Bool
+XMonad | (|||) | (|||) :: l a -> r a -> Choose l r a
+XMonad | Bits | class Eq a => Bits a where ... (.|.) :: a -> a -> a ...
+XMonad | Bits | type Bits :: * -> Constraint
+XMonad | CLR | data CLR = CL | CR
+XMonad | CLR | type CLR :: *
+XMonad | ChangeLayout | data ChangeLayout = FirstLayout | NextLayout
+XMonad | ChangeLayout | type ChangeLayout :: *
+XMonad | Choose | data Choose l r a = Choose CLR (l a) (r a)
+XMonad | Choose | type Choose :: (* -> *) -> (* -> *) -> * -> *
+XMonad | Choose | type role Choose representational representational nominal
+XMonad | ConfExtension | data ConfExtension = forall a. Typeable a => ConfExtension a
+XMonad | ConfExtension | type ConfExtension :: *
+XMonad | D | type D :: *
+XMonad | D | type D = (Dimension, Dimension)
+XMonad | Default | type Default :: * -> Constraint
+XMonad | Directories | type Directories :: *
+XMonad | Directories | type Directories = Directories' FilePath
+XMonad | Directories' | data Directories' a = Directories {dataDir :: !a, cfgDir :: !a, cacheDir :: !a}
+XMonad | Directories' | type Directories' :: * -> *
+XMonad | ExtensionClass | class Typeable a => ExtensionClass a where initialValue :: a extensionType :: a -> StateExtension {-# MINIMAL initialValue #-}
+XMonad | ExtensionClass | type ExtensionClass :: * -> Constraint
+XMonad | Full | data Full a = Full
+XMonad | Full | type Full :: * -> *
+XMonad | Full | type role Full phantom
+XMonad | IncMasterN | newtype IncMasterN = IncMasterN Int
+XMonad | IncMasterN | type IncMasterN :: *
+XMonad | JumpToLayout | newtype JumpToLayout = JumpToLayout String
+XMonad | JumpToLayout | type JumpToLayout :: *
+XMonad | Layout | data Layout a = forall (l :: * -> *). (LayoutClass l a, Read (l a)) => Layout (l a)
+XMonad | Layout | type Layout :: * -> *
+XMonad | Layout | type role Layout nominal
+XMonad | LayoutClass | class (Show (layout a), Typeable layout) => LayoutClass layout a where runLayout :: Workspace WorkspaceId (layout a) a -> Rectangle -> X ([(a, Rectangle)], Maybe (layout a)) doLayout :: layout a -> Rectangle -> Stack a -> X ([(a, Rectangle)], Maybe (layout a)) pureLayout :: layout a -> Rectangle -> Stack a -> [(a, Rectangle)] emptyLayout :: layout a -> Rectangle -> X ([(a, Rectangle)], Maybe (layout a)) handleMessage :: layout a -> SomeMessage -> X (Maybe (layout a)) pureMessage :: layout a -> SomeMessage -> Maybe (layout a) description :: layout a -> String
+XMonad | LayoutClass | type LayoutClass :: (* -> *) -> * -> Constraint
+XMonad | LayoutMessages | data LayoutMessages = Hide | ReleaseResources
+XMonad | LayoutMessages | type LayoutMessages :: *
+XMonad | ManageHook | type ManageHook :: *
+XMonad | ManageHook | type ManageHook = Query (Endo WindowSet)
+XMonad | Message | class Typeable a => Message a
+XMonad | Message | type Message :: * -> Constraint
+XMonad | Mirror | newtype Mirror l a = Mirror (l a)
+XMonad | Mirror | type Mirror :: (* -> *) -> * -> *
+XMonad | Mirror | type role Mirror representational nominal
+XMonad | MonadIO | class Monad m => MonadIO m where liftIO :: IO a -> m a {-# MINIMAL liftIO #-}
+XMonad | MonadIO | type MonadIO :: (* -> *) -> Constraint
+XMonad | MonadReader | class Monad m => MonadReader r m | m -> r where ask :: m r local :: (r -> r) -> m a -> m a reader :: (r -> a) -> m a {-# MINIMAL (ask | reader), local #-}
+XMonad | MonadReader | type MonadReader :: * -> (* -> *) -> Constraint
+XMonad | MonadState | class Monad m => MonadState s m | m -> s where get :: m s put :: s -> m () state :: (s -> (a, s)) -> m a {-# MINIMAL state | get, put #-}
+XMonad | MonadState | type MonadState :: * -> (* -> *) -> Constraint
+XMonad | Query | newtype Query a = Query (ReaderT Window X a)
+XMonad | Query | type Query :: * -> *
+XMonad | Query | type role Query nominal
+XMonad | Resize | data Resize = Shrink | Expand
+XMonad | Resize | type Resize :: *
+XMonad | ScreenDetail | newtype ScreenDetail = SD {screenRect :: Rectangle}
+XMonad | ScreenDetail | type ScreenDetail :: *
+XMonad | ScreenId | newtype ScreenId = S Int
+XMonad | ScreenId | type ScreenId :: *
+XMonad | SomeMessage | data SomeMessage = forall a. Message a => SomeMessage a
+XMonad | SomeMessage | type SomeMessage :: *
+XMonad | StateExtension | data StateExtension = forall a. ExtensionClass a => StateExtension a | forall a. (Read a, Show a, ExtensionClass a) => PersistentExtension a
+XMonad | StateExtension | type StateExtension :: *
+XMonad | StateFile | data StateFile = StateFile {sfWins :: StackSet WorkspaceId String Window ScreenId ScreenDetail, sfExt :: [(String, String)]}
+XMonad | StateFile | type StateFile :: *
+XMonad | Tall | data Tall a = Tall {tallNMaster :: Int, tallRatioIncrement :: Rational, tallRatio :: Rational}
+XMonad | Tall | type Tall :: * -> *
+XMonad | Tall | type role Tall phantom
+XMonad | Typeable | class Typeable a where typeRep# :: TypeRep a {-# MINIMAL typeRep# #-}
+XMonad | Typeable | type Typeable :: forall k. k -> Constraint
+XMonad | WindowSet | type WindowSet :: *
+XMonad | WindowSet | type WindowSet = StackSet WorkspaceId (Layout Window) Window ScreenId ScreenDetail
+XMonad | WindowSpace | type WindowSpace :: *
+XMonad | WindowSpace | type WindowSpace = Workspace WorkspaceId (Layout Window) Window
+XMonad | WorkspaceId | type WorkspaceId :: *
+XMonad | WorkspaceId | type WorkspaceId = String
+XMonad | X | newtype X a = X (ReaderT XConf (StateT XState IO) a)
+XMonad | X | type X :: * -> *
+XMonad | X | type role X nominal
+XMonad | XConf | data XConf = XConf {display :: Display, config :: (XConfig Layout), theRoot :: Window, normalBorder :: Pixel, focusedBorder :: Pixel, keyActions :: !(Map (KeyMask, KeySym) (X ())), buttonActions :: !(Map (KeyMask, Button) (Window -> X ())), mouseFocused :: !Bool, mousePosition :: !(Maybe (Position, Position)), currentEvent :: !(Maybe Event), directories :: Directories}
+XMonad | XConf | type XConf :: *
+XMonad | XConfig | data XConfig l = XConfig {normalBorderColor :: !String, focusedBorderColor :: !String, terminal :: !String, layoutHook :: !(l Window), manageHook :: !ManageHook, handleEventHook :: !(Event -> X All), workspaces :: ![String], modMask :: ! KeyMask, keys :: !(XConfig Layout -> Map (ButtonMask, KeySym) (X ())), mouseBindings :: !(XConfig Layout -> Map (ButtonMask, Button) (Window -> X ())), borderWidth :: Dimension, logHook :: !(X ()), startupHook :: !(X ()), focusFollowsMouse :: !Bool, clickJustFocuses :: !Bool, clientMask :: EventMask, rootMask :: EventMask, handleExtraArgs :: !([String] -> XConfig Layout -> IO (XConfig Layout)), extensibleConf :: !(Map TypeRep ConfExtension)}
+XMonad | XConfig | type XConfig :: (* -> *) -> *
+XMonad | XState | data XState = XState {windowset :: WindowSet, mapped :: !(Set Window), waitingUnmap :: !(Map Window Int), dragging :: !(Maybe (Position -> Position -> X (), X ())), numberlockMask :: ! KeyMask, extensibleState :: !(Map String (Either String StateExtension))}
+XMonad | XState | type XState :: *
+XMonad | a | class Default a where def :: a default def :: (Generic a, GDefault (Rep a)) => a
+XMonad | appName | appName :: Query String
+XMonad | applyAspectHint | applyAspectHint :: (D, D) -> D -> D
+XMonad | applyMaxSizeHint | applyMaxSizeHint :: D -> D -> D
+XMonad | applyResizeIncHint | applyResizeIncHint :: D -> D -> D
+XMonad | applySizeHints | applySizeHints :: Integral a => Dimension -> SizeHints -> (a, a) -> D
+XMonad | applySizeHints' | applySizeHints' :: SizeHints -> D -> D
+XMonad | applySizeHintsContents | applySizeHintsContents :: Integral a => SizeHints -> (a, a) -> D
+XMonad | asks | asks :: MonadReader r m => (r -> a) -> m a
+XMonad | atom_WM_DELETE_WINDOW | atom_WM_DELETE_WINDOW :: X Atom
+XMonad | atom_WM_PROTOCOLS | atom_WM_PROTOCOLS :: X Atom
+XMonad | atom_WM_STATE | atom_WM_STATE :: X Atom
+XMonad | atom_WM_TAKE_FOCUS | atom_WM_TAKE_FOCUS :: X Atom
+XMonad | binFileName | binFileName :: Directories -> FilePath
+XMonad | broadcastMessage | broadcastMessage :: Message a => a -> X ()
+XMonad | cacheNumlockMask | cacheNumlockMask :: X ()
+XMonad | catchIO | catchIO :: MonadIO m => IO () -> m ()
+XMonad | catchX | catchX :: X a -> X a -> X a
+XMonad | className | className :: Query String
+XMonad | cleanMask | cleanMask :: KeyMask -> X KeyMask
+XMonad | clearEvents | clearEvents :: EventMask -> X ()
+XMonad | composeAll | composeAll :: Monoid m => [m] -> m
+XMonad | containedIn | containedIn :: Rectangle -> Rectangle -> Bool
+XMonad | defaultConfig | defaultConfig :: XConfig (Choose Tall (Choose (Mirror Tall) Full))
+XMonad | doF | doF :: (s -> s) -> Query (Endo s)
+XMonad | doFloat | doFloat :: ManageHook
+XMonad | doIgnore | doIgnore :: ManageHook
+XMonad | doShift | doShift :: WorkspaceId -> ManageHook
+XMonad | extraModifiers | extraModifiers :: X [KeyMask]
+XMonad | float | float :: Window -> X ()
+XMonad | floatLocation | floatLocation :: Window -> X (ScreenId, RationalRect)
+XMonad | focus | focus :: Window -> X ()
+XMonad | fromMessage | fromMessage :: Message m => SomeMessage -> Maybe m
+XMonad | getAtom | getAtom :: String -> X Atom
+XMonad | getCleanedScreenInfo | getCleanedScreenInfo :: MonadIO m => Display -> m [Rectangle]
+XMonad | getDirectories | getDirectories :: IO Directories
+XMonad | getStringProperty | getStringProperty :: Display -> Window -> String -> X (Maybe String)
+XMonad | getXMonadCacheDir | getXMonadCacheDir :: X String
+XMonad | getXMonadDataDir | getXMonadDataDir :: X String
+XMonad | getXMonadDir | getXMonadDir :: X String
+XMonad | gets | gets :: MonadState s m => (s -> a) -> m a
+XMonad | hide | hide :: Window -> X ()
+XMonad | idHook | idHook :: Monoid m => m
+XMonad | ifM | ifM :: Monad m => m Bool -> m a -> m a -> m a
+XMonad | initColor | initColor :: Display -> String -> IO (Maybe Pixel)
+XMonad | installSignalHandlers | installSignalHandlers :: MonadIO m => m ()
+XMonad | io | io :: MonadIO m => IO a -> m a
+XMonad | isClient | isClient :: Window -> X Bool
+XMonad | isFixedSizeOrTransient | isFixedSizeOrTransient :: Display -> Window -> X Bool
+XMonad | isRoot | isRoot :: Window -> X Bool
+XMonad | kill | kill :: X ()
+XMonad | killWindow | killWindow :: Window -> X ()
+XMonad | launch | launch :: (LayoutClass l Window, Read (l Window)) => XConfig l -> Directories -> IO ()
+XMonad | liftX | liftX :: X a -> Query a
+XMonad | manage | manage :: Window -> X ()
+XMonad | mirrorRect | mirrorRect :: Rectangle -> Rectangle
+XMonad | mkAdjust | mkAdjust :: Window -> X (D -> D)
+XMonad | mkGrabs | mkGrabs :: [(KeyMask, KeySym)] -> X [(KeyMask, KeyCode)]
+XMonad | modify | modify :: MonadState s m => (s -> s) -> m ()
+XMonad | modifyWindowSet | modifyWindowSet :: (WindowSet -> WindowSet) -> X ()
+XMonad | mouseDrag | mouseDrag :: (Position -> Position -> X ()) -> X () -> X ()
+XMonad | mouseMoveWindow | mouseMoveWindow :: Window -> X ()
+XMonad | mouseResizeWindow | mouseResizeWindow :: Window -> X ()
+XMonad | nubScreens | nubScreens :: [Rectangle] -> [Rectangle]
+XMonad | pointScreen | pointScreen :: Position -> Position -> X (Maybe (Screen WorkspaceId (Layout Window) Window ScreenId ScreenDetail))
+XMonad | pointWithin | pointWithin :: Position -> Position -> Rectangle -> Bool
+XMonad | readStateFile | readStateFile :: (LayoutClass l Window, Read (l Window)) => XConfig l -> X (Maybe XState)
+XMonad | readsLayout | readsLayout :: Layout a -> String -> [(Layout a, String)]
+XMonad | recompile | recompile :: MonadIO m => Directories -> Bool -> m Bool
+XMonad | refresh | refresh :: X ()
+XMonad | rescreen | rescreen :: X ()
+XMonad | resource | resource :: Query String
+XMonad | restart | restart :: String -> Bool -> X ()
+XMonad | reveal | reveal :: Window -> X ()
+XMonad | runOnWorkspaces | runOnWorkspaces :: (WindowSpace -> X WindowSpace) -> X ()
+XMonad | runQuery | runQuery :: Query a -> Window -> X a
+XMonad | runX | runX :: XConf -> XState -> X a -> IO (a, XState)
+XMonad | scaleRationalRect | scaleRationalRect :: Rectangle -> RationalRect -> Rectangle
+XMonad | screenWorkspace | screenWorkspace :: ScreenId -> X (Maybe WorkspaceId)
+XMonad | sendMessage | sendMessage :: Message a => a -> X ()
+XMonad | sendMessageWithNoRefresh | sendMessageWithNoRefresh :: Message a => a -> WindowSpace -> X ()
+XMonad | sendReplace | sendReplace :: IO ()
+XMonad | sendRestart | sendRestart :: IO ()
+XMonad | setButtonGrab | setButtonGrab :: Bool -> Window -> X ()
+XMonad | setFocusX | setFocusX :: Window -> X ()
+XMonad | setInitialProperties | setInitialProperties :: Window -> X ()
+XMonad | setLayout | setLayout :: Layout Window -> X ()
+XMonad | setTopFocus | setTopFocus :: X ()
+XMonad | setWMState | setWMState :: Window -> Int -> X ()
+XMonad | setWindowBorderWithFallback | setWindowBorderWithFallback :: Display -> Window -> String -> Pixel -> X ()
+XMonad | spawn | spawn :: MonadIO m => String -> m ()
+XMonad | spawnPID | spawnPID :: MonadIO m => String -> m ProcessID
+XMonad | splitHorizontally | splitHorizontally :: Int -> Rectangle -> [Rectangle]
+XMonad | splitHorizontallyBy | splitHorizontallyBy :: RealFrac r => r -> Rectangle -> (Rectangle, Rectangle)
+XMonad | splitVertically | splitVertically :: Int -> Rectangle -> [Rectangle]
+XMonad | splitVerticallyBy | splitVerticallyBy :: RealFrac r => r -> Rectangle -> (Rectangle, Rectangle)
+XMonad | stateFileName | stateFileName :: Directories -> FilePath
+XMonad | stringProperty | stringProperty :: String -> Query String
+XMonad | tile | tile :: Rational -> Rectangle -> Int -> Int -> [Rectangle]
+XMonad | tileWindow | tileWindow :: Window -> Rectangle -> X ()
+XMonad | title | title :: Query String
+XMonad | trace | trace :: MonadIO m => String -> m ()
+XMonad | unGrab | unGrab :: X ()
+XMonad | uninstallSignalHandlers | uninstallSignalHandlers :: MonadIO m => m ()
+XMonad | unmanage | unmanage :: Window -> X ()
+XMonad | updateLayout | updateLayout :: WorkspaceId -> Maybe (Layout Window) -> X ()
+XMonad | userCode | userCode :: X a -> X (Maybe a)
+XMonad | userCodeDef | userCodeDef :: a -> X a -> X a
+XMonad | whenJust | whenJust :: Monad m => Maybe a -> (a -> m ()) -> m ()
+XMonad | whenX | whenX :: X Bool -> X () -> X ()
+XMonad | willFloat | willFloat :: Query Bool
+XMonad | windowBracket | windowBracket :: (a -> Bool) -> X a -> X a
+XMonad | windowBracket_ | windowBracket_ :: X Any -> X ()
+XMonad | windows | windows :: (WindowSet -> WindowSet) -> X ()
+XMonad | withDisplay | withDisplay :: (Display -> X a) -> X a
+XMonad | withFocused | withFocused :: (Window -> X ()) -> X ()
+XMonad | withUnfocused | withUnfocused :: (Window -> X ()) -> X ()
+XMonad | withWindowAttributes | withWindowAttributes :: Display -> Window -> (WindowAttributes -> X ()) -> X ()
+XMonad | withWindowSet | withWindowSet :: (WindowSet -> X a) -> X a
+XMonad | writeStateToFile | writeStateToFile :: X ()
+XMonad | xfork | xfork :: MonadIO m => IO () -> m ProcessID
+XMonad | xmessage | xmessage :: MonadIO m => String -> m ()
+XMonad | xmonad | xmonad :: (LayoutClass l Window, Read (l Window)) => XConfig l -> IO ()
+XMonad.Config | Default | type Default :: * -> Constraint
+XMonad.Config | a | class Default a where def :: a default def :: (Generic a, GDefault (Rep a)) => a
+XMonad.Config | defaultConfig | defaultConfig :: XConfig (Choose Tall (Choose (Mirror Tall) Full))
+XMonad.Core | ConfExtension | data ConfExtension = forall a. Typeable a => ConfExtension a
+XMonad.Core | ConfExtension | type ConfExtension :: *
+XMonad.Core | Directories | type Directories :: *
+XMonad.Core | Directories | type Directories = Directories' FilePath
+XMonad.Core | Directories' | data Directories' a = Directories {dataDir :: !a, cfgDir :: !a, cacheDir :: !a}
+XMonad.Core | Directories' | type Directories' :: * -> *
+XMonad.Core | ExtensionClass | class Typeable a => ExtensionClass a where initialValue :: a extensionType :: a -> StateExtension {-# MINIMAL initialValue #-}
+XMonad.Core | ExtensionClass | type ExtensionClass :: * -> Constraint
+XMonad.Core | Layout | data Layout a = forall (l :: * -> *). (LayoutClass l a, Read (l a)) => Layout (l a)
+XMonad.Core | Layout | type Layout :: * -> *
+XMonad.Core | Layout | type role Layout nominal
+XMonad.Core | LayoutClass | class (Show (layout a), Typeable layout) => LayoutClass layout a where runLayout :: Workspace WorkspaceId (layout a) a -> Rectangle -> X ([(a, Rectangle)], Maybe (layout a)) doLayout :: layout a -> Rectangle -> Stack a -> X ([(a, Rectangle)], Maybe (layout a)) pureLayout :: layout a -> Rectangle -> Stack a -> [(a, Rectangle)] emptyLayout :: layout a -> Rectangle -> X ([(a, Rectangle)], Maybe (layout a)) handleMessage :: layout a -> SomeMessage -> X (Maybe (layout a)) pureMessage :: layout a -> SomeMessage -> Maybe (layout a) description :: layout a -> String
+XMonad.Core | LayoutClass | type LayoutClass :: (* -> *) -> * -> Constraint
+XMonad.Core | LayoutMessages | data LayoutMessages = Hide | ReleaseResources
+XMonad.Core | LayoutMessages | type LayoutMessages :: *
+XMonad.Core | ManageHook | type ManageHook :: *
+XMonad.Core | ManageHook | type ManageHook = Query (Endo WindowSet)
+XMonad.Core | Message | class Typeable a => Message a
+XMonad.Core | Message | type Message :: * -> Constraint
+XMonad.Core | Query | newtype Query a = Query (ReaderT Window X a)
+XMonad.Core | Query | type Query :: * -> *
+XMonad.Core | Query | type role Query nominal
+XMonad.Core | ScreenDetail | newtype ScreenDetail = SD {screenRect :: Rectangle}
+XMonad.Core | ScreenDetail | type ScreenDetail :: *
+XMonad.Core | ScreenId | newtype ScreenId = S Int
+XMonad.Core | ScreenId | type ScreenId :: *
+XMonad.Core | SomeMessage | data SomeMessage = forall a. Message a => SomeMessage a
+XMonad.Core | SomeMessage | type SomeMessage :: *
+XMonad.Core | StateExtension | data StateExtension = forall a. ExtensionClass a => StateExtension a | forall a. (Read a, Show a, ExtensionClass a) => PersistentExtension a
+XMonad.Core | StateExtension | type StateExtension :: *
+XMonad.Core | Typeable | class Typeable a where typeRep# :: TypeRep a {-# MINIMAL typeRep# #-}
+XMonad.Core | Typeable | type Typeable :: forall k. k -> Constraint
+XMonad.Core | WindowSet | type WindowSet :: *
+XMonad.Core | WindowSet | type WindowSet = StackSet WorkspaceId (Layout Window) Window ScreenId ScreenDetail
+XMonad.Core | WindowSpace | type WindowSpace :: *
+XMonad.Core | WindowSpace | type WindowSpace = Workspace WorkspaceId (Layout Window) Window
+XMonad.Core | WorkspaceId | type WorkspaceId :: *
+XMonad.Core | WorkspaceId | type WorkspaceId = String
+XMonad.Core | X | newtype X a = X (ReaderT XConf (StateT XState IO) a)
+XMonad.Core | X | type X :: * -> *
+XMonad.Core | X | type role X nominal
+XMonad.Core | XConf | data XConf = XConf {display :: Display, config :: (XConfig Layout), theRoot :: Window, normalBorder :: Pixel, focusedBorder :: Pixel, keyActions :: !(Map (KeyMask, KeySym) (X ())), buttonActions :: !(Map (KeyMask, Button) (Window -> X ())), mouseFocused :: !Bool, mousePosition :: !(Maybe (Position, Position)), currentEvent :: !(Maybe Event), directories :: Directories}
+XMonad.Core | XConf | type XConf :: *
+XMonad.Core | XConfig | data XConfig l = XConfig {normalBorderColor :: !String, focusedBorderColor :: !String, terminal :: !String, layoutHook :: !(l Window), manageHook :: !ManageHook, handleEventHook :: !(Event -> X All), workspaces :: ![String], modMask :: ! KeyMask, keys :: !(XConfig Layout -> Map (ButtonMask, KeySym) (X ())), mouseBindings :: !(XConfig Layout -> Map (ButtonMask, Button) (Window -> X ())), borderWidth :: Dimension, logHook :: !(X ()), startupHook :: !(X ()), focusFollowsMouse :: !Bool, clickJustFocuses :: !Bool, clientMask :: EventMask, rootMask :: EventMask, handleExtraArgs :: !([String] -> XConfig Layout -> IO (XConfig Layout)), extensibleConf :: !(Map TypeRep ConfExtension)}
+XMonad.Core | XConfig | type XConfig :: (* -> *) -> *
+XMonad.Core | XState | data XState = XState {windowset :: WindowSet, mapped :: !(Set Window), waitingUnmap :: !(Map Window Int), dragging :: !(Maybe (Position -> Position -> X (), X ())), numberlockMask :: ! KeyMask, extensibleState :: !(Map String (Either String StateExtension))}
+XMonad.Core | XState | type XState :: *
+XMonad.Core | atom_WM_DELETE_WINDOW | atom_WM_DELETE_WINDOW :: X Atom
+XMonad.Core | atom_WM_PROTOCOLS | atom_WM_PROTOCOLS :: X Atom
+XMonad.Core | atom_WM_STATE | atom_WM_STATE :: X Atom
+XMonad.Core | atom_WM_TAKE_FOCUS | atom_WM_TAKE_FOCUS :: X Atom
+XMonad.Core | binFileName | binFileName :: Directories -> FilePath
+XMonad.Core | catchIO | catchIO :: MonadIO m => IO () -> m ()
+XMonad.Core | catchX | catchX :: X a -> X a -> X a
+XMonad.Core | fromMessage | fromMessage :: Message m => SomeMessage -> Maybe m
+XMonad.Core | getAtom | getAtom :: String -> X Atom
+XMonad.Core | getDirectories | getDirectories :: IO Directories
+XMonad.Core | getXMonadCacheDir | getXMonadCacheDir :: X String
+XMonad.Core | getXMonadDataDir | getXMonadDataDir :: X String
+XMonad.Core | getXMonadDir | getXMonadDir :: X String
+XMonad.Core | ifM | ifM :: Monad m => m Bool -> m a -> m a -> m a
+XMonad.Core | installSignalHandlers | installSignalHandlers :: MonadIO m => m ()
+XMonad.Core | io | io :: MonadIO m => IO a -> m a
+XMonad.Core | isRoot | isRoot :: Window -> X Bool
+XMonad.Core | readsLayout | readsLayout :: Layout a -> String -> [(Layout a, String)]
+XMonad.Core | recompile | recompile :: MonadIO m => Directories -> Bool -> m Bool
+XMonad.Core | runOnWorkspaces | runOnWorkspaces :: (WindowSpace -> X WindowSpace) -> X ()
+XMonad.Core | runQuery | runQuery :: Query a -> Window -> X a
+XMonad.Core | runX | runX :: XConf -> XState -> X a -> IO (a, XState)
+XMonad.Core | spawn | spawn :: MonadIO m => String -> m ()
+XMonad.Core | spawnPID | spawnPID :: MonadIO m => String -> m ProcessID
+XMonad.Core | stateFileName | stateFileName :: Directories -> FilePath
+XMonad.Core | trace | trace :: MonadIO m => String -> m ()
+XMonad.Core | uninstallSignalHandlers | uninstallSignalHandlers :: MonadIO m => m ()
+XMonad.Core | userCode | userCode :: X a -> X (Maybe a)
+XMonad.Core | userCodeDef | userCodeDef :: a -> X a -> X a
+XMonad.Core | whenJust | whenJust :: Monad m => Maybe a -> (a -> m ()) -> m ()
+XMonad.Core | whenX | whenX :: X Bool -> X () -> X ()
+XMonad.Core | withDisplay | withDisplay :: (Display -> X a) -> X a
+XMonad.Core | withWindowAttributes | withWindowAttributes :: Display -> Window -> (WindowAttributes -> X ()) -> X ()
+XMonad.Core | withWindowSet | withWindowSet :: (WindowSet -> X a) -> X a
+XMonad.Core | xfork | xfork :: MonadIO m => IO () -> m ProcessID
+XMonad.Core | xmessage | xmessage :: MonadIO m => String -> m ()
+XMonad.Layout | (|||) | (|||) :: l a -> r a -> Choose l r a
+XMonad.Layout | CLR | data CLR = CL | CR
+XMonad.Layout | CLR | type CLR :: *
+XMonad.Layout | ChangeLayout | data ChangeLayout = FirstLayout | NextLayout
+XMonad.Layout | ChangeLayout | type ChangeLayout :: *
+XMonad.Layout | Choose | data Choose l r a = Choose CLR (l a) (r a)
+XMonad.Layout | Choose | type Choose :: (* -> *) -> (* -> *) -> * -> *
+XMonad.Layout | Choose | type role Choose representational representational nominal
+XMonad.Layout | Full | data Full a = Full
+XMonad.Layout | Full | type Full :: * -> *
+XMonad.Layout | Full | type role Full phantom
+XMonad.Layout | IncMasterN | newtype IncMasterN = IncMasterN Int
+XMonad.Layout | IncMasterN | type IncMasterN :: *
+XMonad.Layout | JumpToLayout | newtype JumpToLayout = JumpToLayout String
+XMonad.Layout | JumpToLayout | type JumpToLayout :: *
+XMonad.Layout | Mirror | newtype Mirror l a = Mirror (l a)
+XMonad.Layout | Mirror | type Mirror :: (* -> *) -> * -> *
+XMonad.Layout | Mirror | type role Mirror representational nominal
+XMonad.Layout | Resize | data Resize = Shrink | Expand
+XMonad.Layout | Resize | type Resize :: *
+XMonad.Layout | Tall | data Tall a = Tall {tallNMaster :: Int, tallRatioIncrement :: Rational, tallRatio :: Rational}
+XMonad.Layout | Tall | type Tall :: * -> *
+XMonad.Layout | Tall | type role Tall phantom
+XMonad.Layout | mirrorRect | mirrorRect :: Rectangle -> Rectangle
+XMonad.Layout | splitHorizontally | splitHorizontally :: Int -> Rectangle -> [Rectangle]
+XMonad.Layout | splitHorizontallyBy | splitHorizontallyBy :: RealFrac r => r -> Rectangle -> (Rectangle, Rectangle)
+XMonad.Layout | splitVertically | splitVertically :: Int -> Rectangle -> [Rectangle]
+XMonad.Layout | splitVerticallyBy | splitVerticallyBy :: RealFrac r => r -> Rectangle -> (Rectangle, Rectangle)
+XMonad.Layout | tile | tile :: Rational -> Rectangle -> Int -> Int -> [Rectangle]
+XMonad.Main | launch | launch :: (LayoutClass l Window, Read (l Window)) => XConfig l -> Directories -> IO ()
+XMonad.Main | sendRestart | sendRestart :: IO ()
+XMonad.Main | xmonad | xmonad :: (LayoutClass l Window, Read (l Window)) => XConfig l -> IO ()
+XMonad.ManageHook | (-->) | (-->) :: (Monad m, Monoid a) => m Bool -> m a -> m a
+XMonad.ManageHook | (<&&>) | (<&&>) :: Monad m => m Bool -> m Bool -> m Bool
+XMonad.ManageHook | (<+>) | (<+>) :: Monoid m => m -> m -> m
+XMonad.ManageHook | (<||>) | (<||>) :: Monad m => m Bool -> m Bool -> m Bool
+XMonad.ManageHook | (=?) | (=?) :: Eq a => Query a -> a -> Query Bool
+XMonad.ManageHook | appName | appName :: Query String
+XMonad.ManageHook | className | className :: Query String
+XMonad.ManageHook | composeAll | composeAll :: Monoid m => [m] -> m
+XMonad.ManageHook | doF | doF :: (s -> s) -> Query (Endo s)
+XMonad.ManageHook | doFloat | doFloat :: ManageHook
+XMonad.ManageHook | doIgnore | doIgnore :: ManageHook
+XMonad.ManageHook | doShift | doShift :: WorkspaceId -> ManageHook
+XMonad.ManageHook | getStringProperty | getStringProperty :: Display -> Window -> String -> X (Maybe String)
+XMonad.ManageHook | idHook | idHook :: Monoid m => m
+XMonad.ManageHook | liftX | liftX :: X a -> Query a
+XMonad.ManageHook | resource | resource :: Query String
+XMonad.ManageHook | stringProperty | stringProperty :: String -> Query String
+XMonad.ManageHook | title | title :: Query String
+XMonad.ManageHook | willFloat | willFloat :: Query Bool
+XMonad.Operations | D | type D :: *
+XMonad.Operations | D | type D = (Dimension, Dimension)
+XMonad.Operations | StateFile | data StateFile = StateFile {sfWins :: StackSet WorkspaceId String Window ScreenId ScreenDetail, sfExt :: [(String, String)]}
+XMonad.Operations | StateFile | type StateFile :: *
+XMonad.Operations | applyAspectHint | applyAspectHint :: (D, D) -> D -> D
+XMonad.Operations | applyMaxSizeHint | applyMaxSizeHint :: D -> D -> D
+XMonad.Operations | applyResizeIncHint | applyResizeIncHint :: D -> D -> D
+XMonad.Operations | applySizeHints | applySizeHints :: Integral a => Dimension -> SizeHints -> (a, a) -> D
+XMonad.Operations | applySizeHints' | applySizeHints' :: SizeHints -> D -> D
+XMonad.Operations | applySizeHintsContents | applySizeHintsContents :: Integral a => SizeHints -> (a, a) -> D
+XMonad.Operations | broadcastMessage | broadcastMessage :: Message a => a -> X ()
+XMonad.Operations | cacheNumlockMask | cacheNumlockMask :: X ()
+XMonad.Operations | cleanMask | cleanMask :: KeyMask -> X KeyMask
+XMonad.Operations | clearEvents | clearEvents :: EventMask -> X ()
+XMonad.Operations | containedIn | containedIn :: Rectangle -> Rectangle -> Bool
+XMonad.Operations | extraModifiers | extraModifiers :: X [KeyMask]
+XMonad.Operations | float | float :: Window -> X ()
+XMonad.Operations | floatLocation | floatLocation :: Window -> X (ScreenId, RationalRect)
+XMonad.Operations | focus | focus :: Window -> X ()
+XMonad.Operations | getCleanedScreenInfo | getCleanedScreenInfo :: MonadIO m => Display -> m [Rectangle]
+XMonad.Operations | hide | hide :: Window -> X ()
+XMonad.Operations | initColor | initColor :: Display -> String -> IO (Maybe Pixel)
+XMonad.Operations | isClient | isClient :: Window -> X Bool
+XMonad.Operations | isFixedSizeOrTransient | isFixedSizeOrTransient :: Display -> Window -> X Bool
+XMonad.Operations | kill | kill :: X ()
+XMonad.Operations | killWindow | killWindow :: Window -> X ()
+XMonad.Operations | manage | manage :: Window -> X ()
+XMonad.Operations | mkAdjust | mkAdjust :: Window -> X (D -> D)
+XMonad.Operations | mkGrabs | mkGrabs :: [(KeyMask, KeySym)] -> X [(KeyMask, KeyCode)]
+XMonad.Operations | modifyWindowSet | modifyWindowSet :: (WindowSet -> WindowSet) -> X ()
+XMonad.Operations | mouseDrag | mouseDrag :: (Position -> Position -> X ()) -> X () -> X ()
+XMonad.Operations | mouseMoveWindow | mouseMoveWindow :: Window -> X ()
+XMonad.Operations | mouseResizeWindow | mouseResizeWindow :: Window -> X ()
+XMonad.Operations | nubScreens | nubScreens :: [Rectangle] -> [Rectangle]
+XMonad.Operations | pointScreen | pointScreen :: Position -> Position -> X (Maybe (Screen WorkspaceId (Layout Window) Window ScreenId ScreenDetail))
+XMonad.Operations | pointWithin | pointWithin :: Position -> Position -> Rectangle -> Bool
+XMonad.Operations | readStateFile | readStateFile :: (LayoutClass l Window, Read (l Window)) => XConfig l -> X (Maybe XState)
+XMonad.Operations | refresh | refresh :: X ()
+XMonad.Operations | rescreen | rescreen :: X ()
+XMonad.Operations | restart | restart :: String -> Bool -> X ()
+XMonad.Operations | reveal | reveal :: Window -> X ()
+XMonad.Operations | scaleRationalRect | scaleRationalRect :: Rectangle -> RationalRect -> Rectangle
+XMonad.Operations | screenWorkspace | screenWorkspace :: ScreenId -> X (Maybe WorkspaceId)
+XMonad.Operations | sendMessage | sendMessage :: Message a => a -> X ()
+XMonad.Operations | sendMessageWithNoRefresh | sendMessageWithNoRefresh :: Message a => a -> WindowSpace -> X ()
+XMonad.Operations | sendReplace | sendReplace :: IO ()
+XMonad.Operations | sendRestart | sendRestart :: IO ()
+XMonad.Operations | setButtonGrab | setButtonGrab :: Bool -> Window -> X ()
+XMonad.Operations | setFocusX | setFocusX :: Window -> X ()
+XMonad.Operations | setInitialProperties | setInitialProperties :: Window -> X ()
+XMonad.Operations | setLayout | setLayout :: Layout Window -> X ()
+XMonad.Operations | setTopFocus | setTopFocus :: X ()
+XMonad.Operations | setWMState | setWMState :: Window -> Int -> X ()
+XMonad.Operations | setWindowBorderWithFallback | setWindowBorderWithFallback :: Display -> Window -> String -> Pixel -> X ()
+XMonad.Operations | tileWindow | tileWindow :: Window -> Rectangle -> X ()
+XMonad.Operations | unGrab | unGrab :: X ()
+XMonad.Operations | unmanage | unmanage :: Window -> X ()
+XMonad.Operations | updateLayout | updateLayout :: WorkspaceId -> Maybe (Layout Window) -> X ()
+XMonad.Operations | windowBracket | windowBracket :: (a -> Bool) -> X a -> X a
+XMonad.Operations | windowBracket_ | windowBracket_ :: X Any -> X ()
+XMonad.Operations | windows | windows :: (WindowSet -> WindowSet) -> X ()
+XMonad.Operations | withFocused | withFocused :: (Window -> X ()) -> X ()
+XMonad.Operations | withUnfocused | withUnfocused :: (Window -> X ()) -> X ()
+XMonad.Operations | writeStateToFile | writeStateToFile :: X ()
+XMonad.StackSet | RationalRect | data RationalRect = RationalRect Rational Rational Rational Rational
+XMonad.StackSet | RationalRect | type RationalRect :: *
+XMonad.StackSet | Screen | data Screen i l a sid sd = Screen {workspace :: (Workspace i l a), screen :: !sid, screenDetail :: !sd}
+XMonad.StackSet | Screen | type Screen :: * -> * -> * -> * -> * -> *
+XMonad.StackSet | Stack | data Stack a = Stack {focus :: !a, up :: [a], down :: [a]}
+XMonad.StackSet | Stack | type Stack :: * -> *
+XMonad.StackSet | StackSet | data StackSet i l a sid sd = StackSet {current :: (Screen i l a sid sd), visible :: [Screen i l a sid sd], hidden :: [Workspace i l a], floating :: Map a RationalRect}
+XMonad.StackSet | StackSet | type StackSet :: * -> * -> * -> * -> * -> *
+XMonad.StackSet | StackSet | type role StackSet representational representational nominal representational representational
+XMonad.StackSet | Workspace | data Workspace i l a = Workspace {tag :: !i, layout :: l, stack :: Maybe (Stack a)}
+XMonad.StackSet | Workspace | type Workspace :: * -> * -> * -> *
+XMonad.StackSet | abort | abort :: String -> a
+XMonad.StackSet | allWindows | allWindows :: Eq a => StackSet i l a s sd -> [a]
+XMonad.StackSet | currentTag | currentTag :: StackSet i l a s sd -> i
+XMonad.StackSet | delete | delete :: Ord a => a -> StackSet i l a s sd -> StackSet i l a s sd
+XMonad.StackSet | delete' | delete' :: Eq a => a -> StackSet i l a s sd -> StackSet i l a s sd
+XMonad.StackSet | differentiate | differentiate :: [a] -> Maybe (Stack a)
+XMonad.StackSet | ensureTags | ensureTags :: Eq i => l -> [i] -> StackSet i l a s sd -> StackSet i l a s sd
+XMonad.StackSet | filter | filter :: (a -> Bool) -> Stack a -> Maybe (Stack a)
+XMonad.StackSet | findTag | findTag :: Eq a => a -> StackSet i l a s sd -> Maybe i
+XMonad.StackSet | float | float :: Ord a => a -> RationalRect -> StackSet i l a s sd -> StackSet i l a s sd
+XMonad.StackSet | focusDown | focusDown :: StackSet i l a s sd -> StackSet i l a s sd
+XMonad.StackSet | focusDown' | focusDown' :: Stack a -> Stack a
+XMonad.StackSet | focusMaster | focusMaster :: StackSet i l a s sd -> StackSet i l a s sd
+XMonad.StackSet | focusUp | focusUp :: StackSet i l a s sd -> StackSet i l a s sd
+XMonad.StackSet | focusUp' | focusUp' :: Stack a -> Stack a
+XMonad.StackSet | focusWindow | focusWindow :: (Eq s, Eq a, Eq i) => a -> StackSet i l a s sd -> StackSet i l a s sd
+XMonad.StackSet | greedyView | greedyView :: (Eq s, Eq i) => i -> StackSet i l a s sd -> StackSet i l a s sd
+XMonad.StackSet | index | index :: StackSet i l a s sd -> [a]
+XMonad.StackSet | insertUp | insertUp :: Eq a => a -> StackSet i l a s sd -> StackSet i l a s sd
+XMonad.StackSet | integrate | integrate :: Stack a -> [a]
+XMonad.StackSet | integrate' | integrate' :: Maybe (Stack a) -> [a]
+XMonad.StackSet | lookupWorkspace | lookupWorkspace :: Eq s => s -> StackSet i l a s sd -> Maybe i
+XMonad.StackSet | mapLayout | mapLayout :: (l -> l') -> StackSet i l a s sd -> StackSet i l' a s sd
+XMonad.StackSet | mapWorkspace | mapWorkspace :: (Workspace i l a -> Workspace i l a) -> StackSet i l a s sd -> StackSet i l a s sd
+XMonad.StackSet | member | member :: Eq a => a -> StackSet i l a s sd -> Bool
+XMonad.StackSet | modify | modify :: Maybe (Stack a) -> (Stack a -> Maybe (Stack a)) -> StackSet i l a s sd -> StackSet i l a s sd
+XMonad.StackSet | modify' | modify' :: (Stack a -> Stack a) -> StackSet i l a s sd -> StackSet i l a s sd
+XMonad.StackSet | new | new :: Integral s => l -> [i] -> [sd] -> StackSet i l a s sd
+XMonad.StackSet | peek | peek :: StackSet i l a s sd -> Maybe a
+XMonad.StackSet | renameTag | renameTag :: Eq i => i -> i -> StackSet i l a s sd -> StackSet i l a s sd
+XMonad.StackSet | screens | screens :: StackSet i l a s sd -> [Screen i l a s sd]
+XMonad.StackSet | shift | shift :: (Ord a, Eq s, Eq i) => i -> StackSet i l a s sd -> StackSet i l a s sd
+XMonad.StackSet | shiftMaster | shiftMaster :: StackSet i l a s sd -> StackSet i l a s sd
+XMonad.StackSet | shiftWin | shiftWin :: (Ord a, Eq s, Eq i) => i -> a -> StackSet i l a s sd -> StackSet i l a s sd
+XMonad.StackSet | sink | sink :: Ord a => a -> StackSet i l a s sd -> StackSet i l a s sd
+XMonad.StackSet | swapDown | swapDown :: StackSet i l a s sd -> StackSet i l a s sd
+XMonad.StackSet | swapMaster | swapMaster :: StackSet i l a s sd -> StackSet i l a s sd
+XMonad.StackSet | swapUp | swapUp :: StackSet i l a s sd -> StackSet i l a s sd
+XMonad.StackSet | tagMember | tagMember :: Eq i => i -> StackSet i l a s sd -> Bool
+XMonad.StackSet | view | view :: (Eq s, Eq i) => i -> StackSet i l a s sd -> StackSet i l a s sd
+XMonad.StackSet | workspaces | workspaces :: StackSet i l a s sd -> [Workspace i l a]

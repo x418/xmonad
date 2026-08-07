@@ -1,0 +1,128 @@
+# Names the X11 build exports and the river build deliberately does not.
+#
+# The rule for the river backend is that anything which cannot be faithfully
+# ported is not exported.  A name that is present but inert is worse than one
+# that is absent: absent fails at the call site, at compile time, naming the
+# file and line, and the person reading that error learns something true.  A
+# no-op that typechecks teaches them nothing until the behaviour is missing at
+# runtime, by which point the backend is the last place they will look.
+#
+# So this file is the cost of that rule, stated in full.  tests/api/check-subset.sh
+# requires it to match exactly: a name dropped without an entry here fails, and
+# so does a stale entry for a name river has since grown.  Adding a line is
+# cheap; the point is that it cannot happen silently.
+#
+# Format: one name per line, then a reason.  Names are unqualified, because
+# XMonad re-exports XMonad.Operations and XMonad.Core wholesale and the
+# per-module duplication carries no information.
+
+# --- No display, no root window, no atoms -----------------------------------
+#
+# Wayland has no equivalent of the X server's global namespace.  There is no
+# connection object a client can ask questions of, no window that parents all
+# others, and no interned-string property system.  These are not hard to
+# implement over river; there is nothing to implement them against.
+
+withDisplay             river has no Display.  XConf holds a Connection, reached with `asks riverConn`.
+withWindowAttributes    Wayland surfaces have no attributes to read.  Use the accumulated RiverWindow.
+isRoot                  There is no root window.  Every window river reports is a real toplevel.
+getAtom                 Wayland has no atoms.  Nothing to intern and nothing to intern it against.
+atom_WM_STATE           As getAtom.
+atom_WM_PROTOCOLS       As getAtom.
+atom_WM_DELETE_WINDOW   As getAtom.  Closing politely is riverWindowV1Close, which is xdg_toplevel.close.
+atom_WM_TAKE_FOCUS      As getAtom.  Focus is set during the manage sequence instead.
+
+# --- No window properties ---------------------------------------------------
+#
+# There is no _NET_WM_*, no WM_WINDOW_ROLE, and no generic key-value store on a
+# surface.  What X11 configs read this way either has a dedicated river event
+# (title, app_id, unreliable_pid) or does not exist at all.
+
+stringProperty          Wayland has no window properties.  A rule matching on one could only be dead code.
+getStringProperty       As stringProperty.
+
+# --- No size hints ----------------------------------------------------------
+#
+# xdg_toplevel carries min and max size, but river does not surface them to the
+# window manager, and resize increments, aspect ratios and base sizes have no
+# Wayland counterpart whatsoever.  Exporting the arithmetic without any hints
+# to apply it to would be a function that always returns its input.
+
+applySizeHints          No WM_NORMAL_HINTS.  river reports a window's dimensions, not its constraints.
+applySizeHints'         As applySizeHints.
+applySizeHintsContents  As applySizeHints.
+applyAspectHint         Wayland has no aspect ratio hint at all.
+applyMaxSizeHint        xdg_toplevel has max_size, but river does not report it to the window manager.
+applyResizeIncHint      Wayland has no resize increment hint at all.
+mkAdjust                Builds an adjuster from size hints; see applySizeHints.
+D                       The (width, height) alias exists only for the size hint functions above.
+isFixedSizeOrTransient  Needs both size hints and WM_TRANSIENT_FOR.  Use river_window_v1.parent for the latter.
+
+# --- Grabs and modifier bookkeeping are the compositor's ---------------------
+#
+# river resolves modifiers itself and owns the keyboard.  Bindings are objects
+# created through river_xkb_bindings_v1, not grabs asserted against a server,
+# so there is no numlock mask to cache, nothing to strip from an incoming
+# mask, and no grab to release.
+
+mkGrabs                 Bindings are river objects, not X grabs.  See XMonad.River.WM.bindSeat.
+unGrab                  Nothing is grabbed, so nothing needs releasing before a screen locker runs.
+setButtonGrab           As mkGrabs, for pointer bindings.
+cacheNumlockMask        river delivers resolved modifiers; there is no mapping to inspect.
+cleanMask               Nothing to clean: masks arrive already resolved.
+extraModifiers          Existed to grab each numlock/capslock combination.  No grabs, no combinations.
+
+# --- No event queue ---------------------------------------------------------
+
+clearEvents             There is no queue to drain.  river delivers a manage/render sequence, not an event stream.
+
+# --- Operations river performs itself ---------------------------------------
+#
+# These are not missing so much as relocated: river owns the moment at which
+# each happens, and doing them at any other time is either ignored or an error.
+# Window management state may only change during a manage sequence, and
+# rendering state is only applied at render_finish.
+
+manage                  Windows are adopted during the manage sequence.  See XMonad.River.WM.adoptNewWindows.
+tileWindow              Dimensions are proposed during manage and positions applied during render.
+setTopFocus             Focus is set at the end of the manage sequence, once the layout is known.
+setFocusX               As setTopFocus.
+setInitialProperties    There are no properties to set, and no border to set before the first render.
+setWMState              WM_STATE is X11's; workspaces are implemented with river_window_v1.hide/show.
+setWindowBorderWithFallback  Borders are RGBA on river_window_v1.set_borders.  No colormap, so no fallback.
+initColor               No colormap to allocate against.  Colours are parsed to RGBA directly.
+getCleanedScreenInfo    Screens come from river outputs, reconciled every manage sequence, not from xinerama.
+
+# --- Interactive pointer operations -----------------------------------------
+#
+# river drives these through the seat's op_start_pointer / op_delta /
+# op_release cycle rather than by the window manager grabbing the pointer.
+# That cycle is not yet wired into XConf; when it is, these can come back with
+# their signatures intact, which is why they are listed together.
+
+mouseDrag               Needs river's seat pointer-operation cycle.  Not yet wired into XConf.
+mouseMoveWindow         As mouseDrag.
+mouseResizeWindow       As mouseDrag.
+
+# --- Session lifecycle ------------------------------------------------------
+
+sendReplace             river permits one window manager and answers a second with `unavailable`.
+                      # There is no selection to steal, so there is nothing to replace.  Swapping window
+                      # managers is what --restart does, and river keeps every client alive across it.
+
+# --- State does not survive a restart ---------------------------------------
+#
+# river object ids are per-connection and recycled after wl_display.delete_id,
+# so a window id serialised by one process means nothing to its successor.
+# Writing the file would be easy; reading it back correctly is the part that
+# has no answer today.  See README.river.md, which records this as the one
+# thing worth raising upstream.
+
+StateFile               No state file: a serialised river object id is meaningless to the next process.
+writeStateToFile        As StateFile.
+readStateFile           As StateFile.
+stateFileName           As StateFile.
+
+# --- X11 clients ------------------------------------------------------------
+
+xmessage                An X11 client.  Diagnostics go to stderr, and so to the journal.

@@ -110,7 +110,15 @@ perl -e '
         $text =~ s/\s+/ /g;
         $text =~ s/^ | $//g;
 
-        push @{ $is_reexport ? \@reexports : \@api }, "$module | $text\n";
+        # The declared name, so that the subset check can compare names without
+        # being confused by a signature that differs for good reason.
+        my $name;
+        if    ($text =~ /^(?:type|data|newtype) (?:family |instance |role )?(\S+)/) { $name = $1 }
+        elsif ($text =~ /^class (?:.*=> )?(\S+)/)                                   { $name = $1 }
+        elsif ($text =~ /^(\(.*?\)|[^\s:]+) ::/)                                    { $name = $1 }
+        else                                                                        { $name = $text }
+
+        push @{ $is_reexport ? \@reexports : \@api }, "$module | $name | $text\n";
         $entry = undef;
     };
 

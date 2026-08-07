@@ -14,7 +14,7 @@ import qualified Data.ByteString as BS
 
 import XMonad.Layout
 import XMonad.River.Wire
-import XMonad.River.X11Compat
+import XMonad.River.Types
 
 main :: IO ()
 main = do

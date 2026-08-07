@@ -1,0 +1,148 @@
+# The river backend
+
+```
+stack build                      # X11, byte-for-byte upstream behaviour
+stack build --flag xmonad:river  # river/Wayland
+```
+
+**Status: it compiles, links and passes its unit tests. Nothing has been run
+against a live river.** All the evidence below is compile-time and unit-test
+evidence. The wire codec is pinned against byte sequences derived from the
+specification, and the layout arithmetic is tested, but the protocol stack
+above them is unverified until it runs against a real compositor.
+
+## Why river, and why this is possible
+
+river's master branch does not implement window management at all. It defers
+*all* policy — position, size, focus, keybindings, decorations — to a separate
+process implementing [`river-window-management-v1`][wm-protocol]. Three
+consequences matter:
+
+1. **Custom layouts survive.** The window manager computes every window's
+   geometry and hands it over via `river_node_v1.set_position` and
+   `river_window_v1.propose_dimensions`. A layout is ordinary pure code again.
+   This is the thing sway cannot offer at any price.
+2. **`M-q` survives.** river hot-swaps window managers without restarting the
+   compositor or its clients, so the recompile-and-restart loop is recoverable.
+3. **The keymap ports as data.** xkbcommon reuses X11's keysym numbering and
+   `river_seat_v1.modifiers` reuses X11's modifier mask values. `mod4Mask` is
+   still 64, `xK_Return` still `0xff0d`, so `"M-S-<Return>"` means the same
+   thing without translation.
+
+[wm-protocol]: https://isaacfreund.com/docs/wayland/river-window-management-v1/
+
+There is no dependency on `libwayland`. None of the river window management
+protocols pass file descriptors, and fd passing (`SCM_RIGHTS`) is the only part
+of the wire format that genuinely needs C. Serialization uses `store-core`,
+whose `Poke`/`Peek` are host-endian and 32-bit aligned — exactly Wayland's wire
+format. `binary` and `cereal` are big-endian and would route every field
+through an escape hatch.
+
+## Layout of the tree
+
+`src/` is the X11 build and is **frozen**. `tests/check-x11-source.sh` asserts
+it is byte-identical to the commit recorded in `tests/upstream-base.sha`, so the
+river work cannot perturb the X11 build by accident. Changing it stays
+possible — bump the SHA in the same commit, and that diff is the review signal.
+
+`src-river/` is a complete second copy. It does not shadow `src/` by
+`hs-source-dirs` precedence and shares nothing with it; the flag-off build never
+looks at it. That costs two copies of `XMonad.StackSet` and `XMonad.Layout`,
+which are backend-independent. The alternative was to share those two and let
+the rest shadow, which makes a module's provenance depend on a flag and on
+directory order. Two honest copies read better than one file that means
+different things on different days, and the API goldens are what hold them in
+step.
+
+Nothing in `src-river/` is named `Graphics.X11`.
+
+## The rule
+
+**If something cannot be faithfully ported, it is not exported.**
+
+A name that is present but inert is worse than one that is absent. Absent fails
+at the call site, at compile time, naming the file and line, and whoever reads
+that error learns something true. A no-op that typechecks teaches them nothing
+until the behaviour is missing at runtime, by which point the backend is the
+last place they will look.
+
+The consequence is that river's API is deliberately a strict subset: 44 names
+the X11 build exports are gone, and the 1458 names `XMonad` re-exports from
+`Graphics.X11` are not re-exported at all. Every one of those omissions is
+justified by name in [`tests/api/unportable.txt`](tests/api/unportable.txt), and
+the 11 river-native additions in
+[`tests/api/river-only.txt`](tests/api/river-only.txt).
+`tests/api/check-subset.sh` requires both lists to match exactly, in both
+directions — a name dropped without an entry fails, and so does a stale entry
+for a name river has since grown.
+
+This is a real cost, and it falls on xmonad-contrib: a contrib module that
+touches `withDisplay`, size hints, or window properties will not compile against
+this backend. That is the intended outcome, not a regression to be papered over.
+
+## What is implemented
+
+| Area | Notes |
+| --- | --- |
+| Wire codec | `store-core`. 14 tests, including byte sequences derived from the spec. |
+| Connection | Socket, object id recycling, registry, dispatch, roundtrip. |
+| Protocol bindings | Generated from the XML in `protocol/`, checked in. |
+| Manage/render loop | Layout and focus in the manage sequence; position, order, borders and hide/show in render — matching river's split of the two state categories. |
+| Workspaces | river has no workspace concept; hidden workspaces use `river_window_v1.hide`/`show`. |
+| Layouts | `LayoutClass`, `Tall`, `Full`, `Mirror`, `\|\|\|`. |
+| Manage hooks | Run during the manage sequence, *before* the window is rendered — the ordering guarantee xmonad has and sway's IPC cannot give. |
+| `title`, `className`, `appName` | From `river_window_v1.title` and `app_id`. Note river has no separate instance name, so `className` and `appName` are the same string. |
+| Layer shell | Bound via `river_layer_shell_v1`, without which river closes every layer surface on sight. This is what makes prompts, notifications, wallpaper and bars appear at all, and its exclusive zones shrink the tiling area. |
+| Screens | Reconciled from river outputs every manage sequence, ordered by position so screen ids are stable across reconnects. |
+| Pointer warping | `river_seat_v1.pointer_warp`. |
+| `M-q` | `sendRestart` throws an async exception into the event loop thread; the loop does `stop` → `finished` → `exec`. river keeps every client alive across the swap. |
+
+## Known gaps
+
+- **Nothing has run against a live river.** See the status line at the top.
+- **Interactive move and resize are unbound.** river drives these through the
+  seat's `op_start_pointer` / `op_delta` / `op_release` cycle rather than by the
+  window manager grabbing the pointer, and that cycle is not wired into `XConf`.
+  `mod-button1` and `mod-button3` are left free rather than bound to something
+  inert.
+- **Multi-key submaps.** Needs a transient binding set installed for the prefix,
+  using `ensure_next_key_eaten` so an unbound key cancels cleanly.
+- **Floating geometry** is tracked in the `StackSet` but not yet applied during
+  the render sequence.
+- **`logHook` output has no consumer.** A Wayland bar wants `ext-workspace-v1`
+  or a direct IPC.
+- **State does not survive a restart** — see below.
+
+## Worth fixing upstream in river
+
+**Window manager state cannot survive a restart, because object ids cannot.**
+
+xmonad serialises its `WindowSet` to a state file and reads it back after
+`M-q`, so windows stay on the workspaces you put them on. That is not possible
+here. River object ids are per-connection and are recycled after
+`wl_display.delete_id`, so an id written by one window manager means nothing to
+its successor. Writing the file is easy; reading it back correctly is the part
+with no answer today. This is why `StateFile`, `writeStateToFile`,
+`readStateFile` and `stateFileName` are absent, and why `PersistentExtension`
+behaves exactly like `StateExtension`.
+
+There may be a purely local fix, and it should be tried before asking anyone
+upstream for anything: `river_window_v1.identifier` is documented as a unique
+string that outlives the object, so resume state could be keyed on identifier
+rather than object id and re-mapped as windows are re-advertised at startup.
+
+What is genuinely unclear — and what the upstream question would be — is
+whether that can be made reliable:
+
+- Is `identifier` guaranteed to be delivered for every existing window before
+  the first `manage_start`? If not, the first manage sequence has to lay out
+  windows it cannot yet identify, and the restore either races or has to be
+  deferred by a sequence.
+- Is there, or should there be, a channel for a window manager to hand opaque
+  state to its successor across the `stop` → `finished` → exec handover? river
+  already mediates that handover, and it is the only participant that spans
+  both processes.
+
+I have not verified either against a running river or read the compositor
+source closely enough to be confident, so this is a question to raise rather
+than a bug to report.

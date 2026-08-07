@@ -1,3 +1,7 @@
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections #-}
 -- | The river window management state machine, driving an xmonad 'WindowSet'.
 --
 -- river splits state into two disjoint categories, and the split shapes this
@@ -46,7 +50,7 @@ import XMonad.River.Protocol.WindowManagement
 import XMonad.River.Protocol.LayerShell
 import XMonad.River.Protocol.XkbBindings
 import XMonad.River.Wire (ObjectId, isNullObject)
-import XMonad.River.X11Compat
+import XMonad.River.Types
 import qualified XMonad.StackSet as W
 
 --------------------------------------------------------------------------------
@@ -83,8 +87,8 @@ data Runtime = Runtime
 -- Entry point
 
 -- | Connect to river and run the window manager. Does not return.
-riverMain :: XConfig Layout -> IO ()
-riverMain userConfig = do
+riverMain :: XConfig Layout -> Directories -> IO ()
+riverMain userConfig dirs = do
   conn <- connect
   (registry, globals) <- getRegistry conn
   mManager <- bindGlobal conn registry globals
@@ -104,7 +108,7 @@ riverMain userConfig = do
       when (mLayerShell == Nothing) $ hPutStrLn stderr
         "xmonad-river: river_layer_shell_v1 is unavailable; layer surfaces \
         \(fuzzel prompts, notifications, wallpaper, bars) will not be shown"
-      run conn manager bindings (fmap fst mLayerShell) userConfig
+      run conn manager bindings (fmap fst mLayerShell) userConfig dirs
     _ -> do
       hPutStrLn stderr
         "xmonad-river: river_window_manager_v1 (>= 4) or \
@@ -112,8 +116,8 @@ riverMain userConfig = do
       exitFailure
 
 run :: Connection -> ObjectId -> ObjectId -> Maybe ObjectId -> XConfig Layout
-    -> IO ()
-run conn manager bindings layerShell userConfig = do
+    -> Directories -> IO ()
+run conn manager bindings layerShell userConfig dirs = do
   windowsRef <- newIORef M.empty
   outputsRef <- newIORef M.empty
   seatsRef   <- newIORef M.empty
@@ -164,6 +168,7 @@ run conn manager bindings layerShell userConfig = do
         , mouseFocused = False
         , mousePosition = Nothing
         , currentEvent = Nothing
+        , directories = dirs
         }
       xstate = XState
         { windowset = initialSet
@@ -246,7 +251,7 @@ onManagerEvent conn manager restartRef rt runX' = \case
   RiverWindowManagerV1SessionUnlocked -> void (runX' (broadcastEvent SessionUnlocked))
   _ -> pure ()
 
-broadcastEvent :: RiverEvent -> X All
+broadcastEvent :: Event -> X All
 broadcastEvent ev = do
   hook <- asks (handleEventHook . config)
   userCodeDef (All True) (hook ev)

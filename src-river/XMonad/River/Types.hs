@@ -19,6 +19,8 @@ module XMonad.River.Types
   , RiverWindow(..)
   , RiverOutput(..)
   , RiverSeat(..)
+  , LayerFocus(..)
+  , layerHasFocus
   ) where
 
 import Data.ByteString (ByteString)
@@ -109,13 +111,39 @@ data RiverWindow = RiverWindow
   } deriving (Eq, Show)
 
 data RiverOutput = RiverOutput
-  { roObject   :: !ObjectId
-  , roPosition :: !(Int32, Int32)
-  , roSize     :: !(Int32, Int32)
-  , roRemoved  :: !Bool
+  { roObject      :: !ObjectId
+  , roPosition    :: !(Int32, Int32)
+  , roSize        :: !(Int32, Int32)
+  , roRemoved     :: !Bool
+  , roLayerObject :: !(Maybe ObjectId)
+    -- ^ The @river_layer_shell_output_v1@ for this output, when the compositor
+    -- offers layer shell at all.
+  , roLayerArea   :: !(Maybe Rectangle)
+    -- ^ The area left over once layer surfaces have claimed their exclusive
+    -- zones.  Preferring this to the raw output rectangle is what stops a bar
+    -- or dock being tiled over.
   } deriving (Eq, Show)
 
 data RiverSeat = RiverSeat
-  { rsObject  :: !ObjectId
-  , rsRemoved :: !Bool
+  { rsObject      :: !ObjectId
+  , rsRemoved     :: !Bool
+  , rsLayerObject :: !(Maybe ObjectId)
+  , rsLayerFocus  :: !LayerFocus
   } deriving (Eq, Show)
+
+-- | Whether a seat's keyboard currently belongs to a layer surface.
+--
+-- This has to be tracked because focus requests must not be made while it
+-- does: river discards them outright when focus is exclusive, and in the
+-- non-exclusive case re-focusing a window in the same manage sequence silently
+-- steals the keyboard back.  That is the difference between a prompt you can
+-- type into and one you cannot.
+data LayerFocus
+  = LayerFocusNone
+  | LayerFocusNonExclusive
+  | LayerFocusExclusive
+  deriving (Eq, Show)
+
+layerHasFocus :: LayerFocus -> Bool
+layerHasFocus LayerFocusNone = False
+layerHasFocus _              = True
