@@ -103,11 +103,19 @@ Design conclusions, which apply here unchanged:
 - **A timeout was tried and rejected.** It bounds the damage without preventing
   it, and the bound is on the user thinking, not on anything mechanical.
 
-## 4. CI never builds the river backend
+## 4. CI never builds the river backend — CLOSED
 
-- `.github/workflows/stack.yml:79` — `--flag=xmonad:pedantic`, no river flag.
-- `.github/workflows/haskell-ci.yml` — zero occurrences of "river".
-- `cabal.haskell-ci` — `+pedantic` only.
+Closed by `.github/workflows/river.yml`, which builds both backends with
+`-f pedantic` and runs all four consistency scripts plus the `river-wire`
+suite. Kept out of the Stack resolver matrix deliberately: the checks compare
+the two backends against each other, so they need both halves built in one job.
+
+Building with `-f pedantic` immediately found a real partial function —
+`head initialWorkspaces` in `riverMain`, which crashed on a config with
+`workspaces = []`.
+
+What it looked like before:
+
 
 So all 6,894 lines under `src-river/` are never compiled in CI, and the
 `river-wire` suite never runs — its stanza in `xmonad.cabal` is
@@ -119,11 +127,15 @@ Separately, **none of the four consistency scripts runs anywhere**:
 repo's best idea, and today it only protects the tree when someone remembers to
 run it by hand.
 
-## 5. Session integration is undocumented
+## 5. Session integration is undocumented — CLOSED
 
-`INSTALL.md` has zero river content — it is the untouched upstream X11 document
-and covers only `.desktop` files for X sessions. Each of the following cost real
-debugging time, and none is discoverable from the code.
+Closed by [`INSTALL.river.md`](INSTALL.river.md). `INSTALL.md` remains the
+untouched upstream X11 document, as it should — `src/` is frozen and so is its
+documentation.
+
+Each of the following cost real debugging time, none is discoverable from the
+code, and all of them now have a home. They are kept here as the record of
+*why* that document says what it says.
 
 **Blank screen, cursor only, nothing in any log.** river's init exec'd a WM
 binary that was never installed. Unlike X11 there is no free install step:
