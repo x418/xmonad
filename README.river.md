@@ -5,11 +5,20 @@ stack build                      # X11, byte-for-byte upstream behaviour
 stack build --flag xmonad:river  # river/Wayland
 ```
 
-**Status: it compiles, links and passes its unit tests. Nothing has been run
-against a live river.** All the evidence below is compile-time and unit-test
-evidence. The wire codec is pinned against byte sequences derived from the
-specification, and the layout arithmetic is tested, but the protocol stack
-above them is unverified until it runs against a real compositor.
+**Status: it runs against a real compositor, connects, and does not yet manage
+windows.**
+
+`tests/headless-river.sh` starts river on a headless backend with no display or
+hardware, runs this window manager against it, and asserts on river's debug
+log. What passes today: the connection is made, the wire codec round-trips
+against a real server (55 globals enumerated correctly),
+`river_window_manager_v1` binds at version 5, manage and render sequences
+complete, and a client creates a toplevel. What does not: no window is ever
+configured -- `sent 0 tracked configure(s)` throughout -- so nothing is laid
+out, and a connecting client is eventually dropped.
+
+Everything else here is still compile-time evidence only. Drawing, prompts,
+keyboard input and the mailbox have never executed.
 
 ## Why river, and why this is possible
 

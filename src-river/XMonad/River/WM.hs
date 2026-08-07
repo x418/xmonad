@@ -253,6 +253,7 @@ run conn manager bindings layerShell compositor shm userConfig dirs = do
             acts <- MB.drain mailbox
             mapM_ (queueAction rt) acts
             flush conn
+        loop
   -- A restart request arrives as an async exception thrown into this thread,
   -- which interrupts the blocking read. Ask river to release us, then keep
   -- dispatching: the 'finished' event does the exec.

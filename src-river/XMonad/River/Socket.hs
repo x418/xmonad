@@ -23,8 +23,9 @@ module XMonad.River.Socket
 
 import Control.Monad (when)
 import Data.Word (Word8)
-import Foreign.C.Error (throwErrnoIfMinus1Retry)
+import Foreign.C.Error (throwErrnoIfMinus1RetryMayBlock)
 import Foreign.C.Types (CInt (..), CSize (..))
+import GHC.Conc (threadWaitRead, threadWaitWrite)
 import Foreign.Marshal.Alloc (alloca, allocaBytes)
 import Foreign.Marshal.Array (allocaArray, peekArray, withArrayLen)
 import Foreign.Ptr (Ptr, castPtr)
@@ -58,9 +59,16 @@ sendWithFds sock bs fds = do
   N.withFdSocket sock $ \fd ->
     BSU.unsafeUseAsCStringLen bs $ \(p, len) ->
       withArrayLen [n | Fd n <- fds] $ \nfds fdp ->
-        fmap fromIntegral . throwErrnoIfMinus1Retry "sendWithFds" $
-          c_sendmsg_fds (fromIntegral fd) (castPtr p) (fromIntegral len)
-                        fdp (fromIntegral nfds)
+        -- MayBlock, not plain Retry.  GHC's IO manager puts every socket it
+        -- owns into non-blocking mode, so a full send buffer comes back as
+        -- EAGAIN rather than waiting -- and a plain retry would treat that as
+        -- a fatal error.  The recovery is to wait for writability the way the
+        -- IO manager does and go again.
+        fmap fromIntegral
+          . throwErrnoIfMinus1RetryMayBlock "sendWithFds"
+              (c_sendmsg_fds (fromIntegral fd) (castPtr p) (fromIntegral len)
+                             fdp (fromIntegral nfds))
+          $ threadWaitWrite (fromIntegral fd)
 
 -- | Read up to @n@ bytes, collecting any descriptors that arrive with them.
 --
@@ -73,9 +81,14 @@ recvWithFds sock n =
     allocaBytes n $ \buf ->
       allocaArray maxFds $ \fdp ->
         alloca $ \nfdsp -> do
-          got <- throwErrnoIfMinus1Retry "recvWithFds" $
-            c_recvmsg_fds (fromIntegral fd) buf (fromIntegral n)
-                          fdp (fromIntegral maxFds) nfdsp
+          -- As sendWithFds: an empty socket answers EAGAIN rather than
+          -- blocking, and the fix is to wait for readability.  This is what
+          -- the network package's recv does internally, and losing it was the
+          -- first thing that broke when the window manager was finally run.
+          got <- throwErrnoIfMinus1RetryMayBlock "recvWithFds"
+            (c_recvmsg_fds (fromIntegral fd) buf (fromIntegral n)
+                           fdp (fromIntegral maxFds) nfdsp)
+            (threadWaitRead (fromIntegral fd))
           nfds <- peek nfdsp
           fds <- peekArray (fromIntegral nfds) fdp
           bs <- BS.packCStringLen (castPtr buf, fromIntegral got)

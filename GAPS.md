@@ -41,10 +41,12 @@ are `inform_resize_start`/`inform_resize_end`, edge-aware resize origin
 correction, and `pointer_move_requested`/`pointer_resize_requested` — the
 client-initiated half, which X11 had no equivalent of.
 
-## 2. No runtime harness
+## 2. No runtime harness — CLOSED
 
-Per the status line at the top of `README.river.md`, nothing has run against a
-live river; everything above the wire codec is unverified.
+Closed by [`tests/headless-river.sh`](tests/headless-river.sh), and it earned
+its keep on the first two runs -- see the Findings comment at the bottom of the
+script. Things have now run against a live river, which the status line in
+`README.river.md` reflects.
 
 The prototype's reusable asset is a recipe. Run river under
 `WLR_BACKENDS=headless` with `-c <init-script>`, then assert on its debug log:

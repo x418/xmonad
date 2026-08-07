@@ -65,6 +65,18 @@ data ClientSpec = ClientSpec
   { csWidth  :: !Int
   , csHeight :: !Int
   , csAnchor :: !Anchor
+  , csMargin :: !(Int, Int, Int, Int)
+    -- ^ Top, right, bottom, left, in pixels from the anchored edges.
+    --
+    -- How a surface is placed at all: a layer surface has no coordinates, only
+    -- an anchor and a distance from it.  A completion list sits under a prompt
+    -- by being anchored the same way with a top margin of the prompt's height.
+  , csKeyboard :: !Bool
+    -- ^ Whether this surface takes the keyboard.
+    --
+    -- Exactly one surface of a prompt may: two asking for exclusive
+    -- interactivity would fight over focus, and the completion list wants none
+    -- -- it is shown by the prompt, not typed into.
   , csDraw   :: Buffer -> IO ()
     -- ^ Fill the buffer.  Runs on the client thread; see the module header.
   , csOnKey  :: Word32 -> String -> IO ()
@@ -134,10 +146,15 @@ clientMain spec inbox = do
       zwlrLayerSurfaceV1SetSize conn layer
         (fromIntegral (csWidth spec)) (fromIntegral (csHeight spec))
       zwlrLayerSurfaceV1SetAnchor conn layer (anchorBits (csAnchor spec))
+      let (mt, mr, mb, ml) = csMargin spec
+      zwlrLayerSurfaceV1SetMargin conn layer
+        (fromIntegral mt) (fromIntegral mr) (fromIntegral mb) (fromIntegral ml)
       -- Exclusive rather than on-demand: a prompt wants every key while it is
       -- open, including ones the compositor would otherwise treat as its own.
-      zwlrLayerSurfaceV1SetKeyboardInteractivity conn layer
-        zwlrLayerSurfaceV1KeyboardInteractivityExclusive
+      zwlrLayerSurfaceV1SetKeyboardInteractivity conn layer $
+        if csKeyboard spec
+          then zwlrLayerSurfaceV1KeyboardInteractivityExclusive
+          else zwlrLayerSurfaceV1KeyboardInteractivityNone
       wlSurfaceCommit conn surface
 
       bufRef <- newIORef Nothing
@@ -146,7 +163,8 @@ clientMain spec inbox = do
       running <- newIORef True
       let cl = Client conn shm surface layer bufRef sizeRef xkbRef running
 
-      forM_ mSeat $ \(seat, _) -> setupKeyboard spec cl seat
+      when (csKeyboard spec) $
+        forM_ mSeat $ \(seat, _) -> setupKeyboard spec cl seat
 
       zwlrLayerSurfaceV1Listen conn layer $ \case
         -- The compositor decides the final size; a layer surface must ack the
