@@ -124,6 +124,24 @@ this backend. That is the intended outcome, not a regression to be papered over.
 | Pointer warping | `river_seat_v1.pointer_warp`. |
 | `M-q` | `sendRestart` throws an async exception into the event loop thread; the loop does `stop` → `finished` → `exec`. river keeps every client alive across the swap. |
 
+## Runtime dependencies
+
+Unlike the X11 build, some things are done by asking another program rather
+than by asking a server. None is a build dependency, so none can be checked for
+at compile time; each warns once on stderr if it is missing, rather than
+silently doing nothing.
+
+| needed for | program | why not done directly |
+| --- | --- | --- |
+| `XMonad.Util.XSelection` — the selection and clipboard | `wl-paste`, from `wl-clipboard` | Wayland offers the selection only to the client holding keyboard focus, and a window manager has no focused surface — it is not in the focus chain at all. The primary selection is a separate protocol again (`zwp_primary_selection_v1`). `wl-paste` works because it is a real client that can take focus for the instant it needs. |
+
+Drawing is *not* on this list. Prompts and decorations are rendered in-process
+with cairo and pango, into a `wl_shm` buffer the compositor reads directly —
+see `XMonad.River.Surface` and, on the contrib side,
+`XMonad.Util.River.Draw`. Those are library dependencies of xmonad-contrib
+rather than of xmonad, exactly as `X11-xft` is under X11, so a config with no
+prompts and no decorations links neither.
+
 ## Known gaps
 
 [`GAPS.md`](GAPS.md) covers what the working prototype this was rewritten from
