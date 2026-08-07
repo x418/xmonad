@@ -27,12 +27,14 @@
 --
 -- What differs, and only what differs:
 --
--- * 'XConf' holds a river 'Connection' rather than a @Display@, and there is no
---   root window.  Everything X11 reached through the display -- atoms, window
---   attributes, the root -- has no Wayland counterpart, so @withDisplay@,
---   @getAtom@, @atom_WM_*@ and @withWindowAttributes@ are absent rather than
---   present and inert.  See tests/api/unportable.txt.  'isRoot' is the
---   exception: "is this the root window" has a correct total answer here.
+-- * 'XConf' holds a river 'Connection' where the X11 build holds an Xlib
+--   @Display@, but the field and the type keep their names: @type Display =
+--   Connection@, because that is what the value is.  So 'withDisplay' works.
+--   What has no Wayland counterpart is everything X11 reached for *through*
+--   the display -- @getAtom@, @atom_WM_*@, @withWindowAttributes@ -- and those
+--   are absent rather than present and inert.  See tests/api/unportable.txt.
+--   'isRoot' is the exception: "is this the root window" has a correct total
+--   answer here.
 -- * @clientMask@ and @rootMask@ are gone from 'XConfig': river delivers exactly
 --   the events the window management protocol defines, with no mask to select.
 -- * 'Event' is river's event type rather than Xlib's.
@@ -49,7 +51,7 @@ module XMonad.Core (
     SomeMessage(..), fromMessage, LayoutMessages(..),
     StateExtension(..), ExtensionClass(..), ConfExtension(..),
     runX, catchX, userCode, userCodeDef, io, catchIO, installSignalHandlers, uninstallSignalHandlers,
-    withWindowSet, isRoot, runOnWorkspaces,
+    withDisplay, withWindowSet, isRoot, runOnWorkspaces,
     spawn, spawnPID, xfork, recompile, trace, whenJust, whenX, ifM,
     getXMonadDir, getXMonadCacheDir, getXMonadDataDir, binFileName,
     ManageHook, Query(..), runQuery, Directories'(..), Directories, getDirectories,
@@ -67,7 +69,7 @@ module XMonad.Core (
     -- $river
     Event(..), RiverWindow(..), RiverOutput(..), RiverSeat(..),
     LayerFocus(..), layerHasFocus,
-    Connection, BorderColor,
+    Connection, Display, BorderColor,
     manageDirty, RestartRequested(..), sendRestart, setMainThread,
     warnUnimplemented,
   ) where
@@ -121,6 +123,20 @@ import XMonad.River.Wire (ObjectId)
 -- config legitimately needs them -- 'sendRestart' is what makes @M-q@ work --
 -- not as a compatibility surface.
 
+-- | The handle through which the window manager talks to the compositor.
+--
+-- X11's @Display@ was the connection to the X server, and this is the
+-- connection to the Wayland one -- the protocol even calls its root object
+-- @wl_display@.  Defining the alias rather than dropping the name is what lets
+-- 'withDisplay', 'XMonad.Operations.getCleanedScreenInfo' and
+-- 'XMonad.Operations.isFixedSizeOrTransient' keep the signatures they have
+-- upstream, so code that merely threads a display through still compiles.
+--
+-- What does /not/ carry over is anything that called an Xlib function on it.
+-- Those names are simply absent, so such code fails at the call that is
+-- genuinely unportable rather than here.
+type Display = Connection
+
 -- | An RGBA border colour, in the 32-bit-per-channel form
 -- @river_window_v1.set_borders@ takes.
 --
@@ -145,8 +161,8 @@ data XState = XState
 
 -- | XConf, the (read-only) window manager configuration.
 data XConf = XConf
-    { config        :: !(XConfig Layout)       -- ^ initial user configuration
-    , riverConn     :: !Connection             -- ^ the compositor connection
+    { display       :: !Display        -- ^ the compositor connection
+    , config        :: !(XConfig Layout)       -- ^ initial user configuration
     , riverManager  :: !ObjectId               -- ^ the @river_window_manager_v1@ global
     , riverBindings :: !ObjectId               -- ^ the @river_xkb_bindings_v1@ global
     , riverWindows  :: !(IORef (M.Map ObjectId RiverWindow))
@@ -290,6 +306,10 @@ userCodeDef defValue a = fromMaybe defValue <$> userCode a
 
 -- ---------------------------------------------------------------------
 -- Convenient wrappers to state
+
+-- | Run a monad action with the current display settings
+withDisplay :: (Display -> X a) -> X a
+withDisplay   f = asks display >>= f
 
 -- | Run a monadic action with the current stack set
 withWindowSet :: (WindowSet -> X a) -> X a

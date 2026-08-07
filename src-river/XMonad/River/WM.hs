@@ -157,7 +157,7 @@ run conn manager bindings layerShell userConfig dirs = do
 
       xconf = XConf
         { config = userConfig
-        , riverConn = conn
+        , display = conn
         , riverManager = manager
         , riverBindings = bindings
         , riverWindows = windowsRef
@@ -267,7 +267,7 @@ broadcastEvent ev = do
 
 addWindow :: ObjectId -> X ()
 addWindow win = do
-  conn <- asks riverConn
+  conn <- asks display
   node <- io (riverWindowV1GetNode conn win)
   ref <- asks riverWindows
   io $ modifyIORef' ref $ M.insert win RiverWindow
@@ -305,7 +305,7 @@ adjust ref k f = modifyIORef' ref (M.adjust f k)
 
 addOutput :: Runtime -> ObjectId -> X ()
 addOutput rt out = do
-  conn <- asks riverConn
+  conn <- asks display
   ref <- asks riverOutputs
 
   mLayer <- forM (rtLayerShell rt) $ \shell -> io $ do
@@ -329,7 +329,7 @@ addOutput rt out = do
 
 addSeat :: Runtime -> ObjectId -> X ()
 addSeat rt seat = do
-  conn <- asks riverConn
+  conn <- asks display
   ref <- asks riverSeats
 
   mLayer <- forM (rtLayerShell rt) $ \shell -> io $ do
@@ -386,7 +386,7 @@ manageSequence rt = do
 -- | Drop windows river has told us are gone, and destroy the protocol objects.
 reapClosed :: X ()
 reapClosed = do
-  conn <- asks riverConn
+  conn <- asks display
   ref <- asks riverWindows
   ws <- io (readIORef ref)
   let closed = [ w | w <- M.elems ws, rwClosed w ]
@@ -440,7 +440,7 @@ nominateLayerOutput rt = forM_ (rtLayerShell rt) $ \_ -> do
   forM_ chosen $ \o -> forM_ (roLayerObject o) $ \lo -> do
     prev <- io (readIORef (rtLayerDefault rt))
     unless (prev == Just (roObject o)) $ do
-      conn <- asks riverConn
+      conn <- asks display
       io (riverLayerShellOutputV1SetDefault conn lo)
       io (writeIORef (rtLayerDefault rt) (Just (roObject o)))
 
@@ -542,7 +542,7 @@ createBindings rt = do
 
 bindSeat :: Runtime -> ObjectId -> X ()
 bindSeat rt seat = do
-  conn <- asks riverConn
+  conn <- asks display
   bindingsGlobal <- asks riverBindings
   ks <- asks keyActions
   bs <- asks buttonActions
@@ -636,7 +636,7 @@ applyLayout rt = do
   io $ writeIORef (rtPlacements rt) placements
   io $ writeIORef (rtVisible rt) (S.fromList (map fst placements))
 
-  conn <- asks riverConn
+  conn <- asks display
   winRef <- asks riverWindows
   known <- io (readIORef winRef)
 
@@ -668,7 +668,7 @@ updateLayout i l = W.mapWorkspace $ \wsp ->
 
 renderSequence :: Runtime -> X ()
 renderSequence rt = do
-  conn <- asks riverConn
+  conn <- asks display
   placements <- io (readIORef (rtPlacements rt))
   visible <- io (readIORef (rtVisible rt))
   winRef <- asks riverWindows

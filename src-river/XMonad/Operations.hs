@@ -109,7 +109,7 @@ windows f = do
 -- changed.
 requestManageSequence :: X ()
 requestManageSequence = do
-    conn <- asks riverConn
+    conn <- asks display
     manager <- asks riverManager
     io (riverWindowManagerV1ManageDirty conn manager)
 
@@ -147,7 +147,7 @@ unmanage = windows . W.delete
 -- could be.
 killWindow :: Window -> X ()
 killWindow w = do
-    conn <- asks riverConn
+    conn <- asks display
     known <- io . readIORef =<< asks riverWindows
     when (M.member w known) $ io (riverWindowV1Close conn w)
 
@@ -257,8 +257,9 @@ nubScreens xs = nub . filter (\x -> not $ any (x `containedIn`) xs) $ xs
 
 -- | The screen rectangles, cleaned according to the rules for 'nubScreens'.
 --
--- Under X11 this queried xinerama and therefore needed a 'Display'.  Here the
--- outputs are already known, so the argument is gone.  Removed outputs and
+-- Under X11 this queried xinerama through the display.  Here the outputs are
+-- accumulated in 'XConf', so the 'Display' is accepted and unused, as for
+-- 'isFixedSizeOrTransient'.  Removed outputs and
 -- zero-sized ones are skipped, and an output's layer-shell area is preferred
 -- to its raw rectangle where one has been reported, so that a bar or dock
 -- claiming an exclusive zone shrinks the tiling area rather than being tiled
@@ -266,8 +267,8 @@ nubScreens xs = nub . filter (\x -> not $ any (x `containedIn`) xs) $ xs
 --
 -- Ordering is by position, which is what keeps screen ids stable across a
 -- monitor being unplugged and replugged.
-getCleanedScreenInfo :: X [Rectangle]
-getCleanedScreenInfo = do
+getCleanedScreenInfo :: Display -> X [Rectangle]
+getCleanedScreenInfo _ = do
     outs <- io . readIORef =<< asks riverOutputs
     pure $ nubScreens
         [ rect
@@ -394,7 +395,7 @@ float w = do
 -- precisely for this.
 warpPointer :: Position -> Position -> X ()
 warpPointer x y = do
-    conn <- asks riverConn
+    conn <- asks display
     seats <- io . readIORef =<< asks riverSeats
     forM_ (M.keys seats) $ \seat -> io (riverSeatV1PointerWarp conn seat x y)
 
@@ -415,7 +416,7 @@ mouseDrag f done = do
     case drag of
         Just _ -> return () -- already dragging
         Nothing -> do
-            conn <- asks riverConn
+            conn <- asks display
             seats <- io . readIORef =<< asks riverSeats
             case M.elems seats of
                 [] -> return ()
@@ -440,7 +441,7 @@ mouseMoveWindow w = whenX (isClient w) $ do
         mouseDrag
             (\ex ey -> do
                 node <- io . readIORef =<< asks riverWindows
-                conn <- asks riverConn
+                conn <- asks display
                 forM_ (M.lookup w node) $ \rw ->
                     io $ riverNodeV1SetPosition conn (rwNode rw)
                            (rect_x sr + (ex - ox)) (rect_y sr + (ey - oy))
@@ -457,7 +458,7 @@ mouseResizeWindow w = whenX (isClient w) $ do
         (ox, oy) <- io . readIORef =<< asks riverDragOrigin
         mouseDrag
             (\ex ey -> do
-                conn <- asks riverConn
+                conn <- asks display
                 let (width, height) = applySizeHintsContents hints
                         ( fromIntegral w0 + (ex - ox)
                         , fromIntegral h0 + (ey - oy) )
@@ -487,7 +488,7 @@ mouseResizeWindow w = whenX (isClient w) $ do
 -- README.river.md, which records this as something worth fixing upstream.
 restart :: String -> Bool -> X ()
 restart cmd _resume = do
-    conn <- asks riverConn
+    conn <- asks display
     manager <- asks riverManager
     ref <- asks riverRestart
     broadcastMessage ReleaseResources
@@ -497,7 +498,7 @@ restart cmd _resume = do
 -- | End the Wayland session, taking the compositor with it.
 exitSession :: X ()
 exitSession = do
-    conn <- asks riverConn
+    conn <- asks display
     manager <- asks riverManager
     io (riverWindowManagerV1ExitSession conn manager)
 
@@ -515,11 +516,16 @@ type D = (Dimension, Dimension)
 
 -- | Detect whether a window has fixed size or is transient.
 --
+-- The 'Display' is accepted and unused: there is only one, 'XConf' already has
+-- it, and what river reports about a window is accumulated there rather than
+-- queried over the wire.  Keeping the parameter costs nothing and lets a call
+-- site written for X11 compile unchanged.
+--
 -- Fixed size is @dimensions_hint@ reporting an equal minimum and maximum;
 -- transient is @river_window_v1.parent@, which is @xdg_toplevel.set_parent@ --
 -- the faithful translation of X11's @WM_TRANSIENT_FOR@.
-isFixedSizeOrTransient :: Window -> X Bool
-isFixedSizeOrTransient w = do
+isFixedSizeOrTransient :: Display -> Window -> X Bool
+isFixedSizeOrTransient _ w = do
     known <- io . readIORef =<< asks riverWindows
     pure $ case M.lookup w known of
         Nothing -> False
