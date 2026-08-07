@@ -118,6 +118,13 @@ data Event
   | SeatRemoved        { ev_seat   :: !ObjectId }
   | SessionLocked
   | SessionUnlocked
+  | TimerFired !Int
+    -- ^ A timer started with @XMonad.Util.Timer.startTimer@ has expired.
+    --
+    -- Not something the compositor sends: the window manager posts it to
+    -- itself when a timer thread reports in.  X11 did the same thing by
+    -- sending a client message to the root window, which needed an interned
+    -- atom and a round trip through the server; here it is a constructor.
   deriving (Eq, Show)
 
 --------------------------------------------------------------------------------

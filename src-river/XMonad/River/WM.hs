@@ -37,7 +37,10 @@ import Data.List (sortOn)
 import Data.Monoid (All(..), appEndo)
 import Data.Int (Int32)
 import Data.Word (Word32)
+import Control.Concurrent (forkIO, killThread)
+import Control.Concurrent.MVar
 import Control.Exception (catch)
+import GHC.Conc (threadWaitRead)
 import System.Environment (getArgs, getExecutablePath)
 import System.Exit (exitFailure, exitSuccess)
 import System.Posix.Process (executeFile)
@@ -48,6 +51,7 @@ import qualified Data.Set as S
 import XMonad.Core
 import XMonad.River.Runtime (RestartRequested(..), setMainThread, warnUnimplemented)
 import XMonad.River.Connection
+import qualified XMonad.River.Mailbox as MB
 import XMonad.River.Protocol.WindowManagement
 import XMonad.River.Protocol.Core
 import XMonad.River.Protocol.LayerShell
@@ -143,6 +147,7 @@ run conn manager bindings layerShell compositor shm userConfig dirs = do
   manageRef  <- newIORef False
   restartRef <- newIORef Nothing
   dragOrigin <- newIORef (0, 0)
+  mailbox    <- MB.newMailbox
   rt <- Runtime
           <$> newIORef []
           <*> newIORef M.empty
@@ -194,6 +199,7 @@ run conn manager bindings layerShell compositor shm userConfig dirs = do
         , riverDirty = dirtyRef
         , inManageSeq = manageRef
         , riverRestart = restartRef
+        , riverMailbox = mailbox
         , riverDragOrigin = dragOrigin
         , normalBorder = parseColor (normalBorderColor userConfig)
         , focusedBorder = parseColor (focusedBorderColor userConfig)
@@ -234,7 +240,21 @@ run conn manager bindings layerShell compositor shm userConfig dirs = do
   -- "timeout occurred, some imperfect frames may be shown". It runs at the end
   -- of the first manage sequence instead, once manage_finish is already on its
   -- way. See 'runStartupHook'.
-  let loop = dispatch conn >> loop
+  -- The loop waits on the compositor socket *and* the mailbox, so an action
+  -- posted from a timer thread is noticed now rather than whenever the next
+  -- unrelated Wayland event happens along -- which on an idle desktop could be
+  -- minutes.  Anything drained is queued for the next manage sequence and one
+  -- is requested, because river permits window management state to change
+  -- nowhere else.
+  let loop = do
+        ready <- waitInput conn mailbox
+        case ready of
+          FromCompositor -> dispatch conn
+          FromMailbox -> do
+            MB.clearWakeups mailbox
+            acts <- MB.drain mailbox
+            mapM_ (queueAction rt) acts
+            flush conn
   -- A restart request arrives as an async exception thrown into this thread,
   -- which interrupts the blocking read. Ask river to release us, then keep
   -- dispatching: the 'finished' event does the exec.
@@ -244,6 +264,30 @@ run conn manager bindings layerShell compositor shm userConfig dirs = do
     writeIORef restartRef (Just (unwords (map shellQuote (exe : args))))
     riverWindowManagerV1Stop conn manager
     loop
+
+-- | Which of the two sources the loop is waiting on became readable.
+data Ready = FromCompositor | FromMailbox
+
+-- | Block until either the compositor or another thread has something for us.
+--
+-- Two watchers race to fill one 'MVar'; the loser is killed.  Forking a pair
+-- per iteration is wasteful in principle and irrelevant in practice, since
+-- iterations are paced by human input rather than by a tight loop, and it
+-- avoids reimplementing poll(2) over a set of descriptors that only ever has
+-- two members.
+waitInput :: Connection -> MB.Mailbox (X ()) -> IO Ready
+waitInput conn mailbox = do
+  result <- newEmptyMVar
+  sockFd <- connectionFd conn
+  watchers <- mapM (forkWatcher result)
+    [ (sockFd, FromCompositor), (MB.mailboxFd mailbox, FromMailbox) ]
+  r <- takeMVar result
+  mapM_ killThread watchers
+  pure r
+  where
+    forkWatcher result (fd, tag) = forkIO $ do
+      threadWaitRead fd
+      void (tryPutMVar result tag)
 
 -- | Quote an argument for the @sh -c@ used to exec the successor.
 shellQuote :: String -> String

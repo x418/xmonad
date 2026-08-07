@@ -29,6 +29,7 @@ module XMonad.River.Connection
   , decode
     -- * Event loop
   , flush
+  , connectionFd
   , dispatch
   , dispatchPending
   , roundtrip
@@ -157,6 +158,14 @@ newConnection sock = do
   let conn = Connection sock nextId freeIds out inBuf outFds inFds listeners
   setListener conn displayId (displayListener conn)
   pure conn
+
+-- | The socket's descriptor, for waiting on it alongside something else.
+--
+-- The event loop needs this because it has two sources -- the compositor and
+-- work posted by other threads -- and a blocking read on one would ignore the
+-- other.  See "XMonad.River.Mailbox".
+connectionFd :: Connection -> IO Fd
+connectionFd conn = N.withFdSocket (connSocket conn) (pure . fromIntegral)
 
 disconnect :: Connection -> IO ()
 disconnect = N.close . connSocket

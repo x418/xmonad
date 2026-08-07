@@ -68,7 +68,7 @@ Two findings no unit test would have caught:
 - **fuzzel does not exit when its layer surface is closed.** It hangs
   indefinitely rather than treating `closed` as fatal. See §3.
 
-## 3. Blocking the event loop is an unguarded hazard
+## 3. Blocking the event loop is an unguarded hazard — PARTLY CLOSED
 
 A design constraint, not a bug report — relevant before this repo grows a
 prompt or any other shell-out.
@@ -100,6 +100,12 @@ Design conclusions, which apply here unchanged:
   delayed until the next unrelated Wayland event. A background thread must
   never touch the connection directly; it is `IORef`-buffered and not
   thread-safe.
+
+  **Both now exist.** `XMonad.River.Mailbox` is the queue and the self-pipe,
+  `XMonad.River.postAction` is the way in, and the loop waits on the socket and
+  the mailbox together. `XMonad.Util.Timer` is built on it, which is what
+  proved the shape. What remains is the *use*: nothing yet runs a blocking
+  action off the loop, so a prompt that shells out still wedges it.
 - **A timeout was tried and rejected.** It bounds the damage without preventing
   it, and the bound is on the user thinking, not on anything mechanical.
 

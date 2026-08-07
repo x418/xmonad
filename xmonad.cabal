@@ -120,6 +120,7 @@ library
                      XMonad.River.Connection
                      XMonad.River.Keysym
                      XMonad.River.Keysym.Table
+                     XMonad.River.Mailbox
                      XMonad.River.Runtime
                      XMonad.River.Socket
                      XMonad.River.Surface

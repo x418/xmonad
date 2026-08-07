@@ -113,6 +113,7 @@ import qualified Data.Set as S
 
 import XMonad.River.Connection (Connection)
 import XMonad.River.Keysym
+import XMonad.River.Mailbox (Mailbox)
 import XMonad.River.Runtime (sendRestart)
 import XMonad.River.Types
 import XMonad.River.Wire (ObjectId)
@@ -168,6 +169,11 @@ data XConf = XConf
       -- ^ guards requests river only permits during a manage sequence
     , riverRestart  :: !(IORef (Maybe String))
       -- ^ command to exec once river confirms this window manager has stopped
+    , riverMailbox :: !(Mailbox (X ()))
+      -- ^ How a thread that is not the event loop gets work done.  X11 let a
+      -- background thread post a client message to the root window; there is
+      -- no such relay here, so the channel is ours.  See
+      -- "XMonad.River.Mailbox".
     , riverDragOrigin :: !(IORef (Position, Position))
       -- ^ Where the pointer was when the current interactive operation began.
       -- river reports a drag as a delta from its start; 'mouseDrag' promises

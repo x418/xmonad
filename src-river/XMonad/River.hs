@@ -20,6 +20,14 @@ module XMonad.River (
     BorderColor,
     noSizeHints,
 
+    -- * Working off the event loop
+    --
+    -- | The event loop owns the connection outright, so a timer thread or a
+    -- subprocess watcher cannot touch it.  'postAction' is how such a thread
+    -- gets an action run: it is queued and executed at the start of the next
+    -- manage sequence, which the loop requests as soon as it wakes.
+    postAction,
+
     -- * Driving the manage sequence
     --
     -- | X11 let a window manager act at any moment.  river permits window
@@ -42,9 +50,19 @@ import Control.Monad.Reader (asks)
 
 import XMonad.Core
 import XMonad.River.Keysym.Table (keysymTable, reverseKeysymTable)
+import qualified XMonad.River.Mailbox as MB
 import XMonad.River.Protocol.WindowManagement (riverWindowManagerV1ExitSession)
 import XMonad.River.Runtime (RestartRequested(..), setMainThread, warnUnimplemented)
 import XMonad.River.Types
+
+-- | Run an action on the event loop, from any thread.
+--
+-- The action is queued and runs at the start of the next manage sequence.
+-- That is not a delay to work around: river permits window management state to
+-- change only during a sequence, so it is the earliest moment the action could
+-- legally do anything.
+postAction :: XConf -> X () -> IO ()
+postAction c = MB.post (riverMailbox c)
 
 -- | Ask the compositor to start a manage sequence, because state it cannot see
 -- has changed.
