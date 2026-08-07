@@ -37,24 +37,25 @@ setInitialProperties    FIX: set_borders + set_tiled + set_capabilities at adopt
 
 
 ################################################################################
-# 2. State across a restart -- the one worth raising upstream
+# 2. State across a restart -- fixed; nothing is dropped for it any more
 #
-# river object ids are per-connection and recycled after wl_display.delete_id,
-# so an id written by one window manager is meaningless to its successor.
-# river_window_v1.identifier is documented as up to 32 printable ASCII bytes
-# that outlive the object, so keying resume state on identifier and re-mapping
-# as windows are re-advertised should work.
+# This section used to list StateFile, writeStateToFile, readStateFile and
+# stateFileName, on the grounds that river object ids are per-connection and
+# recycled after wl_display.delete_id, so an id written by one window manager
+# is meaningless to its successor.  That much is still true; the conclusion
+# was wrong.
 #
-# What is unclear, and is the actual upstream question: is identifier
-# guaranteed delivered for every existing window before the first manage_start?
-# If not, the first sequence must lay out windows it cannot yet identify, and
-# the restore either races or has to be deferred by a sequence.  See
-# README.river.md.
-
-StateFile               FIX: key on river_window_v1.identifier rather than object id.
-writeStateToFile        FIX: as StateFile.
-readStateFile           FIX: as StateFile, re-mapping identifiers to fresh ids at startup.
-stateFileName           FIX: returns with the rest; it is only a path.
+# river_window_v1.identifier is generated from the window's
+# ext_foreign_toplevel_handle_v1, which belongs to the window and not to the
+# window manager's connection -- river creates one only if the window has none
+# already, with a comment saying so is for the restarting-window-manager case.
+# And the open question here, whether identifier is delivered for every window
+# before the first manage_start, is answered yes by construction:
+# WindowManager.manageStart() iterates every window, sending window and
+# identifier, and only then sends manage_start.
+#
+# So the state file is keyed on identifier and resolved during the first manage
+# sequence.  See XMonad.Operations.StateFile and XMonad.River.WM.restoreState.
 
 
 ################################################################################

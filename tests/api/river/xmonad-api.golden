@@ -86,6 +86,8 @@ XMonad | SomeMessage | data SomeMessage = forall a. Message a => SomeMessage a
 XMonad | SomeMessage | type SomeMessage :: *
 XMonad | StateExtension | data StateExtension = forall a. ExtensionClass a => StateExtension a | forall a. (Read a, Show a, ExtensionClass a) => PersistentExtension a
 XMonad | StateExtension | type StateExtension :: *
+XMonad | StateFile | data StateFile = StateFile {sfWins :: StackSet WorkspaceId String String ScreenId ScreenDetail, sfExt :: [(String, String)]}
+XMonad | StateFile | type StateFile :: *
 XMonad | Tall | data Tall a = Tall {tallNMaster :: Int, tallRatioIncrement :: Rational, tallRatio :: Rational}
 XMonad | Tall | type Tall :: * -> *
 XMonad | Tall | type role Tall phantom
@@ -184,6 +186,7 @@ XMonad | noSymbol | noSymbol :: KeySym
 XMonad | nubScreens | nubScreens :: [Rectangle] -> [Rectangle]
 XMonad | pointScreen | pointScreen :: Position -> Position -> X (Maybe (Screen WorkspaceId (Layout Window) Window ScreenId ScreenDetail))
 XMonad | pointWithin | pointWithin :: Position -> Position -> Rectangle -> Bool
+XMonad | readStateFile | readStateFile :: XConfig Layout -> X (Maybe XState)
 XMonad | readsLayout | readsLayout :: Layout a -> String -> [(Layout a, String)]
 XMonad | recompile | recompile :: MonadIO m => Directories -> Bool -> m Bool
 XMonad | refresh | refresh :: X ()
@@ -207,6 +210,7 @@ XMonad | splitHorizontally | splitHorizontally :: Int -> Rectangle -> [Rectangle
 XMonad | splitHorizontallyBy | splitHorizontallyBy :: RealFrac r => r -> Rectangle -> (Rectangle, Rectangle)
 XMonad | splitVertically | splitVertically :: Int -> Rectangle -> [Rectangle]
 XMonad | splitVerticallyBy | splitVerticallyBy :: RealFrac r => r -> Rectangle -> (Rectangle, Rectangle)
+XMonad | stateFileName | stateFileName :: Directories -> FilePath
 XMonad | stringToKeysym | stringToKeysym :: String -> KeySym
 XMonad | tile | tile :: Rational -> Rectangle -> Int -> Int -> [Rectangle]
 XMonad | title | title :: Query String
@@ -231,6 +235,7 @@ XMonad | withFocused | withFocused :: (Window -> X ()) -> X ()
 XMonad | withUnfocused | withUnfocused :: (Window -> X ()) -> X ()
 XMonad | withWindowAttributes | withWindowAttributes :: Display -> Window -> (WindowAttributes -> X ()) -> X ()
 XMonad | withWindowSet | withWindowSet :: (WindowSet -> X a) -> X a
+XMonad | writeStateToFile | writeStateToFile :: X ()
 XMonad | xK_0 | xK_0 :: KeySym
 XMonad | xK_1 | xK_1 :: KeySym
 XMonad | xK_2 | xK_2 :: KeySym
@@ -695,6 +700,7 @@ XMonad.Core | sendRestart | sendRestart :: IO ()
 XMonad.Core | shiftMask | shiftMask :: KeyMask
 XMonad.Core | spawn | spawn :: MonadIO m => String -> m ()
 XMonad.Core | spawnPID | spawnPID :: MonadIO m => String -> m ProcessID
+XMonad.Core | stateFileName | stateFileName :: Directories -> FilePath
 XMonad.Core | stringToKeysym | stringToKeysym :: String -> KeySym
 XMonad.Core | trace | trace :: MonadIO m => String -> m ()
 XMonad.Core | uninstallSignalHandlers | uninstallSignalHandlers :: MonadIO m => m ()
@@ -1107,6 +1113,8 @@ XMonad.ManageHook | title | title :: Query String
 XMonad.ManageHook | willFloat | willFloat :: Query Bool
 XMonad.Operations | D | type D :: *
 XMonad.Operations | D | type D = (Dimension, Dimension)
+XMonad.Operations | StateFile | data StateFile = StateFile {sfWins :: StackSet WorkspaceId String String ScreenId ScreenDetail, sfExt :: [(String, String)]}
+XMonad.Operations | StateFile | type StateFile :: *
 XMonad.Operations | applyAspectHint | applyAspectHint :: (D, D) -> D -> D
 XMonad.Operations | applyMaxSizeHint | applyMaxSizeHint :: D -> D -> D
 XMonad.Operations | applyResizeIncHint | applyResizeIncHint :: D -> D -> D
@@ -1135,6 +1143,7 @@ XMonad.Operations | mouseResizeWindow | mouseResizeWindow :: Window -> X ()
 XMonad.Operations | nubScreens | nubScreens :: [Rectangle] -> [Rectangle]
 XMonad.Operations | pointScreen | pointScreen :: Position -> Position -> X (Maybe (Screen WorkspaceId (Layout Window) Window ScreenId ScreenDetail))
 XMonad.Operations | pointWithin | pointWithin :: Position -> Position -> Rectangle -> Bool
+XMonad.Operations | readStateFile | readStateFile :: XConfig Layout -> X (Maybe XState)
 XMonad.Operations | refresh | refresh :: X ()
 XMonad.Operations | rescreen | rescreen :: X ()
 XMonad.Operations | restart | restart :: String -> Bool -> X ()
@@ -1152,6 +1161,7 @@ XMonad.Operations | windowBracket_ | windowBracket_ :: X Any -> X ()
 XMonad.Operations | windows | windows :: (WindowSet -> WindowSet) -> X ()
 XMonad.Operations | withFocused | withFocused :: (Window -> X ()) -> X ()
 XMonad.Operations | withUnfocused | withUnfocused :: (Window -> X ()) -> X ()
+XMonad.Operations | writeStateToFile | writeStateToFile :: X ()
 XMonad.StackSet | RationalRect | data RationalRect = RationalRect Rational Rational Rational Rational
 XMonad.StackSet | RationalRect | type RationalRect :: *
 XMonad.StackSet | Screen | data Screen i l a sid sd = Screen {workspace :: (Workspace i l a), screen :: sid, screenDetail :: sd}

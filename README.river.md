@@ -189,38 +189,43 @@ backend at all, and the session integration `INSTALL.md` says nothing about.
   the render sequence.
 - **`logHook` output has no consumer.** A Wayland bar wants `ext-workspace-v1`
   or a direct IPC.
-- **State does not survive a restart** — see below.
 
-## Worth fixing upstream in river
+## State across a restart
 
-**Window manager state cannot survive a restart, because object ids cannot.**
+**Fixed, and it needed no upstream change.** `M-q` keeps windows on the
+workspaces you put them on, and `PersistentExtension` persists.
 
-xmonad serialises its `WindowSet` to a state file and reads it back after
-`M-q`, so windows stay on the workspaces you put them on. That is not possible
-here. River object ids are per-connection and are recycled after
+This was the one item here listed as a question for river's author. The
+obstacle was real: river object ids are per-connection and recycled after
 `wl_display.delete_id`, so an id written by one window manager means nothing to
-its successor. Writing the file is easy; reading it back correctly is the part
-with no answer today. This is why `StateFile`, `writeStateToFile`,
-`readStateFile` and `stateFileName` are absent, and why `PersistentExtension`
-behaves exactly like `StateExtension`.
+its successor. The way out is `river_window_v1.identifier`, and reading the
+compositor source answered both things that were unclear:
 
-There may be a purely local fix, and it should be tried before asking anyone
-upstream for anything: `river_window_v1.identifier` is documented as a unique
-string that outlives the object, so resume state could be keyed on identifier
-rather than object id and re-mapped as windows are re-advertised at startup.
+- **Is the identifier stable across a restart?** Yes, by design. It comes from
+  the window's `ext_foreign_toplevel_handle_v1`, which belongs to the window
+  and not to the window manager's connection. `Window.zig` creates one only if
+  the window does not already have it, with a comment saying that case *is* the
+  window manager restarting.
+- **Does it arrive before the first `manage_start`?** Yes, by construction.
+  `WindowManager.manageStart()` iterates every window — sending `window` and
+  `identifier` for each — and only then sends `manage_start`.
 
-What is genuinely unclear — and what the upstream question would be — is
-whether that can be made reliable:
+So `StateFile` is keyed on identifier, and `restoreState` resolves them during
+the first manage sequence, before screens are reconciled or anything is laid
+out. `tests/headless-restart.sh` checks it against a real compositor, because
+both facts above are properties of river rather than of this code, and a
+compositor upgrade could change either without anything here failing to
+compile. It restarts twice: one restart cannot distinguish a restore from a
+restore that also re-manages everything it restored.
 
-- Is `identifier` guaranteed to be delivered for every existing window before
-  the first `manage_start`? If not, the first manage sequence has to lay out
-  windows it cannot yet identify, and the restore either races or has to be
-  deferred by a sequence.
-- Is there, or should there be, a channel for a window manager to hand opaque
-  state to its successor across the `stop` → `finished` → exec handover? river
-  already mediates that handover, and it is the only participant that spans
-  both processes.
+The second question — whether river should offer a channel for a window
+manager to hand opaque state to its successor across `stop` → `finished` → exec
+— is no longer blocking anything, but is still the tidier design. The
+filesystem works because both processes share one; a compositor-mediated
+handover would not depend on that.
 
-I have not verified either against a running river or read the compositor
-source closely enough to be confident, so this is a question to raise rather
-than a bug to report.
+`xmonad --restart` needed a rendezvous of its own, for the same reason. Under
+X11 the second process put a client message on the root window and the server
+delivered it; river mediates the window manager handover but offers no channel
+between two window manager processes. The running one writes its pid to
+`xmonad-river.pid` in the data directory, and `--restart` sends it `SIGUSR1`.

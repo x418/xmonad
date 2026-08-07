@@ -28,16 +28,20 @@ module XMonad.Main (xmonad, launch, sendRestart) where
 
 import System.Locale.SetLocale
 import Control.Monad (unless)
+import Data.Char (isSpace)
 import System.Environment (getArgs, getProgName, withArgs)
 import System.Exit (exitFailure)
 import System.IO
+import System.IO.Error (isDoesNotExistError)
 import System.Info
+import System.Posix.Signals (sigUSR1, signalProcess)
+import qualified Control.Exception as E
 
 import Paths_xmonad (version)
 import Data.Version (showVersion)
 
 import XMonad.Core
-import XMonad.River.Runtime (sendRestart)
+import XMonad.River.Runtime (pidFilePath, sendRestart)
 import XMonad.River.WM (riverMain)
 
 ------------------------------------------------------------------------
@@ -57,7 +61,7 @@ xmonad conf = do
     case args of
         ["--help"]            -> usage
         ["--recompile"]       -> recompile dirs True >>= flip unless exitFailure
-        ["--restart"]         -> sendRestart
+        ["--restart"]         -> requestRestart dirs
         ["--version"]         -> putStrLn $ unwords shortVersion
         ["--verbose-version"] -> putStrLn . unwords $ shortVersion ++ longVersion
         _                     -> launch' args
@@ -66,6 +70,41 @@ xmonad conf = do
     longVersion  = [ "compiled by", compilerName, showVersion compilerVersion
                    , "for",  arch ++ "-" ++ os
                    , "\nBackend: river (river-window-management-v1)" ]
+
+-- | Ask the running window manager to restart, from a separate process.
+--
+-- This is @xmonad --restart@, and it does not go through 'sendRestart': that
+-- throws to /this/ process's event loop, and this process has none -- it was
+-- started to deliver a message and exit.  Calling it here was a real bug, and
+-- a quiet one, since the failure looked like "nothing happened".
+--
+-- X11 got the rendezvous for free by putting a client message on the root
+-- window.  river has no equivalent channel between two window manager
+-- processes, so the running one leaves its pid in 'pidFilePath' and this sends
+-- it @SIGUSR1@.
+--
+-- A stale pid file -- from a window manager that was killed rather than asked
+-- to stop -- is reported rather than silently ignored, because the thing the
+-- caller wanted did not happen.
+requestRestart :: Directories -> IO ()
+requestRestart dirs = do
+    let path = pidFilePath (dataDir dirs)
+    raw <- try (readFile path)
+    case raw >>= \s -> maybe (Left (userError "unparseable")) Right (readMaybe s) of
+      Left _ -> die $ "xmonad-river: no running window manager found (" <> path <> ")"
+      Right pid -> do
+        ok <- try (signalProcess sigUSR1 (fromIntegral (pid :: Integer)))
+        case ok of
+          Right () -> pure ()
+          Left e | isDoesNotExistError e ->
+                     die $ "xmonad-river: no process " <> show pid
+                         <> "; the pid file at " <> path <> " is stale"
+                 | otherwise -> die $ "xmonad-river: " <> show e
+  where
+    try :: IO a -> IO (Either IOError a)
+    try = E.try
+    readMaybe s = case reads s of [(n, r)] | all isSpace r -> Just n; _ -> Nothing
+    die msg = hPutStrLn stderr msg >> exitFailure
 
 usage :: IO ()
 usage = do

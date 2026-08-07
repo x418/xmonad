@@ -10,6 +10,7 @@ module XMonad.River.Runtime
   ( RestartRequested(..)
   , sendRestart
   , setMainThread
+  , pidFilePath
   , warnUnimplemented
   , publishGeometry
   , lookupGeometry
@@ -21,6 +22,7 @@ import Control.Concurrent (ThreadId, myThreadId)
 import Control.Monad (unless)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.IORef
+import System.FilePath ((</>))
 import System.IO (hPutStrLn, stderr)
 import System.IO.Unsafe (unsafePerformIO)
 import qualified Control.Exception as E
@@ -100,6 +102,22 @@ sendRestart = readIORef mainThreadRef >>= \case
   Just tid -> E.throwTo tid RestartRequested
   Nothing -> hPutStrLn stderr
     "xmonad-river: sendRestart called before the event loop started"
+
+-- | Where the running window manager records its process id, given the data
+-- directory.
+--
+-- This exists because @xmonad --restart@ has to reach a window manager it is
+-- not part of, and under river there is nothing between the two processes to
+-- carry the request.  X11 had one for free: the second process put a client
+-- message on the root window and the server delivered it.  river mediates the
+-- @stop@/@finished@ handover but offers no channel for anything else, so the
+-- rendezvous has to be on the filesystem, and @SIGUSR1@ carries the request.
+--
+-- Deliberately not in "XMonad.Core" next to 'XMonad.Core.stateFileName'.  That
+-- module's exports are required to be a subset of the X11 build's, and X11 has
+-- no such file because it never needed one.
+pidFilePath :: FilePath -> FilePath
+pidFilePath dir = dir </> "xmonad-river.pid"
 
 -- | Complain, once per process, that something is doing less than it says.
 --

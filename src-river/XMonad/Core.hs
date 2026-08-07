@@ -53,7 +53,7 @@ module XMonad.Core (
     runX, catchX, userCode, userCodeDef, io, catchIO, installSignalHandlers, uninstallSignalHandlers,
     withDisplay, withWindowSet, isRoot, runOnWorkspaces,
     spawn, spawnPID, xfork, recompile, trace, whenJust, whenX, ifM,
-    getXMonadDir, getXMonadCacheDir, getXMonadDataDir, binFileName,
+    getXMonadDir, getXMonadCacheDir, getXMonadDataDir, stateFileName, binFileName,
     ManageHook, Query(..), runQuery, Directories'(..), Directories, getDirectories,
     -- * Types that port unchanged
     --
@@ -547,10 +547,9 @@ class Typeable a => ExtensionClass a where
     -- | Specifies whether the state extension should be
     -- persistent.
     --
-    -- Note that under river this makes no difference: there is no state file,
-    -- because a window id serialised by one process means nothing to its
-    -- successor.  'PersistentExtension' therefore behaves exactly like
-    -- 'StateExtension'.  See README.river.md.
+    -- Means the same thing here as under X11: a 'PersistentExtension' is
+    -- written to the state file by 'XMonad.Operations.writeStateToFile' and
+    -- survives @M-q@, a 'StateExtension' does not.
     extensionType :: a -> StateExtension
     extensionType = StateExtension
 
@@ -707,8 +706,9 @@ binFileName, buildDirName :: Directories -> FilePath
 binFileName  Directories{ cacheDir } = cacheDir </> "xmonad-" <> arch <> "-" <> os
 buildDirName Directories{ cacheDir } = cacheDir </> "build-" <> arch <> "-" <> os
 
-errFileName :: Directories -> FilePath
+errFileName, stateFileName :: Directories -> FilePath
 errFileName   Directories{ dataDir } = dataDir </> "xmonad.errors"
+stateFileName Directories{ dataDir } = dataDir </> "xmonad.state"
 
 srcFileName, libFileName :: Directories -> FilePath
 srcFileName Directories{ cfgDir } = cfgDir </> "xmonad.hs"

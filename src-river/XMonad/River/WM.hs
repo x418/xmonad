@@ -37,17 +37,19 @@ import Data.List (isSuffixOf, sortOn)
 import Data.Monoid (All(..), appEndo)
 import Data.Int (Int32)
 import Data.Word (Word32)
-import Control.Exception (catch)
+import Control.Exception (SomeException, catch, handle)
 import System.Environment (getArgs, getExecutablePath, lookupEnv)
 import System.Directory (doesFileExist)
 import System.Exit (exitFailure, exitSuccess)
-import System.Posix.Process (executeFile)
+import System.Posix.Process (executeFile, getProcessID)
+import System.Posix.Signals (Handler (Catch), installHandler, sigUSR1)
 import System.IO (hPutStrLn, stderr)
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
 import XMonad.Core
-import XMonad.River.Runtime (RestartRequested(..), publishGeometry, publishSizeHints, setMainThread, warnUnimplemented)
+import XMonad.Operations (StateFile (..), broadcastMessage, readStateFile, writeStateToFile)
+import XMonad.River.Runtime (RestartRequested(..), pidFilePath, publishGeometry, publishSizeHints, sendRestart, setMainThread, warnUnimplemented)
 import XMonad.River.Connection
 import XMonad.River.Keyboard (riverModifiers)
 import qualified XMonad.River.Mailbox as MB
@@ -90,6 +92,9 @@ data Runtime = Runtime
   , rtConn        :: !Connection
     -- ^ Likewise: 'queueAction' has to ask for the sequence it queued into.
   , rtStartupDone :: !(IORef Bool)
+  , rtRestored    :: !(IORef Bool)
+    -- ^ Whether the state file left by a previous window manager has been read
+    -- back yet.  Only the first manage sequence may do it; see 'restoreState'.
   , rtLayerShell  :: !(Maybe ObjectId)
     -- ^ The @river_layer_shell_v1@ global, when the compositor offers it.
     -- Binding it is what tells river to let clients map layer surfaces at all;
@@ -177,6 +182,7 @@ run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs 
           <*> pure manager
           <*> pure conn
           <*> newIORef False
+          <*> newIORef False
           <*> pure layerShell
           <*> newIORef Nothing
 
@@ -254,6 +260,14 @@ run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs 
   riverWindowManagerV1ManageDirty conn manager
 
   setMainThread
+  -- Two ways in for a restart request that does not come from a keybinding.
+  -- The signal is what @xmonad --restart@ sends, and is also the only handle a
+  -- script -- or a test -- has on a running window manager; the pid file is
+  -- how the sender finds this process, since river offers nothing between the
+  -- two.  Both are set up after 'setMainThread', because that is what the
+  -- handler needs to reach the event loop.
+  _ <- installHandler sigUSR1 (Catch sendRestart) Nothing
+  writeFile (pidFilePath (dataDir dirs)) . show =<< getProcessID
   -- The startup hook is deliberately *not* run here. river holds a watchdog
   -- over the manage sequence, and this config's startup hook spawns upwards of
   -- a dozen processes; doing that before the event loop starts means river
@@ -301,6 +315,11 @@ run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs 
         loop
       Just exe -> do
         args <- getArgs
+        -- The same two things 'XMonad.Operations.restart' does before asking
+        -- river to stop.  This path exists because 'sendRestart' is callable
+        -- from any thread and so cannot run 'X' code itself; it must not
+        -- therefore be a restart that quietly loses state.
+        runX' (broadcastMessage ReleaseResources >> writeStateToFile)
         writeIORef restartRef (Just (unwords (map shellQuote (exe : args))))
         riverWindowManagerV1Stop conn manager
         loop
@@ -515,6 +534,7 @@ addSeat rt seat = do
 manageSequence :: Runtime -> X ()
 manageSequence rt = do
   asks inManageSeq >>= \r -> io (writeIORef r True)
+  restoreState rt
   reapClosed
   syncScreens
   nominateLayerOutput rt
@@ -523,6 +543,66 @@ manageSequence rt = do
   runPending rt
   applyLayout rt
   asks inManageSeq >>= \r -> io (writeIORef r False)
+
+-- | Pick up where the previous window manager left off, if it left a state
+-- file.
+--
+-- This is what makes @M-q@ keep windows on the workspaces they were on.  It
+-- runs first in the first manage sequence and never again, and both halves of
+-- that matter:
+--
+-- * /First in the sequence/, because everything after it -- reconciling
+--   screens, adopting windows, laying out -- has to see the restored
+--   'WindowSet' rather than the empty one the process started with.
+--
+-- * /The first sequence/, because that is the earliest moment the identifiers
+--   in the file can be resolved, and also the last moment they can be resolved
+--   without a visible flicker.  river sends a @window@ event, and the
+--   @identifier@ with it, for every window it already has /before/ it sends
+--   @manage_start@ -- @WindowManager.manageStart@ iterates the windows and
+--   then sends the event -- so by the time this runs the map is complete.
+--
+-- A restored window has already been through a manage hook, in the process
+-- that wrote the file, so it is marked as no longer new and 'adoptNewWindows'
+-- leaves it alone.  Anything the file did not account for -- opened while the
+-- successor was starting, or belonging to a client that connected since --
+-- stays new and is managed normally.
+restoreState :: Runtime -> X ()
+restoreState rt = do
+  done <- io (readIORef (rtRestored rt))
+  unless done $ do
+    io (writeIORef (rtRestored rt) True)
+    path <- asks (stateFileName . directories)
+    exists <- io (doesFileExist path)
+    when exists $ do
+      xmc <- asks config
+      wanted <- io (windowsInStateFile path)
+      mst <- readStateFile xmc
+      whenJust mst $ \st -> do
+        modify $ \s -> s { windowset = windowset st
+                         , extensibleState = extensibleState st }
+        let restored = W.allWindows (windowset st)
+        -- Worth saying out loud, and not only for the test that reads it: the
+        -- two numbers differing is the one interesting failure here.  It means
+        -- identifiers written by the previous window manager did not match the
+        -- ones river is now reporting, and the symptom a user sees is windows
+        -- silently back on the wrong workspace -- with nothing else to
+        -- distinguish it from a state file that was never written.
+        io $ hPutStrLn stderr $ "xmonad-river: note: restored "
+          <> show (length restored) <> " of " <> show wanted
+          <> " windows from " <> path
+
+-- | How many windows the state file claims, read before it is consumed.
+--
+-- Counted from the raw text rather than from a parse, because the point is to
+-- compare against what the parse produced.  Returns 0 for a file that cannot
+-- be read, which is also what 'readStateFile' will make of it.
+windowsInStateFile :: FilePath -> IO Int
+windowsInStateFile path = handle (\(_ :: SomeException) -> pure 0) $ do
+  raw <- readFile path
+  case reads raw of
+    [(sf, _)] -> pure (length (W.allWindows (sfWins sf)))
+    _         -> pure 0
 
 -- | Drop windows river has told us are gone, and destroy the protocol objects.
 reapClosed :: X ()
@@ -675,12 +755,25 @@ adoptNewWindows = do
     -- ignores the request, which river documents and which is why this is not
     -- conditional on the decoration_hint.
     io (riverWindowV1UseSsd conn (rwObject w))
-    mh <- asks (manageHook . config)
-    g <- userCodeDef (mempty) (runQuery mh (rwObject w))
-    ws' <- gets windowset
-    let placed = W.insertUp (rwObject w) ws'
-    modify $ \st -> st { windowset = appEndo g placed }
-    void (broadcastEvent (WindowAdded (rwObject w)))
+    -- Everything above is setup this connection owes river for any window it
+    -- has not spoken to before, including one carried over from the previous
+    -- window manager: those requests were made on a connection that no longer
+    -- exists, and river's defaults are back.  Everything below is /managing/ a
+    -- window, which a restored one has already had done to it -- by the
+    -- process that wrote the state file.  Running the manage hook again would
+    -- re-shift it to whatever the hook says and undo the restore, and
+    -- 'W.insertUp' would put a second copy of it in the 'WindowSet'.
+    --
+    -- Membership in the 'WindowSet' is the test rather than a flag, because it
+    -- is the actual question being asked: is this already a managed window.
+    managed <- gets (W.allWindows . windowset)
+    unless (rwObject w `elem` managed) $ do
+      mh <- asks (manageHook . config)
+      g <- userCodeDef (mempty) (runQuery mh (rwObject w))
+      ws' <- gets windowset
+      let placed = W.insertUp (rwObject w) ws'
+      modify $ \st -> st { windowset = appEndo g placed }
+      void (broadcastEvent (WindowAdded (rwObject w)))
 
 -- | Run the user's startup hook exactly once, after the first manage sequence
 -- has been finished.

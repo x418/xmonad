@@ -66,7 +66,7 @@ module XMonad.Operations (
     mouseDrag, mouseMoveWindow, mouseResizeWindow,
 
     -- * Lifecycle
-    restart,
+    StateFile (..), writeStateToFile, readStateFile, restart,
 
     -- * Other Utilities
     pointScreen, screenWorkspace,
@@ -78,17 +78,21 @@ import XMonad.River.Types
 import XMonad.River.Protocol.WindowManagement
 import qualified XMonad.StackSet as W
 
+import Control.Arrow        (second)
 import Data.IORef (readIORef, writeIORef)
 import Data.List            (find, nub, sortOn)
 import Data.Maybe
 import Data.Monoid          (Any(..))
 import Data.Ratio           ((%))
+import System.Directory     (removeFile)
+import System.IO            (Handle, IOMode (ReadMode), hGetContents, withFile)
+import qualified Data.ByteString.Char8 as B8
 import qualified Data.Map as M
 import qualified Data.Set as S
 
 import Control.Monad.Reader
 import Control.Monad.State
-import Control.Monad (forM_, guard, unless, void, when)
+import Control.Monad (forM_, guard, join, unless, void, when)
 
 -- ---------------------------------------------------------------------
 -- Managing windows
@@ -471,6 +475,126 @@ mouseResizeWindow w = whenX (isClient w) $ do
 -- ---------------------------------------------------------------------
 -- Lifecycle
 
+-- | A type to help serialize xmonad's state to a file.
+--
+-- The window type is a river @identifier@ rather than a 'Window'.  That is the
+-- whole reason this can exist at all: a river object id is per-connection and
+-- recycled after @wl_display.delete_id@, so an id written by one window
+-- manager names nothing to its successor.  @river_window_v1.identifier@ is a
+-- string river promises is unique and never reused, and -- crucially -- it is
+-- derived from the window's @ext_foreign_toplevel_handle_v1@, which belongs to
+-- the window rather than to the window manager's connection.  river creates
+-- one only if the window has none already, precisely so that it survives a
+-- window manager restart.
+data StateFile = StateFile
+  { sfWins :: W.StackSet WorkspaceId String String ScreenId ScreenDetail
+  , sfExt  :: [(String, String)]
+  } deriving (Show, Read)
+
+-- | Re-key a 'W.StackSet', dropping anything the function has no answer for.
+--
+-- Used in both directions: 'Window' to identifier when writing, identifier
+-- back to 'Window' when reading.  Dropping is the normal case on the way back
+-- in -- a window that was closed while the successor was starting, or one
+-- opened by a client river has not re-advertised -- so a dropped focus has to
+-- be replaced rather than lost.  The nearest survivor below it is preferred,
+-- then the nearest above, which is what closing the focused window does.
+retagWindows :: Ord b => (a -> Maybe b) -> W.StackSet i l a s sd -> W.StackSet i l b s sd
+retagWindows f (W.StackSet cur vis hid flt) = W.StackSet
+    (onScreen cur)
+    (map onScreen vis)
+    (map onWorkspace hid)
+    (M.fromList [ (b, r) | (a, r) <- M.toList flt, Just b <- [f a] ])
+  where
+    onScreen (W.Screen ws sid sd) = W.Screen (onWorkspace ws) sid sd
+    onWorkspace (W.Workspace t l st) = W.Workspace t l (onStack =<< st)
+    -- 'up' runs outwards from the focus, so its head is the nearest window
+    -- above and no reversal is needed to pick a replacement.
+    onStack (W.Stack fo u d) = case (f fo, mapMaybe f u, mapMaybe f d) of
+      (Just b, u', d')      -> Just (W.Stack b u' d')
+      (Nothing, u', x : d') -> Just (W.Stack x u' d')
+      (Nothing, x : u', []) -> Just (W.Stack x u' [])
+      (Nothing, [], [])     -> Nothing
+
+-- | Write the current window state (and extensible state) to a file
+-- so that xmonad can resume with that state intact.
+--
+-- A window river has not given an identifier for is left out, and so comes
+-- back as a new window through the manage hook.  On river 4 and later there
+-- are none: the event is sent to every window as it is created.
+writeStateToFile :: X ()
+writeStateToFile = do
+    known <- io . readIORef =<< asks riverWindows
+    let identOf w = B8.unpack <$> (rwIdentifier =<< M.lookup w known)
+
+        maybeShow (t, Right (PersistentExtension ext)) = Just (t, show ext)
+        maybeShow (t, Left str) = Just (t, str)
+        maybeShow _ = Nothing
+
+        wsData   = retagWindows identOf . W.mapLayout show . windowset
+        extState = mapMaybe maybeShow . M.toList . extensibleState
+
+    path <- asks $ stateFileName . directories
+    stateData <- gets (\s -> StateFile (wsData s) (extState s))
+    catchIO (writeFile path $ show stateData)
+
+-- | Read the state of a previous xmonad instance from a file and
+-- return that state.  The state file is removed after reading it.
+--
+-- Unlike the X11 version this must not be called before the compositor has
+-- advertised its windows, because that is what the identifiers in the file are
+-- resolved against.  river sends a @window@ event, and the @identifier@ with
+-- it, for every window it already has before the first @manage_start@, so the
+-- first manage sequence is both the earliest and the right place.  See
+-- @restoreState@ in "XMonad.River.WM".
+--
+-- The layout witness comes from the config's own 'Layout' rather than from a
+-- @Read (l Window)@ constraint on the caller: 'Layout' carries that dictionary
+-- itself, and by the time this runs the concrete layout type has already been
+-- wrapped.  X11's signature takes the unwrapped config because it is called
+-- from @launch@, where the type is still concrete.
+readStateFile :: XConfig Layout -> X (Maybe XState)
+readStateFile xmc = do
+    path <- asks $ stateFileName . directories
+
+    -- I'm trying really hard here to make sure we read the entire
+    -- contents of the file before it is removed from the file system.
+    sf' <- userCode . io $ do
+        raw <- withFile path ReadMode readStrict
+        return $! maybeRead reads raw
+
+    io (removeFile path)
+
+    known <- io . readIORef =<< asks riverWindows
+    let byIdent = M.fromList
+          [ (B8.unpack i, rwObject w)
+          | w <- M.elems known, Just i <- [rwIdentifier w] ]
+
+    return $ do
+      sf <- join sf'
+
+      let winset = retagWindows (`M.lookup` byIdent)
+                 . W.ensureTags layout (workspaces xmc)
+                 $ W.mapLayout (fromMaybe layout . maybeRead lreads) (sfWins sf)
+          extState = M.fromList . map (second Left) $ sfExt sf
+
+      return XState { windowset       = winset
+                    , numberlockMask  = 0
+                    , mapped          = S.empty
+                    , waitingUnmap    = M.empty
+                    , dragging        = Nothing
+                    , extensibleState = extState
+                    }
+  where
+    layout = layoutHook xmc
+    lreads = readsLayout layout
+    maybeRead reads' s = case reads' s of
+                           [(x, "")] -> Just x
+                           _         -> Nothing
+
+    readStrict :: Handle -> IO String
+    readStrict h = hGetContents h >>= \s -> length s `seq` return s
+
 -- | @restart name resume@ restarts the window manager by executing @name@.
 --
 -- This is the river analogue of xmonad's @restart@, and the reason @M-q@
@@ -483,16 +607,17 @@ mouseResizeWindow w = whenX (isClient w) $ do
 -- is not allowed -- river answers the second connection with @unavailable@ --
 -- so the handover has to be ordered this way.
 --
--- @resume@ is accepted and ignored.  There is no state file: a river object id
--- serialised by this process means nothing to its successor, because ids are
--- per-connection and recycled after @wl_display.delete_id@.  See
--- README.river.md, which records this as something worth fixing upstream.
+-- @resume@ means what it does under X11: write the window state out so that
+-- the successor picks it up.  What is serialised is keyed on
+-- @river_window_v1.identifier@ rather than on object ids, which are
+-- per-connection; see 'StateFile'.
 restart :: String -> Bool -> X ()
-restart cmd _resume = do
+restart cmd resume = do
     conn <- asks display
     manager <- asks riverManager
     ref <- asks riverRestart
     broadcastMessage ReleaseResources
+    when resume writeStateToFile
     io (writeIORef ref (Just cmd))
     io (riverWindowManagerV1Stop conn manager)
 
