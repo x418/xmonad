@@ -31,7 +31,7 @@ module XMonad.River.WM
 import Control.Monad (forM, forM_, unless, void, when)
 import Control.Monad.Reader (asks)
 import Control.Monad.State (gets, modify)
-import Data.Bits ((.&.))
+import Data.Bits ((.&.), (.|.))
 import Data.IORef
 import Data.List (isSuffixOf, sortOn)
 import Data.Maybe (fromMaybe, isNothing)
@@ -51,6 +51,7 @@ import qualified Data.Set as S
 import XMonad.Core
 import XMonad.Operations (StateFile (..), broadcastMessage, focus, readStateFile, writeStateToFile)
 import XMonad.River.Runtime (RestartRequested(..), forgetBorderOverride, lookupBorderOverride, pidFilePath, publishGeometry, publishSizeHints, sendRestart, setMainThread, warnUnimplemented)
+import XMonad.River.Client (closeAllClients)
 import XMonad.River.Connection
 import XMonad.River.Keyboard (riverModifiers)
 import qualified XMonad.River.Mailbox as MB
@@ -849,6 +850,8 @@ bindSeat rt seat = do
   ks <- asks keyActions
   bs <- asks buttonActions
 
+  bindPanic rt seat
+
   forM_ (M.toList ks) $ \((mask, keysym), action) -> do
     b <- io (riverXkbBindingsV1GetXkbBinding conn bindingsGlobal seat keysym
                (riverModifiers mask))
@@ -876,6 +879,51 @@ bindSeat rt seat = do
             riverWindowManagerV1ManageDirty conn (rtManager rt)
       _ -> pure ()
     io (riverPointerBindingV1Enable conn b)
+
+-- | The chord that always works.
+--
+-- Two things in this window manager can make a session unusable by taking
+-- something and not giving it back, and both have done so:
+--
+-- * a prompt is a layer surface holding an exclusive keyboard grab, so if its
+--   thread stops answering, every keystroke goes somewhere nothing is reading;
+-- * a submap disables every one of the config's bindings until it closes, so
+--   one that never closes leaves a session with no shortcuts at all.
+--
+-- Each now has its own guard -- guaranteed teardown, and a deadline -- and
+-- this is what remains when a guard is the thing that failed.  It is deliberately
+-- not part of @keyActions@: it is registered separately, never recorded in
+-- 'rtBindings', and therefore not among the bindings a submap disables.  A
+-- config cannot rebind or remove it, which is the point; a break-glass key
+-- that the broken thing can switch off is not one.
+--
+-- The chord is @Ctrl-Alt-Shift-Escape@, chosen to be one nothing else wants.
+--
+-- This works at all because of how river dispatches: @KeyboardGroup.processKey@
+-- matches xkb bindings /before/ it consults keyboard focus, so a binding fires
+-- even while a layer surface holds an exclusive grab.  Without that ordering
+-- there would be no key that could rescue a wedged prompt, and the only way
+-- out would be a TTY.
+bindPanic :: Runtime -> ObjectId -> X ()
+bindPanic rt seat = do
+  conn <- asks display
+  bindingsGlobal <- asks riverBindings
+  b <- io (riverXkbBindingsV1GetXkbBinding conn bindingsGlobal seat
+             xK_Escape (riverModifiers (controlMask .|. mod1Mask .|. shiftMask)))
+  io $ riverXkbBindingV1Listen conn b $ \case
+    RiverXkbBindingV1Pressed -> do
+      n <- closeAllClients
+      -- Re-enable everything the config asked for, and forget any submap.
+      -- Whatever state a half-finished submap left behind, the bindings the
+      -- user knows about are the ones that should be live afterwards.
+      globals <- readIORef (rtBindings rt)
+      forM_ (M.keys globals) (riverXkbBindingV1Enable conn)
+      writeIORef (rtSubmap rt) Nothing
+      hPutStrLn stderr $ "xmonad-river: panic: closed " <> show n
+        <> " prompt(s) and re-enabled " <> show (M.size globals) <> " binding(s)"
+      riverWindowManagerV1ManageDirty conn (rtManager rt)
+    _ -> pure ()
+  io (riverXkbBindingV1Enable conn b)
 
 -- | X11 button numbers to Linux input event codes, which is what river's
 -- pointer bindings take.
