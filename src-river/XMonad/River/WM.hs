@@ -244,6 +244,12 @@ run conn manager bindings layerShell compositor shm userConfig dirs = do
   -- is requested, because river permits window management state to change
   -- nowhere else.
   let loop = do
+        -- Flush before waiting, or a request queued but not yet written --
+        -- the manage_dirty just above, on the very first pass -- never
+        -- reaches the compositor, and the wait blocks for a reply to
+        -- something that was never sent.  The loop this replaced could not
+        -- get this wrong: dispatch flushes before it reads.
+        flush conn
         sockFd <- connectionFd conn
         ready <- MB.waitEither sockFd (MB.mailboxFd mailbox)
         case ready of

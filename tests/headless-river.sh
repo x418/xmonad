@@ -7,7 +7,7 @@
 #
 # Everything above the wire codec was unverified until this existed: the
 # protocol stack, the manage/render loop, the event loop, all of it compiled
-# and none of it had run.  The first two runs found two bugs that no amount of
+# and none of it had run.  The first few runs found three bugs that no amount of
 # compiling would have (see Findings at the bottom), which is the argument for
 # the script.
 #
@@ -143,7 +143,7 @@ exit "$status"
 
 # == Findings
 #
-# Two bugs, both invisible to the type checker and to every unit test:
+# Three bugs, all invisible to the type checker and to every unit test:
 #
 #   * recvWithFds died with "resource exhausted".  GHC's IO manager puts every
 #     socket it owns into non-blocking mode, so an empty socket answers EAGAIN
@@ -157,9 +157,14 @@ exit "$status"
 #     connected, handled one event and returned.  It stayed alive and silent,
 #     which looks identical to working.
 #
-# Still open: with both fixed, the window manager connects, binds
-# river_window_manager_v1 at version 5 and stays running, but no window is ever
-# configured -- `sent 0 tracked configure(s)` throughout, and a client that
-# connects is eventually dropped with a broken pipe.  A minimal probe against
-# the same compositor does receive manage_start, so the protocol stack is
-# sound and the fault is above it.
+#   * The loop waited before it flushed.  manage_dirty is queued rather than
+#     written, so the very first pass waited for a reply to a request that had
+#     never left the buffer, and every later one was a round trip late.  The
+#     loop this replaced could not get it wrong: dispatch flushes before it
+#     reads.  This was the one keeping every window unconfigured.
+#
+# The executable also needed -threaded, which the design had always assumed:
+# the loop forks a watcher per descriptor, sendRestart interrupts a blocking
+# read with an async exception, and prompts run on threads of their own.
+#
+# With those four fixed, all four assertions pass.

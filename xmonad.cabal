@@ -171,6 +171,13 @@ executable xmonad
   main-is:       Main.hs
   build-depends: base, xmonad
   ghc-options:   -Wall -Wno-unused-do-bind
+  if flag(river)
+    -- The river backend needs the threaded runtime.  Its event loop waits on
+    -- two descriptors at once by forking a watcher for each, sendRestart
+    -- interrupts a blocking read with an async exception, and a prompt runs on
+    -- a thread of its own -- none of which the single-threaded runtime will do
+    -- while a foreign call is in progress.
+    ghc-options: -threaded -rtsopts
   default-language: Haskell2010
 
   -- Keep this in sync with the oldest version in 'tested-with'

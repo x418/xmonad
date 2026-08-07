@@ -5,20 +5,21 @@ stack build                      # X11, byte-for-byte upstream behaviour
 stack build --flag xmonad:river  # river/Wayland
 ```
 
-**Status: it runs against a real compositor, connects, and does not yet manage
-windows.**
+**Status: it manages a window against a real compositor.**
 
-`tests/headless-river.sh` starts river on a headless backend with no display or
-hardware, runs this window manager against it, and asserts on river's debug
-log. What passes today: the connection is made, the wire codec round-trips
-against a real server (55 globals enumerated correctly),
-`river_window_manager_v1` binds at version 5, manage and render sequences
-complete, and a client creates a toplevel. What does not: no window is ever
-configured -- `sent 0 tracked configure(s)` throughout -- so nothing is laid
-out, and a connecting client is eventually dropped.
+`tests/headless-river.sh` starts river on a headless backend — no display, no
+seat, no GPU — runs this window manager against it, and asserts on river's
+debug log. All four assertions pass: the connection is made and the wire codec
+round-trips against a real server (55 globals enumerated correctly),
+`river_window_manager_v1` binds at version 5, a client creates a toplevel, and
+**river configures that window from the layout** — `sent 1 tracked
+configure(s)`, which is the only signal that proves a layout reached the
+compositor.
 
-Everything else here is still compile-time evidence only. Drawing, prompts,
-keyboard input and the mailbox have never executed.
+That is one window, laid out once, on a headless backend. It is not a working
+desktop. What has *not* run: drawing, prompts, keyboard input, the mailbox,
+workspace switching, and everything in xmonad-contrib. Those remain
+compile-time evidence only.
 
 ## Why river, and why this is possible
 

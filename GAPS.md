@@ -44,9 +44,10 @@ client-initiated half, which X11 had no equivalent of.
 ## 2. No runtime harness — CLOSED
 
 Closed by [`tests/headless-river.sh`](tests/headless-river.sh), and it earned
-its keep on the first two runs -- see the Findings comment at the bottom of the
-script. Things have now run against a live river, which the status line in
-`README.river.md` reflects.
+its keep immediately: three bugs on the first few runs, none of which the type
+checker or any unit test could have seen, and the last of which was keeping
+every window unconfigured. See the Findings comment at the bottom of the
+script. The backend now manages a window against a real compositor.
 
 The prototype's reusable asset is a recipe. Run river under
 `WLR_BACKENDS=headless` with `-c <init-script>`, then assert on its debug log:
