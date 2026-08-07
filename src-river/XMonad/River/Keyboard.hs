@@ -33,6 +33,7 @@ module XMonad.River.Keyboard
   , grabKeys
   , ungrabKeys
   , printableKeys
+  , riverModifiers
   ) where
 
 import Control.Monad (forM, forM_)
@@ -112,8 +113,10 @@ printableKeys =
 
 -- | Drop the modifier bits river has no entry for.
 --
--- Lock and mod2 are resolved before the window manager sees anything, so a
--- mask containing them would match nothing.
+-- river resolves modifiers itself and its modifier bits are numerically
+-- X11's, so a mask passes through unchanged apart from lock and mod2, which
+-- are resolved before the window manager sees anything and so would match
+-- nothing.
 riverModifiers :: KeyMask -> Word32
 riverModifiers mask = mask .&. supported
   where

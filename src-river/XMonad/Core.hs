@@ -174,6 +174,23 @@ data XConf = XConf
       -- background thread post a client message to the root window; there is
       -- no such relay here, so the channel is ours.  See
       -- "XMonad.River.Mailbox".
+    , riverKeyBindings :: !(IORef (M.Map ObjectId (X ())))
+      -- ^ The @river_xkb_binding_v1@ object created for each of the config's
+      -- key bindings, and what it runs.  Shared with the event loop rather
+      -- than private to it because a submap has to disable the whole set for
+      -- as long as it is open: river leaves it to compositor policy which of
+      -- several bindings matching one physical key gets the press, so two
+      -- live bindings for the same key is undefined rather than layered.
+    , riverPlacements :: !(IORef [(Window, Rectangle)])
+      -- ^ Where the last layout run put each window, in river's global
+      -- coordinate space.  This is the only record of a window's position:
+      -- river reports a window's size but never where it is, because the
+      -- window manager is the thing that decided.  See
+      -- 'XMonad.River.windowRect'.
+    , riverSubmap :: !(IORef (Maybe (X ())))
+      -- ^ What to do if a key no submap is waiting for is pressed: tear the
+      -- submap down and run its default action.  'Nothing' when no submap is
+      -- open.
     , riverDragOrigin :: !(IORef (Position, Position))
       -- ^ Where the pointer was when the current interactive operation began.
       -- river reports a drag as a delta from its start; 'mouseDrag' promises

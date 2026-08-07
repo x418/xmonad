@@ -38,7 +38,7 @@ import Data.Monoid (All(..), appEndo)
 import Data.Int (Int32)
 import Data.Word (Word32)
 import Control.Exception (catch)
-import System.Environment (getArgs, getExecutablePath)
+import System.Environment (getArgs, getExecutablePath, lookupEnv)
 import System.Exit (exitFailure, exitSuccess)
 import System.Posix.Process (executeFile)
 import System.IO (hPutStrLn, stderr)
@@ -48,6 +48,7 @@ import qualified Data.Set as S
 import XMonad.Core
 import XMonad.River.Runtime (RestartRequested(..), setMainThread, warnUnimplemented)
 import XMonad.River.Connection
+import XMonad.River.Keyboard (riverModifiers)
 import qualified XMonad.River.Mailbox as MB
 import XMonad.River.Protocol.WindowManagement
 import XMonad.River.Protocol.Core
@@ -67,6 +68,15 @@ data Runtime = Runtime
   { rtPending     :: !(IORef [X ()])
     -- ^ Binding actions awaiting the next manage sequence, newest first.
   , rtBindings    :: !(IORef (M.Map ObjectId (X ())))
+    -- ^ The same 'IORef' as 'riverKeyBindings' in the 'XConf'.  A submap
+    -- disables every one of these while it is open, so it needs to reach them
+    -- from the 'X' monad; the callbacks here reach them from 'IO'.
+  , rtSubmap      :: !(IORef (Maybe (X ())))
+    -- ^ Likewise 'riverSubmap': set from 'X' when a submap opens, read from
+    -- the @ate_unbound_key@ callback.
+  , rtXkbVersion  :: !Word32
+    -- ^ Negotiated @river_xkb_bindings_v1@ version.  @get_seat@ and
+    -- @ensure_next_key_eaten@ arrived in 2.
   , rtPointerBind :: !(IORef (M.Map ObjectId (Window -> X ())))
   , rtPlacements  :: !(IORef [(Window, Rectangle)])
     -- ^ Layout output from the last manage sequence, applied during render.
@@ -118,14 +128,17 @@ riverMain userConfig dirs = do
   mShm <- bindGlobal conn registry globals wlShmInterface 1 wlShmVersion
 
   case (mManager, mBindings) of
-    (Just (manager, _), Just (bindings, _)) -> do
+    (Just (manager, _), Just (bindings, bindingsVer)) -> do
       when (mLayerShell == Nothing) $ hPutStrLn stderr
         "xmonad-river: river_layer_shell_v1 is unavailable; layer surfaces \
         \(fuzzel prompts, notifications, wallpaper, bars) will not be shown"
       when (mCompositor == Nothing || mShm == Nothing) $ hPutStrLn stderr
         "xmonad-river: wl_compositor or wl_shm is unavailable; anything the \
         \window manager draws itself (prompts, decorations) will not appear"
-      run conn manager bindings (fmap fst mLayerShell)
+      when (bindingsVer < 2) $ hPutStrLn stderr
+        "xmonad-river: river_xkb_bindings_v1 is version 1; submaps cannot \
+        \detect an unbound key and will wait for one of their own"
+      run conn manager bindings bindingsVer (fmap fst mLayerShell)
           (fmap fst mCompositor) (fmap fst mShm) userConfig dirs
     _ -> do
       hPutStrLn stderr
@@ -133,10 +146,10 @@ riverMain userConfig dirs = do
         \river_xkb_bindings_v1 not supported by the compositor"
       exitFailure
 
-run :: Connection -> ObjectId -> ObjectId -> Maybe ObjectId
+run :: Connection -> ObjectId -> ObjectId -> Word32 -> Maybe ObjectId
     -> Maybe ObjectId -> Maybe ObjectId -> XConfig Layout
     -> Directories -> IO ()
-run conn manager bindings layerShell compositor shm userConfig dirs = do
+run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs = do
   windowsRef <- newIORef M.empty
   outputsRef <- newIORef M.empty
   seatsRef   <- newIORef M.empty
@@ -145,11 +158,18 @@ run conn manager bindings layerShell compositor shm userConfig dirs = do
   restartRef <- newIORef Nothing
   dragOrigin <- newIORef (0, 0)
   mailbox    <- MB.newMailbox
+  -- One IORef each, shared between the XConf and the Runtime: the event loop's
+  -- callbacks reach them from IO, and a submap reaches them from X.
+  bindingsRef <- newIORef M.empty
+  submapRef   <- newIORef Nothing
+  placeRef    <- newIORef []
   rt <- Runtime
           <$> newIORef []
+          <*> pure bindingsRef
+          <*> pure submapRef
+          <*> pure bindingsVer
           <*> newIORef M.empty
-          <*> newIORef M.empty
-          <*> newIORef []
+          <*> pure placeRef
           <*> newIORef S.empty
           <*> newIORef S.empty
           <*> newIORef Nothing
@@ -197,6 +217,9 @@ run conn manager bindings layerShell compositor shm userConfig dirs = do
         , inManageSeq = manageRef
         , riverRestart = restartRef
         , riverMailbox = mailbox
+        , riverKeyBindings = bindingsRef
+        , riverPlacements = placeRef
+        , riverSubmap = submapRef
         , riverDragOrigin = dragOrigin
         , normalBorder = parseColor (normalBorderColor userConfig)
         , focusedBorder = parseColor (focusedBorderColor userConfig)
@@ -329,7 +352,7 @@ addWindow win = do
     , rwIdentifier = Nothing, rwParent = Nothing
     , rwDimensions = (0, 0)
     , rwSizeHints = noSizeHints
-    , rwNew = True, rwClosed = False, rwHidden = False
+    , rwNew = True, rwClosed = False, rwFullscreen = False, rwHidden = False
     }
   io $ riverWindowV1Listen conn win $ \case
     RiverWindowV1Closed        -> adjust ref win $ \w -> w { rwClosed = True }
@@ -350,6 +373,12 @@ addWindow win = do
         , sh_aspect     = Nothing
         , sh_base_size  = Nothing
         } }
+    -- Both are followed by a manage_start, so a manage hook asking
+    -- 'XMonad.Hooks.ManageHelpers.isFullscreen' sees the up-to-date answer.
+    RiverWindowV1FullscreenRequested _ ->
+      adjust ref win $ \w -> w { rwFullscreen = True }
+    RiverWindowV1ExitFullscreenRequested ->
+      adjust ref win $ \w -> w { rwFullscreen = False }
     RiverWindowV1PointerMoveRequested _ -> pure ()
     _ -> pure ()
 
@@ -396,10 +425,30 @@ addSeat rt seat = do
         _ -> pure ()
     pure ls
 
+  -- The object a submap requests @ensure_next_key_eaten@ on.  Created once per
+  -- seat, because doing it twice is a protocol error, and only when river
+  -- offers version 2 or better -- the request does not exist before that.
+  bindingsGlobal <- asks riverBindings
+  mXkbSeat <- if rtXkbVersion rt < 2 then pure Nothing else io $ do
+    xs <- riverXkbBindingsV1GetSeat conn bindingsGlobal seat
+    riverXkbBindingsSeatV1Listen conn xs $ \case
+      -- A key the open submap did not ask for.  Under X11 this arrived on the
+      -- keyboard grab and the submap simply did not match it; here the only
+      -- way to hear about it at all is to have asked for the key to be eaten.
+      -- Acting on it matters more than it sounds: a submap disables every one
+      -- of the window manager's bindings while it is open, so a submap that
+      -- could not notice an unknown key would stay armed and leave the session
+      -- with no working shortcuts.
+      RiverXkbBindingsSeatV1AteUnboundKey -> do
+        pending <- atomicModifyIORef' (rtSubmap rt) (\s -> (Nothing, s))
+        forM_ pending (queueAction rt)
+      _ -> pure ()
+    pure (Just xs)
+
   io $ modifyIORef' ref $ M.insert seat RiverSeat
     { rsObject = seat, rsRemoved = False
     , rsLayerObject = mLayer, rsLayerFocus = LayerFocusNone
-    , rsPointer = (0, 0) }
+    , rsPointer = (0, 0), rsXkbSeat = mXkbSeat }
   io $ riverSeatV1Listen conn seat $ \case
     RiverSeatV1Removed -> adjust ref seat $ \s -> s { rsRemoved = True }
     RiverSeatV1PointerEnter win -> writeIORef (rtHovered rt) (Just win)
@@ -463,6 +512,7 @@ reapClosed = do
   seats <- io (readIORef seatRef)
   forM_ [ s | s <- M.elems seats, rsRemoved s ] $ \s -> io $ do
     forM_ (rsLayerObject s) (riverLayerShellSeatV1Destroy conn)
+    forM_ (rsXkbSeat s) (riverXkbBindingsSeatV1Destroy conn)
     riverSeatV1Destroy conn (rsObject s)
     modifyIORef' seatRef (M.delete (rsObject s))
 
@@ -571,14 +621,27 @@ adoptNewWindows = do
 -- 'XMonad.Operations.windows', which requests another manage sequence, so
 -- deferring costs nothing but keeps a slow hook from tripping river's
 -- watchdog.
+-- Setting @XMONAD_RIVER_NO_STARTUP_HOOK@ skips it, which is what makes it safe
+-- to run a real config under a test compositor.  A startup hook is the one
+-- part of a config that reaches outside the session it belongs to: this one
+-- spawns a dozen processes and kills tmux sessions by name, and doing that
+-- from a throwaway headless river would interfere with the desktop the user is
+-- actually sitting in front of.  Everything worth testing -- manage sequences,
+-- layout, bindings -- happens without it.
 runStartupHook :: Runtime -> X ()
 runStartupHook rt = do
   done <- io (readIORef (rtStartupDone rt))
   unless done $ do
     io (writeIORef (rtStartupDone rt) True)
-    hook <- asks (startupHook . config)
-    _ <- userCode hook
-    pure ()
+    skip <- io (lookupEnv "XMONAD_RIVER_NO_STARTUP_HOOK")
+    case skip of
+      Just _ -> io $ hPutStrLn stderr
+        "xmonad-river: note: startup hook skipped \
+        \(XMONAD_RIVER_NO_STARTUP_HOOK is set)"
+      Nothing -> do
+        hook <- asks (startupHook . config)
+        _ <- userCode hook
+        pure ()
 
 --------------------------------------------------------------------------------
 -- Bindings
@@ -627,19 +690,6 @@ bindSeat rt seat = do
             riverWindowManagerV1ManageDirty conn (rtManager rt)
       _ -> pure ()
     io (riverPointerBindingV1Enable conn b)
-
--- | The compositor resolves modifiers itself, and river's modifier bits are
--- numerically X11's, so the mask passes through unchanged apart from dropping
--- bits river has no entry for (lock and mod2).
-riverModifiers :: KeyMask -> Word32
-riverModifiers mask = mask .&. supported
-  where
-    supported = riverSeatV1ModifiersShift
-            + riverSeatV1ModifiersCtrl
-            + riverSeatV1ModifiersMod1
-            + riverSeatV1ModifiersMod3
-            + riverSeatV1ModifiersMod4
-            + riverSeatV1ModifiersMod5
 
 -- | X11 button numbers to Linux input event codes, which is what river's
 -- pointer bindings take.

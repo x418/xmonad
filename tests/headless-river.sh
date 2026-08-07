@@ -100,10 +100,28 @@ chmod +x "$RT/init.sh"
 echo "headless-river: wm=$WM"
 echo "headless-river: client=${CLIENT:-<none found>}"
 
+# The startup hook is suppressed unless asked for, because a real config's
+# startup hook is the one part of it that reaches outside its own session.  The
+# config this was first run against spawns a dozen processes through systemd-cat
+# -- so they outlive the compositor rather than dying with it -- and kills tmux
+# sessions by name, which would have taken out the live ones had they existed.
+# Nothing being tested here needs it.
+#
+#   WITH_STARTUP_HOOK=1 tests/headless-river.sh
+#
+# runs it anyway, for when the hook itself is what you are testing.
+STARTUP_ENV=(XMONAD_RIVER_NO_STARTUP_HOOK=1)
+if [ -n "${WITH_STARTUP_HOOK:-}" ]; then
+    STARTUP_ENV=()
+    echo "headless-river: WARNING: running the config's startup hook; it may" >&2
+    echo "                spawn processes and alter the live session" >&2
+fi
+
 timeout $((DURATION + 20)) env \
     XDG_RUNTIME_DIR="$RT" \
     WLR_BACKENDS=headless \
     WLR_LIBINPUT_NO_DEVICES=1 \
+    ${STARTUP_ENV[@]+"${STARTUP_ENV[@]}"} \
     river -log-level debug -no-xwayland -c "$RT/init.sh" > "$LOG" 2>&1
 
 configures=$(grep -oE 'sent [0-9]+ tracked configure' "$LOG" \
@@ -124,12 +142,37 @@ echo "headless-river: results"
 [ "$manages" -gt 0 ] && report "river completed a manage sequence" ok \
                      || report "river completed a manage sequence" no
 
-if [ -s "$WMLOG" ]; then
-    report "the window manager reported no errors" no
-    echo "--- window manager output ---" >&2
-    head -20 "$WMLOG" >&2
+# Only backend-level trouble counts.  "Printed nothing at all" was the right
+# test while the only thing run here was a bare test binary, and it stopped
+# being right the moment XMONAD_RIVER_WM was pointed at a real config: a
+# startup hook that spawns a dozen processes and logs what it spawned is
+# working, not failing, and several of those processes legitimately fail in a
+# sandbox with no session to attach to.
+#
+# So the assertion names what actually indicates a broken backend.  The
+# alternative -- keeping "no output" and telling people to ignore it -- is an
+# assertion nobody reads.
+# Anchored, because a config's binary is very likely to be called something
+# ending in "xmonad-river" and its own spawn failures would match otherwise --
+# which is exactly what happened the first time this ran against a real config.
+# "xmonad-river: note: ..." is the backend saying something worth knowing, not
+# something going wrong; anything else it prints about itself is a problem.
+backend_trouble=$(grep -nE '^xmonad-river:|protocol error|wl_display|invalid object|no such interface' "$WMLOG" 2>/dev/null \
+                  | grep -v '^[0-9]*:xmonad-river: note:')
+if [ -n "$backend_trouble" ]; then
+    report "the backend reported no errors" no
+    echo "--- backend errors ---" >&2
+    echo "$backend_trouble" | head -20 >&2
 else
-    report "the window manager reported no errors" ok
+    report "the backend reported no errors" ok
+fi
+
+# Not an assertion.  A config's own output is expected, but it is the first
+# thing wanted when something else fails, so it is shown rather than hidden.
+if [ -s "$WMLOG" ]; then
+    echo
+    echo "window manager output ($(wc -l < "$WMLOG") lines, first 15):"
+    head -15 "$WMLOG" | sed 's/^/  | /'
 fi
 
 if [ -n "$CLIENT" ]; then

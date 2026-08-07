@@ -198,6 +198,13 @@ data RiverWindow = RiverWindow
     -- means the window did not state one, and becomes 'Nothing'.
   , rwNew        :: !Bool
   , rwClosed     :: !Bool
+  , rwFullscreen :: !Bool
+    -- ^ The window has asked to be fullscreen and has not asked to stop.
+    --
+    -- X11 answered this from @_NET_WM_STATE@, which a window manager could
+    -- read whenever it liked.  river reports it as a pair of events instead,
+    -- so the answer has to be accumulated -- and each arrives before the
+    -- manage sequence it triggers, which is what lets a manage hook ask.
   , rwHidden     :: !Bool
   } deriving (Eq, Show)
 
@@ -225,6 +232,15 @@ data RiverSeat = RiverSeat
     -- coordinate space.  Recorded because an interactive drag reports a delta
     -- from where it started, and 'XMonad.Operations.mouseDrag' promises its
     -- caller an absolute position.
+  , rsXkbSeat     :: !(Maybe ObjectId)
+    -- ^ The seat's @river_xkb_bindings_seat_v1@, which is what
+    -- @ensure_next_key_eaten@ is requested on.  A submap needs it to learn
+    -- that a key it does not know about was pressed, and so to give up rather
+    -- than stay armed with the window manager's own bindings disabled.
+    --
+    -- 'Nothing' on a compositor offering @river_xkb_bindings_v1@ version 1,
+    -- where the request does not exist.  See 'XMonad.River.submapNextKey' for
+    -- what is lost.
   } deriving (Eq, Show)
 
 -- | Whether a seat's keyboard currently belongs to a layer surface.
