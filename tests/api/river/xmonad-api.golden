@@ -34,6 +34,8 @@ XMonad | Display | type Display :: *
 XMonad | Display | type Display = Connection
 XMonad | Event | data Event = DestroyWindowEvent {ev_window :: Window} | WindowAdded {ev_window :: Window} | WindowTitleChanged {ev_window :: Window, ev_text :: (Maybe ByteString)} | WindowAppIdChanged {ev_window :: Window, ev_text :: (Maybe ByteString)} | OutputAdded {ev_output :: ObjectId} | OutputRemoved {ev_output :: ObjectId} | SeatAdded {ev_seat :: ObjectId} | SeatRemoved {ev_seat :: ObjectId} | ScreenLayoutChanged | SessionLocked | SessionUnlocked | KeyPressed {ev_state :: KeyMask, ev_keysym :: KeySym} | TimerFired Int
 XMonad | Event | type Event :: *
+XMonad | EventType | type EventType :: *
+XMonad | EventType | type EventType = Word32
 XMonad | ExtensionClass | class Typeable a => ExtensionClass a where initialValue :: a extensionType :: a -> StateExtension {-# MINIMAL initialValue #-}
 XMonad | ExtensionClass | type ExtensionClass :: * -> Constraint
 XMonad | Full | data Full a = Full
@@ -163,6 +165,8 @@ XMonad | io | io :: MonadIO m => IO a -> m a
 XMonad | isClient | isClient :: Window -> X Bool
 XMonad | isFixedSizeOrTransient | isFixedSizeOrTransient :: Display -> Window -> X Bool
 XMonad | isRoot | isRoot :: Window -> X Bool
+XMonad | keyPress | keyPress :: EventType
+XMonad | keyRelease | keyRelease :: EventType
 XMonad | keysymToString | keysymToString :: KeySym -> String
 XMonad | kill | kill :: X ()
 XMonad | killWindow | killWindow :: Window -> X ()
@@ -609,6 +613,8 @@ XMonad.Core | Display | type Display :: *
 XMonad.Core | Display | type Display = Connection
 XMonad.Core | Event | data Event = DestroyWindowEvent {ev_window :: Window} | WindowAdded {ev_window :: Window} | WindowTitleChanged {ev_window :: Window, ev_text :: (Maybe ByteString)} | WindowAppIdChanged {ev_window :: Window, ev_text :: (Maybe ByteString)} | OutputAdded {ev_output :: ObjectId} | OutputRemoved {ev_output :: ObjectId} | SeatAdded {ev_seat :: ObjectId} | SeatRemoved {ev_seat :: ObjectId} | ScreenLayoutChanged | SessionLocked | SessionUnlocked | KeyPressed {ev_state :: KeyMask, ev_keysym :: KeySym} | TimerFired Int
 XMonad.Core | Event | type Event :: *
+XMonad.Core | EventType | type EventType :: *
+XMonad.Core | EventType | type EventType = Word32
 XMonad.Core | ExtensionClass | class Typeable a => ExtensionClass a where initialValue :: a extensionType :: a -> StateExtension {-# MINIMAL initialValue #-}
 XMonad.Core | ExtensionClass | type ExtensionClass :: * -> Constraint
 XMonad.Core | KeyMask | type KeyMask :: *
@@ -685,6 +691,8 @@ XMonad.Core | ifM | ifM :: Monad m => m Bool -> m a -> m a -> m a
 XMonad.Core | installSignalHandlers | installSignalHandlers :: MonadIO m => m ()
 XMonad.Core | io | io :: MonadIO m => IO a -> m a
 XMonad.Core | isRoot | isRoot :: Window -> X Bool
+XMonad.Core | keyPress | keyPress :: EventType
+XMonad.Core | keyRelease | keyRelease :: EventType
 XMonad.Core | keysymToString | keysymToString :: KeySym -> String
 XMonad.Core | lockMask | lockMask :: KeyMask
 XMonad.Core | mod1Mask | mod1Mask :: KeyMask

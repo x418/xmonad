@@ -22,12 +22,15 @@ module XMonad.River.Runtime
   , forgetBorderOverride
   , nextSubmapGeneration
   , currentSubmapGeneration
+  , setModifierWatcher
+  , takeModifierWatcher
   ) where
 
 import Control.Concurrent (ThreadId, myThreadId)
 import Control.Monad (unless)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.IORef
+import Data.Word (Word32)
 import System.FilePath ((</>))
 import System.IO (hPutStrLn, stderr)
 import System.IO.Unsafe (unsafePerformIO)
@@ -130,6 +133,27 @@ nextSubmapGeneration = atomicModifyIORef' submapGenRef (\n -> (n + 1, n + 1))
 
 currentSubmapGeneration :: IO Int
 currentSubmapGeneration = readIORef submapGenRef
+
+{-# NOINLINE modWatcherRef #-}
+modWatcherRef :: IORef (Maybe (Word32 -> Word32 -> IO ()))
+modWatcherRef = unsafePerformIO (newIORef Nothing)
+
+-- | Register what to run when the seat's watched modifiers change.
+--
+-- One slot, not a list: @modifiers_watch@ is a single mask per seat and the
+-- second caller would silently replace the first's mask anyway.  A process
+-- global rather than a field of the 'Runtime' because the listener that feeds
+-- it is installed once per seat, in 'IO', while the thing that wants it --
+-- 'XMonad.River.whileModifiersHeld' -- runs in 'X' much later.
+setModifierWatcher :: Maybe (Word32 -> Word32 -> IO ()) -> IO ()
+setModifierWatcher = writeIORef modWatcherRef
+
+-- | Take the current watcher, leaving none.
+--
+-- Taking rather than reading, so that the modifier release which concludes an
+-- interaction cannot be delivered twice.
+takeModifierWatcher :: IO (Maybe (Word32 -> Word32 -> IO ()))
+takeModifierWatcher = atomicModifyIORef' modWatcherRef (\w -> (Nothing, w))
 
 -- | Thrown into the event loop thread to ask for a restart.
 data RestartRequested = RestartRequested deriving (Show)

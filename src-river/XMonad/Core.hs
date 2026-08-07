@@ -85,6 +85,14 @@ module XMonad.Core (
     -- override that the render sequence applies.  See
     -- 'XMonad.River.Runtime.setBorderWidth' for what that changes.
     setWindowBorderWidth, setWindowBorder,
+    -- * Key event types
+    --
+    -- | The two X11 event types that survive.  river reports a binding as
+    -- pressed or released rather than as an event with a type, so nothing here
+    -- produces these -- but the handler signatures in
+    -- "XMonad.Actions.Repeatable" are written in terms of them, and a config
+    -- comparing @t == keyPress@ should go on meaning what it meant.
+    EventType, keyPress, keyRelease,
     Event(..), Connection, Display, sendRestart,
   ) where
 
@@ -427,6 +435,13 @@ setWindowBorderWidth _ = setBorderWidth
 -- already makes for @normalBorder@ and @focusedBorder@.
 setWindowBorder :: Display -> Window -> BorderColor -> IO ()
 setWindowBorder _ = setBorderColor
+
+-- | X11's event type tag, kept for the handful of signatures that name it.
+type EventType = Word32
+
+keyPress, keyRelease :: EventType
+keyPress   = 2
+keyRelease = 3
 
 getWMNormalHints :: Display -> Window -> IO SizeHints
 getWMNormalHints _ = lookupSizeHints

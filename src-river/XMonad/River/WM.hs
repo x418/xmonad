@@ -50,7 +50,7 @@ import qualified Data.Set as S
 
 import XMonad.Core
 import XMonad.Operations (StateFile (..), broadcastMessage, focus, readStateFile, writeStateToFile)
-import XMonad.River.Runtime (RestartRequested(..), forgetBorderOverride, lookupBorderOverride, pidFilePath, publishGeometry, publishSizeHints, sendRestart, setMainThread, warnUnimplemented)
+import XMonad.River.Runtime (RestartRequested(..), forgetBorderOverride, takeModifierWatcher, lookupBorderOverride, pidFilePath, publishGeometry, publishSizeHints, sendRestart, setMainThread, warnUnimplemented)
 import XMonad.River.Client (closeAllClients)
 import XMonad.River.Connection
 import XMonad.River.Keyboard (riverModifiers)
@@ -507,6 +507,11 @@ addSeat rt seat = do
       RiverXkbBindingsSeatV1AteUnboundKey -> do
         pending <- atomicModifyIORef' (rtSubmap rt) (\s -> (Nothing, s))
         forM_ pending (queueAction rt)
+      -- What ends an Alt-Tab.  Only sent for modifiers something asked to
+      -- watch, so this is silent unless 'XMonad.River.whileModifiersHeld' has
+      -- an interaction open.
+      RiverXkbBindingsSeatV1ModifiersUpdate old new ->
+        takeModifierWatcher >>= mapM_ (\f -> f old new)
       _ -> pure ()
     pure (Just xs)
 

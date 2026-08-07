@@ -47,12 +47,24 @@ module XMonad.River (
     -- reports where a window is, because the window manager is what decided.
     windowRect, moveResizeWindow, pointerPosition,
 
+    -- * Cursor
+    --
+    -- | X11 set a cursor glyph on the root window and every window inherited
+    -- it.  Wayland has neither, and offers a theme instead.
+    setCursorTheme,
+
     -- * Decorations
     --
     -- | Server-side decoration is requested for every new window before the
     -- manage hook runs, because river's default is the opposite.  These are
     -- how a manage hook overrides that.
     useServerDecorations, useClientDecorations,
+
+    -- * Holding a modifier
+    --
+    -- | What Alt-Tab is built on: capture some keys for as long as a modifier
+    -- is held, and finish when it is let go.
+    whileModifiersHeld,
 
     -- * Reading a key
     --
@@ -86,6 +98,7 @@ import Data.Word (Word32)
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Monad (forM, forM_, void, when)
 import Control.Monad.Reader (ask, asks)
+import qualified Data.ByteString.Char8 as BC
 import qualified Data.Map.Strict as M
 
 import XMonad.Core
@@ -96,7 +109,7 @@ import qualified XMonad.River.Mailbox as MB
 import XMonad.River.Client (closeAllClients)
 import XMonad.River.Protocol.WindowManagement
 import XMonad.River.Protocol.XkbBindings
-import XMonad.River.Runtime (RestartRequested(..), currentSubmapGeneration, nextSubmapGeneration, setMainThread, warnUnimplemented)
+import XMonad.River.Runtime (RestartRequested(..), currentSubmapGeneration, nextSubmapGeneration, setMainThread, setModifierWatcher, warnUnimplemented)
 import XMonad.River.Types
 
 -- | Run an action on the event loop, from any thread.
@@ -179,6 +192,35 @@ pointerPosition = do
         (s:_) -> Just (rsPointer s)
         []    -> Nothing
 
+-- | Choose the XCursor theme the compositor draws with.
+--
+-- This is what replaces X11's @setDefaultCursor@, and it is a different
+-- question with a different answer.  X11 named one glyph from the cursor font
+-- and set it on the root window; every window that did not override it
+-- inherited that shape.  Wayland has no root window and no cursor font: a
+-- client picks its own cursor from a theme, and the compositor draws the
+-- cursor wherever no client does.  So the choice available to a window manager
+-- is which /theme/ the compositor draws from, not which shape it draws.
+--
+-- > startupHook = setCursorTheme "Adwaita" 24
+--
+-- Applies to cursors the compositor renders, and not necessarily to those a
+-- client renders for itself.  river's own documentation notes the consequence:
+-- a window manager generally wants @XCURSOR_THEME@ and @XCURSOR_SIZE@ in the
+-- environment of the programs it spawns as well, so that clients drawing their
+-- own cursors agree with the compositor about which theme that is.
+--
+-- Applied to every seat.  Requires river offering @river_window_management_v1@
+-- version 2 or better; on version 1 the request does not exist and this warns
+-- rather than failing.
+setCursorTheme :: String -> Int -> X ()
+setCursorTheme name size = do
+    conn <- asks display
+    seats <- io . readIORef =<< asks riverSeats
+    io $ forM_ (M.elems seats) $ \s ->
+        riverSeatV1SetXcursorTheme conn (rsObject s)
+          (BC.pack name) (fromIntegral size)
+
 -- | Ask a window to let the window manager draw its frame.
 --
 -- The default for every new window, and the reason it has to be asked for is
@@ -234,6 +276,91 @@ closeAllPrompts :: X ()
 closeAllPrompts = io $ do
   n <- closeAllClients
   hPutStrLn stderr $ "xmonad-river: closed " <> show n <> " prompt(s)"
+
+-- | Capture keys until a modifier is released.
+--
+-- This is what "XMonad.Actions.Repeatable" is built on, and it is the
+-- Alt-Tab shape: an action is invoked with a modifier held, keeps responding
+-- to keys while it stays held, and concludes when it is let go.
+--
+-- __It does not block__, for the same reason 'submapNextKey' does not: a
+-- binding may only be created during a manage sequence and cannot fire until
+-- that sequence has finished, so waiting inside the sequence would be waiting
+-- for something the compositor is not permitted to send.  X11 grabbed the
+-- keyboard and sat in @maskEvent@; here the bindings are installed, this
+-- returns, and the handler runs as keys arrive.
+--
+-- The visible consequence is that a caller cannot compute a value from the
+-- interaction, and anything sequenced after this runs /before/ the keys are
+-- pressed rather than after -- which is why there is a separate conclusion
+-- action rather than a return value.
+--
+-- While the interaction is open the config's own bindings are disabled, as
+-- for a submap: the key that invoked this is typically also a global binding
+-- (@M-Tab@), and river leaves it to compositor policy which of several
+-- matching bindings receives a press.
+--
+-- Requires @river_xkb_bindings_v1@ version 3, where @modifiers_watch@ arrived.
+-- On anything older there is no way to learn that a modifier was released, so
+-- the handler is never installed, the conclusion runs immediately, and a
+-- diagnostic says so -- which degrades Alt-Tab to "acts once", rather than to
+-- a session whose bindings are disabled forever.
+whileModifiersHeld
+    :: KeyMask                        -- ^ concludes when any of these is released
+    -> [(KeyMask, KeySym)]            -- ^ keys to capture while held
+    -> (Bool -> KeySym -> X ())       -- ^ @True@ for a press, @False@ for a release
+    -> X ()                           -- ^ run once, when the modifier is released
+    -> X ()
+whileModifiersHeld mods captures onKey onDone = do
+    conf <- ask
+    let conn = display conf
+        bindingsGlobal = riverBindings conf
+    seats <- io (readIORef (riverSeats conf))
+    globals <- io (readIORef (riverKeyBindings conf))
+
+    let xkbSeats = [ x | s <- M.elems seats, Just x <- [rsXkbSeat s] ]
+    if null xkbSeats
+      then do
+        io $ hPutStrLn stderr
+          "xmonad-river: river_xkb_bindings_v1 is too old for modifier \
+          \watching; a hold-to-cycle action will act once and stop"
+        onDone
+      else do
+        io $ forM_ (M.keys globals) (riverXkbBindingV1Disable conn)
+
+        temps <- io . fmap concat . forM (M.elems seats) $ \seat ->
+            forM captures $ \(mask, keysym) -> do
+                b <- riverXkbBindingsV1GetXkbBinding conn bindingsGlobal
+                       (rsObject seat) keysym (riverModifiers mask)
+                pure (b, keysym)
+
+        let finish = do
+                io $ forM_ temps $ \(b, _) -> do
+                    riverXkbBindingV1Disable conn b
+                    riverXkbBindingV1Destroy conn b
+                io $ forM_ xkbSeats $ \x ->
+                    riverXkbBindingsSeatV1ModifiersWatch conn x 0
+                io $ forM_ (M.keys globals) (riverXkbBindingV1Enable conn)
+                onDone
+
+        io $ forM_ temps $ \(b, sym) -> do
+            riverXkbBindingV1Listen conn b $ \case
+                RiverXkbBindingV1Pressed  -> post conf (onKey True sym)
+                RiverXkbBindingV1Released -> post conf (onKey False sym)
+                _ -> pure ()
+            riverXkbBindingV1Enable conn b
+
+        -- Concludes on any watched modifier going from held to released.  The
+        -- event carries both the old and the new set precisely so that this
+        -- can be told apart from one being pressed.
+        io $ setModifierWatcher $ Just $ \old new ->
+            when (old .&. mods /= 0 && new .&. mods /= old .&. mods) $
+                post conf finish
+
+        io $ forM_ xkbSeats $ \x ->
+            riverXkbBindingsSeatV1ModifiersWatch conn x (riverModifiers mods)
+  where
+    post conf = MB.post (riverMailbox conf)
 
 -- | Read one key press and run the action it selects.
 --
