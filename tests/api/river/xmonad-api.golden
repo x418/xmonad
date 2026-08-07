@@ -10,6 +10,8 @@ XMonad | BorderColor | type BorderColor :: *
 XMonad | BorderColor | type BorderColor = (Word32, Word32, Word32, Word32)
 XMonad | Button | type Button :: *
 XMonad | Button | type Button = Word32
+XMonad | ButtonMask | type ButtonMask :: *
+XMonad | ButtonMask | type ButtonMask = KeyMask
 XMonad | CLR | data CLR = CL | CR
 XMonad | CLR | type CLR :: *
 XMonad | ChangeLayout | data ChangeLayout = FirstLayout | NextLayout
@@ -19,7 +21,7 @@ XMonad | Choose | type Choose :: (* -> *) -> (* -> *) -> * -> *
 XMonad | Choose | type role Choose representational representational nominal
 XMonad | ConfExtension | data ConfExtension = forall a. Typeable a => ConfExtension a
 XMonad | ConfExtension | type ConfExtension :: *
-XMonad | Connection | data Connection = Connection {connSocket :: Socket, connNextId :: ! (IORef Word32), connFreeIds :: ! (IORef [Word32]), connOut :: ! (IORef Encoded), connIn :: ! (IORef ByteString), connListeners :: ! (IORef (IntMap Listener))}
+XMonad | Connection | data Connection = Connection {connSocket :: Socket, connNextId :: (IORef Word32), connFreeIds :: (IORef [Word32]), connOut :: (IORef Encoded), connIn :: (IORef ByteString), connListeners :: (IORef (IntMap Listener))}
 XMonad | Connection | type Connection :: *
 XMonad | D | type D :: *
 XMonad | D | type D = (Dimension, Dimension)
@@ -28,9 +30,9 @@ XMonad | Dimension | type Dimension :: *
 XMonad | Dimension | type Dimension = Word32
 XMonad | Directories | type Directories :: *
 XMonad | Directories | type Directories = Directories' FilePath
-XMonad | Directories' | data Directories' a = Directories {dataDir :: !a, cfgDir :: !a, cacheDir :: !a}
+XMonad | Directories' | data Directories' a = Directories {dataDir :: a, cfgDir :: a, cacheDir :: a}
 XMonad | Directories' | type Directories' :: * -> *
-XMonad | Event | data Event = DestroyWindowEvent {ev_window :: ! Window} | WindowAdded {ev_window :: ! Window} | WindowTitleChanged {ev_window :: ! Window, ev_text :: !(Maybe ByteString)} | WindowAppIdChanged {ev_window :: ! Window, ev_text :: !(Maybe ByteString)} | OutputAdded {ev_output :: ! ObjectId} | OutputRemoved {ev_output :: ! ObjectId} | SeatAdded {ev_seat :: ! ObjectId} | SeatRemoved {ev_seat :: ! ObjectId} | SessionLocked | SessionUnlocked
+XMonad | Event | data Event = DestroyWindowEvent {ev_window :: Window} | WindowAdded {ev_window :: Window} | WindowTitleChanged {ev_window :: Window, ev_text :: (Maybe ByteString)} | WindowAppIdChanged {ev_window :: Window, ev_text :: (Maybe ByteString)} | OutputAdded {ev_output :: ObjectId} | OutputRemoved {ev_output :: ObjectId} | SeatAdded {ev_seat :: ObjectId} | SeatRemoved {ev_seat :: ObjectId} | SessionLocked | SessionUnlocked
 XMonad | Event | type Event :: *
 XMonad | ExtensionClass | class Typeable a => ExtensionClass a where initialValue :: a extensionType :: a -> StateExtension {-# MINIMAL initialValue #-}
 XMonad | ExtensionClass | type ExtensionClass :: * -> Constraint
@@ -78,11 +80,11 @@ XMonad | Resize | data Resize = Shrink | Expand
 XMonad | Resize | type Resize :: *
 XMonad | RestartRequested | data RestartRequested = RestartRequested
 XMonad | RestartRequested | type RestartRequested :: *
-XMonad | RiverOutput | data RiverOutput = RiverOutput {roObject :: ! ObjectId, roPosition :: (Int32, Int32), roSize :: (Int32, Int32), roRemoved :: !Bool, roLayerObject :: !(Maybe ObjectId), roLayerArea :: !(Maybe Rectangle)}
+XMonad | RiverOutput | data RiverOutput = RiverOutput {roObject :: ObjectId, roPosition :: (Int32, Int32), roSize :: (Int32, Int32), roRemoved :: Bool, roLayerObject :: (Maybe ObjectId), roLayerArea :: (Maybe Rectangle)}
 XMonad | RiverOutput | type RiverOutput :: *
-XMonad | RiverSeat | data RiverSeat = RiverSeat {rsObject :: ! ObjectId, rsRemoved :: !Bool, rsLayerObject :: !(Maybe ObjectId), rsLayerFocus :: !LayerFocus, rsPointer :: (Position, Position)}
+XMonad | RiverSeat | data RiverSeat = RiverSeat {rsObject :: ObjectId, rsRemoved :: Bool, rsLayerObject :: (Maybe ObjectId), rsLayerFocus :: LayerFocus, rsPointer :: (Position, Position)}
 XMonad | RiverSeat | type RiverSeat :: *
-XMonad | RiverWindow | data RiverWindow = RiverWindow {rwObject :: ! ObjectId, rwNode :: ! ObjectId, rwAppId :: !(Maybe ByteString), rwTitle :: !(Maybe ByteString), rwPid :: !(Maybe Int32), rwIdentifier :: !(Maybe ByteString), rwParent :: !(Maybe ObjectId), rwDimensions :: (Int32, Int32), rwSizeHints :: SizeHints, rwNew :: !Bool, rwClosed :: !Bool, rwHidden :: !Bool}
+XMonad | RiverWindow | data RiverWindow = RiverWindow {rwObject :: ObjectId, rwNode :: ObjectId, rwAppId :: (Maybe ByteString), rwTitle :: (Maybe ByteString), rwPid :: (Maybe Int32), rwIdentifier :: (Maybe ByteString), rwParent :: (Maybe ObjectId), rwDimensions :: (Int32, Int32), rwSizeHints :: SizeHints, rwNew :: Bool, rwClosed :: Bool, rwHidden :: Bool}
 XMonad | RiverWindow | type RiverWindow :: *
 XMonad | ScreenDetail | newtype ScreenDetail = SD {screenRect :: Rectangle}
 XMonad | ScreenDetail | type ScreenDetail :: *
@@ -110,11 +112,11 @@ XMonad | WorkspaceId | type WorkspaceId = String
 XMonad | X | newtype X a = X (ReaderT XConf (StateT XState IO) a)
 XMonad | X | type X :: * -> *
 XMonad | X | type role X nominal
-XMonad | XConf | data XConf = XConf {config :: (XConfig Layout), riverConn :: Connection, riverManager :: ! ObjectId, riverBindings :: ! ObjectId, riverWindows :: ! (IORef (Map ObjectId RiverWindow)), riverOutputs :: ! (IORef (Map ObjectId RiverOutput)), riverSeats :: ! (IORef (Map ObjectId RiverSeat)), riverDirty :: ! (IORef Bool), inManageSeq :: ! (IORef Bool), riverRestart :: ! (IORef (Maybe String)), riverDragOrigin :: ! >_N)(IORef (Position, Position)), normalBorder :: BorderColor, focusedBorder :: BorderColor, keyActions :: !(Map (KeyMask, KeySym) (X ())), buttonActions :: !(Map (KeyMask, Button) (Window -> X ())), mouseFocused :: !Bool, mousePosition :: !(Maybe (Position, Position)), currentEvent :: !(Maybe Event), directories :: Directories}
+XMonad | XConf | data XConf = XConf {config :: (XConfig Layout), riverConn :: Connection, riverManager :: ObjectId, riverBindings :: ObjectId, riverWindows :: (IORef (Map ObjectId RiverWindow)), riverOutputs :: (IORef (Map ObjectId RiverOutput)), riverSeats :: (IORef (Map ObjectId RiverSeat)), riverDirty :: (IORef Bool), inManageSeq :: (IORef Bool), riverRestart :: (IORef (Maybe String)), riverDragOrigin :: >_N)(IORef (Position, Position)), normalBorder :: BorderColor, focusedBorder :: BorderColor, keyActions :: (Map (KeyMask, KeySym) (X ())), buttonActions :: (Map (KeyMask, Button) (Window -> X ())), mouseFocused :: Bool, mousePosition :: (Maybe (Position, Position)), currentEvent :: (Maybe Event), directories :: Directories}
 XMonad | XConf | type XConf :: *
-XMonad | XConfig | data XConfig l = XConfig {normalBorderColor :: !String, focusedBorderColor :: !String, terminal :: !String, layoutHook :: !(l Window), manageHook :: !ManageHook, handleEventHook :: !(Event -> X All), workspaces :: ![String], modMask :: KeyMask, keys :: !(XConfig Layout -> Map (KeyMask, KeySym) (X ())), mouseBindings :: !(XConfig Layout -> Map (KeyMask, Button) (Window -> X ())), borderWidth :: Dimension, logHook :: !(X ()), startupHook :: !(X ()), focusFollowsMouse :: !Bool, clickJustFocuses :: !Bool, handleExtraArgs :: !([String] -> XConfig Layout -> IO (XConfig Layout)), extensibleConf :: !(Map TypeRep ConfExtension)}
+XMonad | XConfig | data XConfig l = XConfig {normalBorderColor :: String, focusedBorderColor :: String, terminal :: String, layoutHook :: (l Window), manageHook :: ManageHook, handleEventHook :: (Event -> X All), workspaces :: [String], modMask :: KeyMask, keys :: (XConfig Layout -> Map (ButtonMask, KeySym) (X ())), mouseBindings :: (XConfig Layout -> Map (ButtonMask, Button) (Window -> X ())), borderWidth :: Dimension, logHook :: (X ()), startupHook :: (X ()), focusFollowsMouse :: Bool, clickJustFocuses :: Bool, handleExtraArgs :: ([String] -> XConfig Layout -> IO (XConfig Layout)), extensibleConf :: (Map TypeRep ConfExtension)}
 XMonad | XConfig | type XConfig :: (* -> *) -> *
-XMonad | XState | data XState = XState {windowset :: WindowSet, mapped :: !(Set Window), waitingUnmap :: !(Map Window Int), dragging :: !(Maybe (Position -> Position -> X (), X ())), numberlockMask :: KeyMask, extensibleState :: !(Map String (Either String StateExtension))}
+XMonad | XState | data XState = XState {windowset :: WindowSet, mapped :: (Set Window), waitingUnmap :: (Map Window Int), dragging :: (Maybe (Position -> Position -> X (), X ())), numberlockMask :: KeyMask, extensibleState :: (Map String (Either String StateExtension))}
 XMonad | XState | type XState :: *
 XMonad | a | class Default a where def :: a default def :: (Generic a, GDefault (Rep a)) => a
 XMonad | appName | appName :: Query String
@@ -132,7 +134,6 @@ XMonad | catchIO | catchIO :: MonadIO m => IO () -> m ()
 XMonad | catchX | catchX :: X a -> X a -> X a
 XMonad | className | className :: Query String
 XMonad | cleanMask | cleanMask :: KeyMask -> X KeyMask
-XMonad | clearEvents | clearEvents :: X ()
 XMonad | composeAll | composeAll :: Monoid m => [m] -> m
 XMonad | containedIn | containedIn :: Rectangle -> Rectangle -> Bool
 XMonad | defaultConfig | defaultConfig :: XConfig (Choose Tall (Choose (Mirror Tall) Full))
@@ -228,17 +229,19 @@ XMonad.Core | BorderColor | type BorderColor :: *
 XMonad.Core | BorderColor | type BorderColor = (Word32, Word32, Word32, Word32)
 XMonad.Core | Button | type Button :: *
 XMonad.Core | Button | type Button = Word32
+XMonad.Core | ButtonMask | type ButtonMask :: *
+XMonad.Core | ButtonMask | type ButtonMask = KeyMask
 XMonad.Core | ConfExtension | data ConfExtension = forall a. Typeable a => ConfExtension a
 XMonad.Core | ConfExtension | type ConfExtension :: *
-XMonad.Core | Connection | data Connection = Connection {connSocket :: Socket, connNextId :: ! (IORef Word32), connFreeIds :: ! (IORef [Word32]), connOut :: ! (IORef Encoded), connIn :: ! (IORef ByteString), connListeners :: ! (IORef (IntMap Listener))}
+XMonad.Core | Connection | data Connection = Connection {connSocket :: Socket, connNextId :: (IORef Word32), connFreeIds :: (IORef [Word32]), connOut :: (IORef Encoded), connIn :: (IORef ByteString), connListeners :: (IORef (IntMap Listener))}
 XMonad.Core | Connection | type Connection :: *
 XMonad.Core | Dimension | type Dimension :: *
 XMonad.Core | Dimension | type Dimension = Word32
 XMonad.Core | Directories | type Directories :: *
 XMonad.Core | Directories | type Directories = Directories' FilePath
-XMonad.Core | Directories' | data Directories' a = Directories {dataDir :: !a, cfgDir :: !a, cacheDir :: !a}
+XMonad.Core | Directories' | data Directories' a = Directories {dataDir :: a, cfgDir :: a, cacheDir :: a}
 XMonad.Core | Directories' | type Directories' :: * -> *
-XMonad.Core | Event | data Event = DestroyWindowEvent {ev_window :: ! Window} | WindowAdded {ev_window :: ! Window} | WindowTitleChanged {ev_window :: ! Window, ev_text :: !(Maybe ByteString)} | WindowAppIdChanged {ev_window :: ! Window, ev_text :: !(Maybe ByteString)} | OutputAdded {ev_output :: ! ObjectId} | OutputRemoved {ev_output :: ! ObjectId} | SeatAdded {ev_seat :: ! ObjectId} | SeatRemoved {ev_seat :: ! ObjectId} | SessionLocked | SessionUnlocked
+XMonad.Core | Event | data Event = DestroyWindowEvent {ev_window :: Window} | WindowAdded {ev_window :: Window} | WindowTitleChanged {ev_window :: Window, ev_text :: (Maybe ByteString)} | WindowAppIdChanged {ev_window :: Window, ev_text :: (Maybe ByteString)} | OutputAdded {ev_output :: ObjectId} | OutputRemoved {ev_output :: ObjectId} | SeatAdded {ev_seat :: ObjectId} | SeatRemoved {ev_seat :: ObjectId} | SessionLocked | SessionUnlocked
 XMonad.Core | Event | type Event :: *
 XMonad.Core | ExtensionClass | class Typeable a => ExtensionClass a where initialValue :: a extensionType :: a -> StateExtension {-# MINIMAL initialValue #-}
 XMonad.Core | ExtensionClass | type ExtensionClass :: * -> Constraint
@@ -268,11 +271,11 @@ XMonad.Core | Rectangle | data Rectangle = Rectangle {rect_x :: Position, rect_y
 XMonad.Core | Rectangle | type Rectangle :: *
 XMonad.Core | RestartRequested | data RestartRequested = RestartRequested
 XMonad.Core | RestartRequested | type RestartRequested :: *
-XMonad.Core | RiverOutput | data RiverOutput = RiverOutput {roObject :: ! ObjectId, roPosition :: (Int32, Int32), roSize :: (Int32, Int32), roRemoved :: !Bool, roLayerObject :: !(Maybe ObjectId), roLayerArea :: !(Maybe Rectangle)}
+XMonad.Core | RiverOutput | data RiverOutput = RiverOutput {roObject :: ObjectId, roPosition :: (Int32, Int32), roSize :: (Int32, Int32), roRemoved :: Bool, roLayerObject :: (Maybe ObjectId), roLayerArea :: (Maybe Rectangle)}
 XMonad.Core | RiverOutput | type RiverOutput :: *
-XMonad.Core | RiverSeat | data RiverSeat = RiverSeat {rsObject :: ! ObjectId, rsRemoved :: !Bool, rsLayerObject :: !(Maybe ObjectId), rsLayerFocus :: !LayerFocus, rsPointer :: (Position, Position)}
+XMonad.Core | RiverSeat | data RiverSeat = RiverSeat {rsObject :: ObjectId, rsRemoved :: Bool, rsLayerObject :: (Maybe ObjectId), rsLayerFocus :: LayerFocus, rsPointer :: (Position, Position)}
 XMonad.Core | RiverSeat | type RiverSeat :: *
-XMonad.Core | RiverWindow | data RiverWindow = RiverWindow {rwObject :: ! ObjectId, rwNode :: ! ObjectId, rwAppId :: !(Maybe ByteString), rwTitle :: !(Maybe ByteString), rwPid :: !(Maybe Int32), rwIdentifier :: !(Maybe ByteString), rwParent :: !(Maybe ObjectId), rwDimensions :: (Int32, Int32), rwSizeHints :: SizeHints, rwNew :: !Bool, rwClosed :: !Bool, rwHidden :: !Bool}
+XMonad.Core | RiverWindow | data RiverWindow = RiverWindow {rwObject :: ObjectId, rwNode :: ObjectId, rwAppId :: (Maybe ByteString), rwTitle :: (Maybe ByteString), rwPid :: (Maybe Int32), rwIdentifier :: (Maybe ByteString), rwParent :: (Maybe ObjectId), rwDimensions :: (Int32, Int32), rwSizeHints :: SizeHints, rwNew :: Bool, rwClosed :: Bool, rwHidden :: Bool}
 XMonad.Core | RiverWindow | type RiverWindow :: *
 XMonad.Core | ScreenDetail | newtype ScreenDetail = SD {screenRect :: Rectangle}
 XMonad.Core | ScreenDetail | type ScreenDetail :: *
@@ -297,11 +300,11 @@ XMonad.Core | WorkspaceId | type WorkspaceId = String
 XMonad.Core | X | newtype X a = X (ReaderT XConf (StateT XState IO) a)
 XMonad.Core | X | type X :: * -> *
 XMonad.Core | X | type role X nominal
-XMonad.Core | XConf | data XConf = XConf {config :: (XConfig Layout), riverConn :: Connection, riverManager :: ! ObjectId, riverBindings :: ! ObjectId, riverWindows :: ! (IORef (Map ObjectId RiverWindow)), riverOutputs :: ! (IORef (Map ObjectId RiverOutput)), riverSeats :: ! (IORef (Map ObjectId RiverSeat)), riverDirty :: ! (IORef Bool), inManageSeq :: ! (IORef Bool), riverRestart :: ! (IORef (Maybe String)), riverDragOrigin :: ! >_N)(IORef (Position, Position)), normalBorder :: BorderColor, focusedBorder :: BorderColor, keyActions :: !(Map (KeyMask, KeySym) (X ())), buttonActions :: !(Map (KeyMask, Button) (Window -> X ())), mouseFocused :: !Bool, mousePosition :: !(Maybe (Position, Position)), currentEvent :: !(Maybe Event), directories :: Directories}
+XMonad.Core | XConf | data XConf = XConf {config :: (XConfig Layout), riverConn :: Connection, riverManager :: ObjectId, riverBindings :: ObjectId, riverWindows :: (IORef (Map ObjectId RiverWindow)), riverOutputs :: (IORef (Map ObjectId RiverOutput)), riverSeats :: (IORef (Map ObjectId RiverSeat)), riverDirty :: (IORef Bool), inManageSeq :: (IORef Bool), riverRestart :: (IORef (Maybe String)), riverDragOrigin :: >_N)(IORef (Position, Position)), normalBorder :: BorderColor, focusedBorder :: BorderColor, keyActions :: (Map (KeyMask, KeySym) (X ())), buttonActions :: (Map (KeyMask, Button) (Window -> X ())), mouseFocused :: Bool, mousePosition :: (Maybe (Position, Position)), currentEvent :: (Maybe Event), directories :: Directories}
 XMonad.Core | XConf | type XConf :: *
-XMonad.Core | XConfig | data XConfig l = XConfig {normalBorderColor :: !String, focusedBorderColor :: !String, terminal :: !String, layoutHook :: !(l Window), manageHook :: !ManageHook, handleEventHook :: !(Event -> X All), workspaces :: ![String], modMask :: KeyMask, keys :: !(XConfig Layout -> Map (KeyMask, KeySym) (X ())), mouseBindings :: !(XConfig Layout -> Map (KeyMask, Button) (Window -> X ())), borderWidth :: Dimension, logHook :: !(X ()), startupHook :: !(X ()), focusFollowsMouse :: !Bool, clickJustFocuses :: !Bool, handleExtraArgs :: !([String] -> XConfig Layout -> IO (XConfig Layout)), extensibleConf :: !(Map TypeRep ConfExtension)}
+XMonad.Core | XConfig | data XConfig l = XConfig {normalBorderColor :: String, focusedBorderColor :: String, terminal :: String, layoutHook :: (l Window), manageHook :: ManageHook, handleEventHook :: (Event -> X All), workspaces :: [String], modMask :: KeyMask, keys :: (XConfig Layout -> Map (ButtonMask, KeySym) (X ())), mouseBindings :: (XConfig Layout -> Map (ButtonMask, Button) (Window -> X ())), borderWidth :: Dimension, logHook :: (X ()), startupHook :: (X ()), focusFollowsMouse :: Bool, clickJustFocuses :: Bool, handleExtraArgs :: ([String] -> XConfig Layout -> IO (XConfig Layout)), extensibleConf :: (Map TypeRep ConfExtension)}
 XMonad.Core | XConfig | type XConfig :: (* -> *) -> *
-XMonad.Core | XState | data XState = XState {windowset :: WindowSet, mapped :: !(Set Window), waitingUnmap :: !(Map Window Int), dragging :: !(Maybe (Position -> Position -> X (), X ())), numberlockMask :: KeyMask, extensibleState :: !(Map String (Either String StateExtension))}
+XMonad.Core | XState | data XState = XState {windowset :: WindowSet, mapped :: (Set Window), waitingUnmap :: (Map Window Int), dragging :: (Maybe (Position -> Position -> X (), X ())), numberlockMask :: KeyMask, extensibleState :: (Map String (Either String StateExtension))}
 XMonad.Core | XState | type XState :: *
 XMonad.Core | binFileName | binFileName :: Directories -> FilePath
 XMonad.Core | catchIO | catchIO :: MonadIO m => IO () -> m ()
@@ -396,7 +399,6 @@ XMonad.Operations | applySizeHintsContents | applySizeHintsContents :: Integral 
 XMonad.Operations | broadcastMessage | broadcastMessage :: Message a => a -> X ()
 XMonad.Operations | cacheNumlockMask | cacheNumlockMask :: X ()
 XMonad.Operations | cleanMask | cleanMask :: KeyMask -> X KeyMask
-XMonad.Operations | clearEvents | clearEvents :: X ()
 XMonad.Operations | containedIn | containedIn :: Rectangle -> Rectangle -> Bool
 XMonad.Operations | exitSession | exitSession :: X ()
 XMonad.Operations | extraModifiers | extraModifiers :: X [KeyMask]
@@ -436,14 +438,14 @@ XMonad.Operations | withFocused | withFocused :: (Window -> X ()) -> X ()
 XMonad.Operations | withUnfocused | withUnfocused :: (Window -> X ()) -> X ()
 XMonad.StackSet | RationalRect | data RationalRect = RationalRect Rational Rational Rational Rational
 XMonad.StackSet | RationalRect | type RationalRect :: *
-XMonad.StackSet | Screen | data Screen i l a sid sd = Screen {workspace :: (Workspace i l a), screen :: !sid, screenDetail :: !sd}
+XMonad.StackSet | Screen | data Screen i l a sid sd = Screen {workspace :: (Workspace i l a), screen :: sid, screenDetail :: sd}
 XMonad.StackSet | Screen | type Screen :: * -> * -> * -> * -> * -> *
-XMonad.StackSet | Stack | data Stack a = Stack {focus :: !a, up :: [a], down :: [a]}
+XMonad.StackSet | Stack | data Stack a = Stack {focus :: a, up :: [a], down :: [a]}
 XMonad.StackSet | Stack | type Stack :: * -> *
 XMonad.StackSet | StackSet | data StackSet i l a sid sd = StackSet {current :: (Screen i l a sid sd), visible :: [Screen i l a sid sd], hidden :: [Workspace i l a], floating :: Map a RationalRect}
 XMonad.StackSet | StackSet | type StackSet :: * -> * -> * -> * -> * -> *
 XMonad.StackSet | StackSet | type role StackSet representational representational nominal representational representational
-XMonad.StackSet | Workspace | data Workspace i l a = Workspace {tag :: !i, layout :: l, stack :: Maybe (Stack a)}
+XMonad.StackSet | Workspace | data Workspace i l a = Workspace {tag :: i, layout :: l, stack :: Maybe (Stack a)}
 XMonad.StackSet | Workspace | type Workspace :: * -> * -> * -> *
 XMonad.StackSet | abort | abort :: String -> a
 XMonad.StackSet | allWindows | allWindows :: Eq a => StackSet i l a s sd -> [a]

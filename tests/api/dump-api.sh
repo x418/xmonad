@@ -107,6 +107,14 @@ perl -e '
         # backends may unbox differently while exporting the same field.
         $text =~ s/\{-# UNPACK #-\}//g;
         $text =~ s/\(N:[^)]*\)//g;
+        # Strictness annotations are printed only when the field could not be
+        # unboxed, which depends on how the field is represented rather than on
+        # what the source says.  Both backends write a bang on KeyMask fields;
+        # GHC renders the X11 one because that KeyMask is a newtype over CUInt,
+        # and drops it for river because Word32 unboxes.  Same source, same
+        # semantics, different rendering -- so it has to go, or every strict
+        # field becomes a false difference.
+        $text =~ s/!\s*//g;
         $text =~ s/\s+/ /g;
         $text =~ s/^ | $//g;
 

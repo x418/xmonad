@@ -45,7 +45,7 @@ module XMonad.Operations (
     withFocused, withUnfocused,
 
     -- * Keyboard and Mouse
-    cleanMask, extraModifiers, cacheNumlockMask, clearEvents,
+    cleanMask, extraModifiers, cacheNumlockMask,
 
     -- * Messages
     sendMessage, broadcastMessage, sendMessageWithNoRefresh,
@@ -192,14 +192,14 @@ withUnfocused f = withWindowSet $ \ws ->
 -- ---------------------------------------------------------------------
 -- Keyboard and mouse
 --
--- These four have a correct total implementation under river rather than an
+-- These three have a correct total implementation under river rather than an
 -- unavailable one, because the situation each guards against cannot arise.
 -- They are not stubs: each establishes exactly the postcondition its caller
 -- is entitled to.
 --
--- Their neighbours in upstream's export list -- unGrab and setButtonGrab --
--- are deliberately *not* here, even though `pure ()` would be equally
--- vacuous.  Those two are advice-shaped: unGrab's caller writes
+-- Their neighbours in upstream's export list -- unGrab, setButtonGrab and
+-- clearEvents -- are deliberately *not* here, even though `pure ()` would be
+-- equally vacuous.  Those two are advice-shaped: unGrab's caller writes
 -- @unGrab >> spawn "slock"@ believing it has handed the keyboard over, and
 -- under river it has not.  The locker gets input by a different route
 -- entirely, so a silent success would be true about grabs and misleading
@@ -228,19 +228,6 @@ extraModifiers = return [0]
 -- so this establishes its postcondition rather than skipping it.
 cacheNumlockMask :: X ()
 cacheNumlockMask = modify $ \s -> s { numberlockMask = 0 }
-
--- | Remove all pending events of a given type from the event queue.
---
--- Vacuous, and correct: river has no event queue to drain.  It delivers a
--- manage\/render sequence, and the events that reach a window manager are the
--- ones the protocol defines, not a stream that can run ahead of us.
---
--- Upstream takes an @EventMask@ saying what to discard.  That parameter is
--- dropped rather than accepted and ignored: river exports no event mask
--- constants for a caller to pass, so keeping it would only offer a slot that
--- nothing can fill.
-clearEvents :: X ()
-clearEvents = return ()
 
 -- ---------------------------------------------------------------------
 -- Screens

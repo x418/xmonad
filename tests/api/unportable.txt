@@ -66,6 +66,13 @@ stateFileName           FIX: returns with the rest; it is only a path.
 # cacheNumlockMask (all now exported, for exactly the reason this section
 # rejects these two) their contract is advice rather than state.
 #
+# clearEvents is here for a different reason: `pure ()` is right, but its
+# EventMask argument cannot be kept.  That type is a bitmask over the X
+# protocol's event taxonomy, and river exports none of the constants that fill
+# it, so the parameter would be a slot nothing can fill.  Changing the shape of
+# a signature to make a name fit is the sort of accommodation this backend
+# avoids.
+#
 # unGrab's documentation tells the caller to run it before spawning a screen
 # locker, so the locker can take the keyboard without a sleep first.  A caller
 # writes `unGrab >> spawn "slock"` and believes the keyboard has been handed
@@ -77,6 +84,7 @@ stateFileName           FIX: returns with the rest; it is only a path.
 # intercept clicks, and river settled that when the pointer binding object was
 # created.  Taking the argument and discarding it misrepresents who decides.
 
+clearEvents             HELD: correct as `pure ()`, but its EventMask parameter cannot be kept.
 unGrab                  HELD: `pure ()` is true about grabs and misleading about handing over the keyboard.
 setButtonGrab           HELD: `pure ()` would accept a Bool that river already decided.
 

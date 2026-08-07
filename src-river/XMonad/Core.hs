@@ -60,6 +60,7 @@ module XMonad.Core (
     -- that /do/ port faithfully are exported here instead -- a config still
     -- has to be able to write @LayoutClass l Window@.
     Window, Rectangle(..), Position, Dimension, KeyMask, KeySym, Button,
+    ButtonMask,
     SizeHints(..), noSizeHints,
     -- * River plumbing
     --
@@ -188,9 +189,9 @@ data XConfig l = XConfig
                                                  -- event hooks in most cases.
     , workspaces         :: ![String]            -- ^ The list of workspaces' names
     , modMask            :: !KeyMask             -- ^ the mod modifier
-    , keys               :: !(XConfig Layout -> M.Map (KeyMask,KeySym) (X ()))
+    , keys               :: !(XConfig Layout -> M.Map (ButtonMask,KeySym) (X ()))
                                                  -- ^ The key binding: a map from key presses and actions
-    , mouseBindings      :: !(XConfig Layout -> M.Map (KeyMask, Button) (Window -> X ()))
+    , mouseBindings      :: !(XConfig Layout -> M.Map (ButtonMask, Button) (Window -> X ()))
                                                  -- ^ The mouse bindings
     , borderWidth        :: !Dimension           -- ^ The border width
     , logHook            :: !(X ())              -- ^ The action to perform when the windows set is changed
@@ -214,6 +215,10 @@ data XConfig l = XConfig
 type KeyMask = Word32
 type KeySym  = Word32
 type Button  = Word32
+
+-- | X11 spelled the same type two ways depending on what was being masked.
+-- Kept so that 'XConfig''s field types read exactly as upstream's do.
+type ButtonMask = KeyMask
 
 type WindowSet   = StackSet  WorkspaceId (Layout Window) Window ScreenId ScreenDetail
 type WindowSpace = Workspace WorkspaceId (Layout Window) Window
