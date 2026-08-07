@@ -37,10 +37,7 @@ import Data.List (sortOn)
 import Data.Monoid (All(..), appEndo)
 import Data.Int (Int32)
 import Data.Word (Word32)
-import Control.Concurrent (forkIO, killThread)
-import Control.Concurrent.MVar
 import Control.Exception (catch)
-import GHC.Conc (threadWaitRead)
 import System.Environment (getArgs, getExecutablePath)
 import System.Exit (exitFailure, exitSuccess)
 import System.Posix.Process (executeFile)
@@ -247,10 +244,11 @@ run conn manager bindings layerShell compositor shm userConfig dirs = do
   -- is requested, because river permits window management state to change
   -- nowhere else.
   let loop = do
-        ready <- waitInput conn mailbox
+        sockFd <- connectionFd conn
+        ready <- MB.waitEither sockFd (MB.mailboxFd mailbox)
         case ready of
-          FromCompositor -> dispatch conn
-          FromMailbox -> do
+          Left () -> dispatch conn
+          Right () -> do
             MB.clearWakeups mailbox
             acts <- MB.drain mailbox
             mapM_ (queueAction rt) acts
@@ -264,30 +262,6 @@ run conn manager bindings layerShell compositor shm userConfig dirs = do
     writeIORef restartRef (Just (unwords (map shellQuote (exe : args))))
     riverWindowManagerV1Stop conn manager
     loop
-
--- | Which of the two sources the loop is waiting on became readable.
-data Ready = FromCompositor | FromMailbox
-
--- | Block until either the compositor or another thread has something for us.
---
--- Two watchers race to fill one 'MVar'; the loser is killed.  Forking a pair
--- per iteration is wasteful in principle and irrelevant in practice, since
--- iterations are paced by human input rather than by a tight loop, and it
--- avoids reimplementing poll(2) over a set of descriptors that only ever has
--- two members.
-waitInput :: Connection -> MB.Mailbox (X ()) -> IO Ready
-waitInput conn mailbox = do
-  result <- newEmptyMVar
-  sockFd <- connectionFd conn
-  watchers <- mapM (forkWatcher result)
-    [ (sockFd, FromCompositor), (MB.mailboxFd mailbox, FromMailbox) ]
-  r <- takeMVar result
-  mapM_ killThread watchers
-  pure r
-  where
-    forkWatcher result (fd, tag) = forkIO $ do
-      threadWaitRead fd
-      void (tryPutMVar result tag)
 
 -- | Quote an argument for the @sh -c@ used to exec the successor.
 shellQuote :: String -> String

@@ -31,9 +31,13 @@ module XMonad.River.Mailbox
   , drain
   , mailboxFd
   , clearWakeups
+  , waitEither
   ) where
 
+import Control.Concurrent (forkIO, killThread)
+import Control.Concurrent.MVar
 import Control.Monad (void)
+import GHC.Conc (threadWaitRead)
 import Data.IORef
 import System.Posix.IO (createPipe, fdReadBuf, fdWriteBuf)
 import System.Posix.Types (Fd)
@@ -79,3 +83,24 @@ drain mb = atomicModifyIORef' (mbQueue mb) $ \xs -> ([], reverse xs)
 -- is readable.
 clearWakeups :: Mailbox a -> IO ()
 clearWakeups mb = allocaBytes 64 $ \p -> void (fdReadBuf (mbRead mb) p 64)
+
+-- | Block until either descriptor is readable, saying which.
+--
+-- Both event loops in this backend -- the window manager's and a prompt's --
+-- have exactly two sources, a compositor socket and a mailbox, and both must
+-- wait on them together: a blocking read on one ignores the other, so an
+-- action posted while the loop sat idle would not be seen until the next
+-- unrelated event.
+--
+-- Two watchers race to fill an 'MVar' and the loser is killed.  Forking a pair
+-- per iteration is wasteful in principle and irrelevant in practice, since
+-- iterations are paced by human input, and it beats reimplementing poll(2)
+-- over a set that never has more than two members.
+waitEither :: Fd -> Fd -> IO (Either () ())
+waitEither a b = do
+  result <- newEmptyMVar
+  t1 <- forkIO (threadWaitRead a >> void (tryPutMVar result (Left ())))
+  t2 <- forkIO (threadWaitRead b >> void (tryPutMVar result (Right ())))
+  r <- takeMVar result
+  killThread t1 >> killThread t2
+  pure r

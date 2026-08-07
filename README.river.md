@@ -135,6 +135,23 @@ silently doing nothing.
 | --- | --- | --- |
 | `XMonad.Util.XSelection` — the selection and clipboard | `wl-paste`, from `wl-clipboard` | Wayland offers the selection only to the client holding keyboard focus, and a window manager has no focused surface — it is not in the focus chain at all. The primary selection is a separate protocol again (`zwp_primary_selection_v1`). `wl-paste` works because it is a real client that can take focus for the instant it needs. |
 
+Prompts are *not* on this list either, and the reason is worth knowing. A
+prompt opens a **second Wayland connection** and behaves as an ordinary client
+on it — a `zwlr_layer_shell_v1` surface with exclusive keyboard interactivity —
+because the window management protocol deliberately does not deliver keys.
+`river_seat_v1` reports which *binding* fired, never which key was pressed,
+which is right for a window manager and useless for a text field. Going through
+the client protocols instead gets real `wl_keyboard` events and the keymap, so
+dead keys, compose sequences, input methods and key repeat all work; a binding
+per keysym could not have done any of them.
+
+Each connection is owned by exactly one thread. `Connection` buffers requests
+in `IORef`s and is not thread-safe, so `XMonad.River.Client` forks a thread that
+owns its connection outright and never hands it out: a caller can only redraw or
+close, both posted to a mailbox. That is enforced by the module's interface
+rather than by a comment, because GAPS.md §3 exists precisely because the rule
+was broken once.
+
 Drawing is *not* on this list. Prompts and decorations are rendered in-process
 with cairo and pango, into a `wl_shm` buffer the compositor reads directly —
 see `XMonad.River.Surface` and, on the contrib side,
