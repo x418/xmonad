@@ -68,6 +68,15 @@ module XMonad.Core (
     button1, button2, button3, button4, button5,
     module XMonad.River.Keysym,
     SizeHints(..),
+    -- * Window geometry
+    --
+    -- | The X11 build gets these from the @Graphics.X11@ re-export too.  They
+    -- are here because a great deal of xmonad-contrib asks a window where it
+    -- is, and the shape of the question ports even though the mechanism does
+    -- not.  See 'XMonad.River.Types.WindowAttributes' for what is and is not
+    -- answered.
+    WindowAttributes(..), waIsUnmapped, waIsUnviewable, waIsViewable,
+    withWindowAttributes, getWindowAttributes, getGeometry, getWMNormalHints,
     Event(..), Connection, Display, sendRestart,
   ) where
 
@@ -114,9 +123,9 @@ import qualified Data.Set as S
 import XMonad.River.Connection (Connection)
 import XMonad.River.Keysym
 import XMonad.River.Mailbox (Mailbox)
-import XMonad.River.Runtime (sendRestart)
+import XMonad.River.Runtime (lookupGeometry, lookupSizeHints, sendRestart)
 import XMonad.River.Types
-import XMonad.River.Wire (ObjectId)
+import XMonad.River.Wire (ObjectId, nullObject)
 
 -- | The handle through which the window manager talks to the compositor.
 --
@@ -355,6 +364,54 @@ withDisplay   f = asks display >>= f
 -- | Run a monadic action with the current stack set
 withWindowSet :: (WindowSet -> X a) -> X a
 withWindowSet f = gets windowset >>= f
+
+
+-- | Run an action with a window's attributes, if river knows the window.
+--
+-- Same contract as the X11 version, which skipped the action when the server
+-- answered @BadWindow@; here it is skipped for a window river has never
+-- mentioned.
+withWindowAttributes :: Display -> Window -> (WindowAttributes -> X ()) -> X ()
+withWindowAttributes _ win f = do
+    wa <- io (lookupGeometry win)
+    catchX (whenJust wa f) (return ())
+
+-- | A window's attributes.
+--
+-- Kept in 'IO' with the same signature the X11 version had, so that the
+-- @io $ getWindowAttributes d w@ spelling used throughout xmonad-contrib still
+-- compiles.  There is no server to ask, so the answer comes from what the last
+-- layout run decided; see 'XMonad.River.Types.WindowAttributes'.
+--
+-- Throws for a window river has never mentioned, as @XGetWindowAttributes@
+-- did.  Callers that would rather not, and most should not, can use
+-- 'withWindowAttributes'.
+getWindowAttributes :: Display -> Window -> IO WindowAttributes
+getWindowAttributes _ win = lookupGeometry win >>= \case
+    Just wa -> pure wa
+    Nothing -> ioError . userError $
+        "getWindowAttributes: no such window: " ++ show win
+
+-- | A window's size hints.
+--
+-- Same signature as X11's, so @io $ getWMNormalHints d w@ still compiles.
+-- River reports a minimum and a maximum and nothing else; see
+-- 'XMonad.River.Types.SizeHints' for what the remaining fields do.
+getWMNormalHints :: Display -> Window -> IO SizeHints
+getWMNormalHints _ = lookupSizeHints
+
+-- | Geometry in the tuple shape X11's @getGeometry@ returned:
+-- @(root, x, y, width, height, border width, depth)@.
+--
+-- The first component is 'nullWindow' rather than a root window id, because
+-- there is no root window; the last is zero, because there is no visual depth
+-- to report.  Callers in xmonad-contrib discard both.
+getGeometry :: Display -> Window
+            -> IO (Window, Position, Position, Dimension, Dimension, Dimension, Int)
+getGeometry dpy win = do
+    wa <- getWindowAttributes dpy win
+    pure ( nullObject
+         , wa_x wa, wa_y wa, wa_width wa, wa_height wa, wa_border_width wa, 0 )
 
 -- | True if the given window is the root window.
 --

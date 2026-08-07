@@ -24,6 +24,9 @@ module XMonad.River.Types
     -- * Size hints
   , SizeHints(..)
   , noSizeHints
+    -- * Window attributes
+  , WindowAttributes(..)
+  , waIsUnmapped, waIsUnviewable, waIsViewable
     -- * Accumulated compositor state
   , RiverWindow(..)
   , RiverOutput(..)
@@ -116,6 +119,16 @@ data Event
   | OutputRemoved      { ev_output :: !ObjectId }
   | SeatAdded          { ev_seat   :: !ObjectId }
   | SeatRemoved        { ev_seat   :: !ObjectId }
+  | ScreenLayoutChanged
+    -- ^ The set of screen rectangles changed: an output appeared or went
+    -- away, or one of them moved or changed size.
+    --
+    -- X11 made a config work this out for itself, from @ConfigureNotify@ on
+    -- the root window versus @RRScreenChangeNotify@, and clear the burst of
+    -- duplicates Xorg emitted with them.  river reports each output's position
+    -- and dimensions directly, so the window manager can just compare the
+    -- result -- this is sent only when the rectangles genuinely differ from
+    -- what the 'WindowSet' already had.  See "XMonad.Hooks.Rescreen".
   | SessionLocked
   | SessionUnlocked
   | KeyPressed { ev_state :: !KeyMask, ev_keysym :: !KeySym }
@@ -174,6 +187,48 @@ noSizeHints = SizeHints
   , sh_aspect     = Nothing
   , sh_base_size  = Nothing
   }
+
+--------------------------------------------------------------------------------
+-- Window attributes
+
+-- | What X11 answered @XGetWindowAttributes@ with, restricted to the parts
+-- river can answer for.
+--
+-- Same reasoning as 'SizeHints': keeping the X11 name and field names means a
+-- module that only wants a window's geometry compiles unchanged, and there are
+-- a lot of those.  The fields that are here are real answers.
+--
+-- The ones that are not here are the X11 server's own bookkeeping, and there
+-- is no server: @wa_colormap@, @wa_visual@, @wa_depth@, @wa_backing_store@,
+-- @wa_save_under@, @wa_your_event_mask@ and the rest describe how a window is
+-- stored and drawn by X, which under Wayland is between the client and the
+-- compositor and no business of the window manager's.  A module reaching for
+-- one of those gets a compile error, which is the right answer: it is doing
+-- X11 drawing, not window management.
+--
+-- One caveat on 'wa_x' and 'wa_y'.  X11 reported where the window /was/;
+-- these report where the last layout run /put/ it, because river never says
+-- where a window is -- the window manager is what decided.  For a window the
+-- layout did not place, both are zero and 'wa_map_state' is 'waIsUnmapped'.
+data WindowAttributes = WindowAttributes
+  { wa_x                 :: !Position
+  , wa_y                 :: !Position
+  , wa_width             :: !Dimension
+  , wa_height            :: !Dimension
+  , wa_border_width      :: !Dimension
+    -- ^ The configured border width, which is what river was asked to draw.
+  , wa_map_state         :: !Int
+  , wa_override_redirect :: !Bool
+    -- ^ Always 'False'.  Override-redirect was an X client's way of asking the
+    -- window manager to keep out; the Wayland equivalent is to use layer shell
+    -- instead, and river does not offer layer surfaces as windows at all.
+  } deriving (Eq, Show, Read)
+
+-- | Values of 'wa_map_state', matching X11's.
+waIsUnmapped, waIsUnviewable, waIsViewable :: Int
+waIsUnmapped   = 0
+waIsUnviewable = 1
+waIsViewable   = 2
 
 --------------------------------------------------------------------------------
 -- Accumulated compositor state

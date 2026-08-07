@@ -11,6 +11,10 @@ module XMonad.River.Runtime
   , sendRestart
   , setMainThread
   , warnUnimplemented
+  , publishGeometry
+  , lookupGeometry
+  , publishSizeHints
+  , lookupSizeHints
   ) where
 
 import Control.Concurrent (ThreadId, myThreadId)
@@ -20,7 +24,51 @@ import Data.IORef
 import System.IO (hPutStrLn, stderr)
 import System.IO.Unsafe (unsafePerformIO)
 import qualified Control.Exception as E
+import qualified Data.Map.Strict as M
 import qualified Data.Set as S
+
+import XMonad.River.Types (Window, WindowAttributes, SizeHints, noSizeHints)
+
+{-# NOINLINE geometryRef #-}
+geometryRef :: IORef (M.Map Window WindowAttributes)
+geometryRef = unsafePerformIO (newIORef M.empty)
+
+-- | Record what is known about every window's geometry, for the benefit of the
+-- @IO@-shaped queries below.
+--
+-- A process-level 'IORef' rather than a field of 'XMonad.Core.XConf', because
+-- the callers it exists for are shaped like @getWindowAttributes dpy w@ and run
+-- in 'IO' with nothing but the connection to go on.  Under X11 that was fine --
+-- the answer was the server's, and asking it was an @IO@ action.  Here the
+-- answer is the window manager's own, and there is exactly one window manager
+-- per process, so a global is a faithful stand-in for what the server used to
+-- be.  It is the same reasoning as 'setMainThread' above.
+--
+-- Written once per manage sequence, by "XMonad.River.WM".
+publishGeometry :: M.Map Window WindowAttributes -> IO ()
+publishGeometry = writeIORef geometryRef
+
+-- | What is known about one window, or 'Nothing' if river has never mentioned
+-- it.
+lookupGeometry :: Window -> IO (Maybe WindowAttributes)
+lookupGeometry w = M.lookup w <$> readIORef geometryRef
+
+{-# NOINLINE hintsRef #-}
+hintsRef :: IORef (M.Map Window SizeHints)
+hintsRef = unsafePerformIO (newIORef M.empty)
+
+-- | Record every window's size hints, for the same reason as
+-- 'publishGeometry': @getWMNormalHints dpy w@ runs in 'IO'.
+publishSizeHints :: M.Map Window SizeHints -> IO ()
+publishSizeHints = writeIORef hintsRef
+
+-- | A window's size hints, or 'noSizeHints' if river has not mentioned it.
+--
+-- Total, where 'lookupGeometry' is partial: X11's @getWMNormalHints@ answered
+-- with an empty hint structure for a window that had set none, so there is a
+-- correct total answer here and no reason to make callers handle a failure.
+lookupSizeHints :: Window -> IO SizeHints
+lookupSizeHints w = M.findWithDefault noSizeHints w <$> readIORef hintsRef
 
 -- | Thrown into the event loop thread to ask for a restart.
 data RestartRequested = RestartRequested deriving (Show)

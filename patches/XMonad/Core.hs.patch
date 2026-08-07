@@ -1,5 +1,5 @@
 --- src/XMonad/Core.hs	2026-08-06 14:14:13.108989784 -0600
-+++ src-river/XMonad/Core.hs	2026-08-07 00:44:01.593513010 -0600
++++ src-river/XMonad/Core.hs	2026-08-07 01:47:23.642462723 -0600
 @@ -16,13 +16,31 @@
  -- Copyright   :  (c) Spencer Janssen 2007
  -- License     :  BSD3-style (see LICENSE)
@@ -36,7 +36,7 @@
  -----------------------------------------------------------------------------
  
  module XMonad.Core (
-@@ -34,15 +52,29 @@
+@@ -34,15 +52,38 @@
      StateExtension(..), ExtensionClass(..), ConfExtension(..),
      runX, catchX, userCode, userCodeDef, io, catchIO, installSignalHandlers, uninstallSignalHandlers,
      withDisplay, withWindowSet, isRoot, runOnWorkspaces,
@@ -59,6 +59,15 @@
 +    button1, button2, button3, button4, button5,
 +    module XMonad.River.Keysym,
 +    SizeHints(..),
++    -- * Window geometry
++    --
++    -- | The X11 build gets these from the @Graphics.X11@ re-export too.  They
++    -- are here because a great deal of xmonad-contrib asks a window where it
++    -- is, and the shape of the question ports even though the mechanism does
++    -- not.  See 'XMonad.River.Types.WindowAttributes' for what is and is not
++    -- answered.
++    WindowAttributes(..), waIsUnmapped, waIsUnviewable, waIsViewable,
++    withWindowAttributes, getWindowAttributes, getGeometry, getWMNormalHints,
 +    Event(..), Connection, Display, sendRestart,
    ) where
  
@@ -69,7 +78,7 @@
  import Control.Exception (fromException, try, bracket_, throw, finally, SomeException(..))
  import qualified Control.Exception as E
  import Control.Applicative ((<|>), empty)
-@@ -50,13 +82,16 @@
+@@ -50,13 +91,16 @@
  import Control.Monad.Fix (fix)
  import Control.Monad.State
  import Control.Monad.Reader
@@ -87,7 +96,7 @@
  import Data.List (isInfixOf, intercalate, (\\))
  import System.FilePath
  import System.IO
-@@ -69,8 +104,6 @@
+@@ -69,8 +113,6 @@
  import System.Process
  import System.Directory
  import System.Exit
@@ -96,16 +105,16 @@
  import Data.Typeable
  import Data.Maybe (isJust,fromMaybe)
  import Data.Monoid (Ap(..))
-@@ -78,13 +111,34 @@
+@@ -78,13 +120,34 @@
  import qualified Data.Map as M
  import qualified Data.Set as S
  
 +import XMonad.River.Connection (Connection)
 +import XMonad.River.Keysym
 +import XMonad.River.Mailbox (Mailbox)
-+import XMonad.River.Runtime (sendRestart)
++import XMonad.River.Runtime (lookupGeometry, lookupSizeHints, sendRestart)
 +import XMonad.River.Types
-+import XMonad.River.Wire (ObjectId)
++import XMonad.River.Wire (ObjectId, nullObject)
 +
 +-- | The handle through which the window manager talks to the compositor.
 +--
@@ -133,7 +142,7 @@
      , extensibleState  :: !(M.Map String (Either String StateExtension))
      -- ^ stores custom state information.
      --
-@@ -94,11 +148,55 @@
+@@ -94,11 +157,55 @@
  
  -- | XConf, the (read-only) window manager configuration.
  data XConf = XConf
@@ -193,7 +202,7 @@
      , keyActions    :: !(M.Map (KeyMask, KeySym) (X ()))
                                        -- ^ a mapping of key presses to actions
      , buttonActions :: !(M.Map (KeyMask, Button) (Window -> X ()))
-@@ -115,10 +213,10 @@
+@@ -115,10 +222,10 @@
  data XConfig l = XConfig
      { normalBorderColor  :: !String              -- ^ Non focused windows border color. Default: \"#dddddd\"
      , focusedBorderColor :: !String              -- ^ Focused windows border color. Default: \"#ff0000\"
@@ -206,7 +215,7 @@
                                                   -- should also be run afterwards. mappend should be used for combining
                                                   -- event hooks in most cases.
      , workspaces         :: ![String]            -- ^ The list of workspaces' names
-@@ -132,8 +230,6 @@
+@@ -132,8 +239,6 @@
      , startupHook        :: !(X ())              -- ^ The action to perform on startup
      , focusFollowsMouse  :: !Bool                -- ^ Whether window entry events can change focus
      , clickJustFocuses   :: !Bool                -- ^ False to make a click which changes focus to be additionally passed to the window
@@ -215,7 +224,7 @@
      , handleExtraArgs    :: !([String] -> XConfig Layout -> IO (XConfig Layout))
                                                   -- ^ Modify the configuration, complain about extra arguments etc. with arguments that are not handled by default
      , extensibleConf     :: !(M.Map TypeRep ConfExtension)
-@@ -144,6 +240,43 @@
+@@ -144,6 +249,43 @@
      }
  
  
@@ -259,17 +268,62 @@
  type WindowSet   = StackSet  WorkspaceId (Layout Window) Window ScreenId ScreenDetail
  type WindowSpace = Workspace WorkspaceId (Layout Window) Window
  
-@@ -223,26 +356,15 @@
+@@ -223,26 +365,63 @@
  withWindowSet :: (WindowSet -> X a) -> X a
  withWindowSet f = gets windowset >>= f
  
 --- | Safely access window attributes.
--withWindowAttributes :: Display -> Window -> (WindowAttributes -> X ()) -> X ()
++
++-- | Run an action with a window's attributes, if river knows the window.
++--
++-- Same contract as the X11 version, which skipped the action when the server
++-- answered @BadWindow@; here it is skipped for a window river has never
++-- mentioned.
+ withWindowAttributes :: Display -> Window -> (WindowAttributes -> X ()) -> X ()
 -withWindowAttributes dpy win f = do
 -    wa <- userCode (io $ getWindowAttributes dpy win)
--    catchX (whenJust wa f) (return ())
--
++withWindowAttributes _ win f = do
++    wa <- io (lookupGeometry win)
+     catchX (whenJust wa f) (return ())
+ 
 --- | True if the given window is the root window
++-- | A window's attributes.
++--
++-- Kept in 'IO' with the same signature the X11 version had, so that the
++-- @io $ getWindowAttributes d w@ spelling used throughout xmonad-contrib still
++-- compiles.  There is no server to ask, so the answer comes from what the last
++-- layout run decided; see 'XMonad.River.Types.WindowAttributes'.
++--
++-- Throws for a window river has never mentioned, as @XGetWindowAttributes@
++-- did.  Callers that would rather not, and most should not, can use
++-- 'withWindowAttributes'.
++getWindowAttributes :: Display -> Window -> IO WindowAttributes
++getWindowAttributes _ win = lookupGeometry win >>= \case
++    Just wa -> pure wa
++    Nothing -> ioError . userError $
++        "getWindowAttributes: no such window: " ++ show win
++
++-- | A window's size hints.
++--
++-- Same signature as X11's, so @io $ getWMNormalHints d w@ still compiles.
++-- River reports a minimum and a maximum and nothing else; see
++-- 'XMonad.River.Types.SizeHints' for what the remaining fields do.
++getWMNormalHints :: Display -> Window -> IO SizeHints
++getWMNormalHints _ = lookupSizeHints
++
++-- | Geometry in the tuple shape X11's @getGeometry@ returned:
++-- @(root, x, y, width, height, border width, depth)@.
++--
++-- The first component is 'nullWindow' rather than a root window id, because
++-- there is no root window; the last is zero, because there is no visual depth
++-- to report.  Callers in xmonad-contrib discard both.
++getGeometry :: Display -> Window
++            -> IO (Window, Position, Position, Dimension, Dimension, Dimension, Int)
++getGeometry dpy win = do
++    wa <- getWindowAttributes dpy win
++    pure ( nullObject
++         , wa_x wa, wa_y wa, wa_width wa, wa_height wa, wa_border_width wa, 0 )
++
 +-- | True if the given window is the root window.
 +--
 +-- Always 'False'.  That is not a stub: river has no root window, so nothing is
@@ -294,7 +348,7 @@
  
  ------------------------------------------------------------------------
  -- LayoutClass handling. See particular instances in Operations.hs
-@@ -273,20 +395,11 @@
+@@ -273,20 +452,11 @@
  -- * 'description'
  --
  -- Note that any code which /uses/ 'LayoutClass' methods should only
@@ -317,7 +371,7 @@
      runLayout :: Workspace WorkspaceId (layout a) a
                -> Rectangle
                -> X ([(a, Rectangle)], Maybe (layout a))
-@@ -294,25 +407,13 @@
+@@ -294,25 +464,13 @@
  
      -- | Given a 'Rectangle' in which to place the windows, and a 'Stack'
      -- of windows, return a list of windows and their corresponding
@@ -346,7 +400,7 @@
      pureLayout  :: layout a -> Rectangle -> Stack a -> [(a, Rectangle)]
      pureLayout _ r s = [(focus s, r)]
  
-@@ -320,28 +421,17 @@
+@@ -320,28 +478,17 @@
      emptyLayout :: layout a -> Rectangle -> X ([(a, Rectangle)], Maybe (layout a))
      emptyLayout _ _ = return ([], Nothing)
  
@@ -378,7 +432,7 @@
      description :: layout a -> String
      description      = show
  
-@@ -374,7 +464,7 @@
+@@ -374,7 +521,7 @@
  fromMessage :: Message m => SomeMessage -> Maybe m
  fromMessage (SomeMessage m) = cast m
  
@@ -387,7 +441,7 @@
  instance Message Event
  
  -- | 'LayoutMessages' are core messages that all layouts (especially stateful
-@@ -398,11 +488,12 @@
+@@ -398,11 +545,12 @@
      -- | Defines an initial value for the state extension
      initialValue :: a
      -- | Specifies whether the state extension should be
@@ -404,7 +458,7 @@
      extensionType :: a -> StateExtension
      extensionType = StateExtension
  
-@@ -459,17 +550,6 @@
+@@ -459,17 +607,6 @@
          dupTo fd stdInput
          closeFd fd
  
@@ -422,7 +476,7 @@
  -- | This is basically a map function, running a function in the 'X' monad on
  -- each workspace with the output of that function being the modified workspace.
  runOnWorkspaces :: (WindowSpace -> X WindowSpace) -> X ()
-@@ -494,7 +574,6 @@
+@@ -494,7 +631,6 @@
  -- * @cacheDir@: This directory is used to store temporary files that
  -- can easily be recreated such as the configuration binary and any
  -- intermediate object files generated by GHC.
@@ -430,7 +484,7 @@
  --
  -- For how these directories are chosen, see 'getDirectories'.
  --
-@@ -521,9 +600,6 @@
+@@ -521,9 +657,6 @@
  --    @XDG_CONFIG_HOME@, and @XDG_CACHE_HOME@ (or their respective
  --    fallbacks).  These directories are created if necessary.
  --
@@ -440,7 +494,7 @@
  getDirectories :: IO Directories
  getDirectories = xmEnvDirs <|> xmDirs <|> xdgDirs
    where
-@@ -574,9 +650,8 @@
+@@ -574,9 +707,8 @@
  binFileName  Directories{ cacheDir } = cacheDir </> "xmonad-" <> arch <> "-" <> os
  buildDirName Directories{ cacheDir } = cacheDir </> "build-" <> arch <> "-" <> os
  
@@ -451,7 +505,7 @@
  
  srcFileName, libFileName :: Directories -> FilePath
  srcFileName Directories{ cfgDir } = cfgDir </> "xmonad.hs"
-@@ -798,6 +873,10 @@
+@@ -798,6 +930,10 @@
  
  -- | Check GHC output for deprecation warnings and notify the user if there
  -- were any. Report success otherwise.
@@ -462,7 +516,7 @@
  checkCompileWarnings :: Directories -> IO ()
  checkCompileWarnings dirs = do
      ghcErr <- readFile (errFileName dirs)
-@@ -808,7 +887,6 @@
+@@ -808,7 +944,6 @@
                  ++ lines ghcErr
                  ++ ["","Please correct them or silence using {-# OPTIONS_GHC -Wno-deprecations #-}."]
          trace msg
@@ -470,7 +524,7 @@
        else
          trace "XMonad recompilation process exited with success!"
  
-@@ -820,10 +898,7 @@
+@@ -820,10 +955,7 @@
              ["Errors detected while compiling xmonad config: " <> srcFileName dirs]
              ++ lines (if null ghcErr then show status else ghcErr)
              ++ ["","Please check the file for errors."]
@@ -481,7 +535,7 @@
  
  -- | Recompile the xmonad configuration file when any of the following apply:
  --
-@@ -836,12 +911,8 @@
+@@ -836,12 +968,8 @@
  --
  --  * custom @build@ script is being used
  --
@@ -495,7 +549,7 @@
  --
  -- 'False' is returned if there are compilation errors.
  --
-@@ -869,8 +940,8 @@
+@@ -869,8 +997,8 @@
  whenX :: X Bool -> X () -> X ()
  whenX a f = a >>= \b -> when b f
  

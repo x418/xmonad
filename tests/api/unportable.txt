@@ -101,7 +101,6 @@ setButtonGrab           HELD: `pure ()` would accept a Bool that river already d
 # it, and those names are absent, so such code fails at the call that is
 # genuinely unportable rather than at withDisplay.
 
-withWindowAttributes    NO FIX: surfaces have no attributes.  Nearest: the accumulated RiverWindow.
 getAtom                 NO FIX: Wayland has no atom namespace.  Nothing to intern, nothing to intern against.
 atom_WM_STATE           NO FIX: as getAtom.  Purpose survives as river_window_v1.hide/show.
 atom_WM_PROTOCOLS       NO FIX: as getAtom.  There is no protocol negotiation to advertise.

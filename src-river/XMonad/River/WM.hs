@@ -46,7 +46,7 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
 import XMonad.Core
-import XMonad.River.Runtime (RestartRequested(..), setMainThread, warnUnimplemented)
+import XMonad.River.Runtime (RestartRequested(..), publishGeometry, publishSizeHints, setMainThread, warnUnimplemented)
 import XMonad.River.Connection
 import XMonad.River.Keyboard (riverModifiers)
 import qualified XMonad.River.Mailbox as MB
@@ -402,6 +402,8 @@ addOutput rt out = do
   io $ modifyIORef' ref $ M.insert out RiverOutput
     { roObject = out, roPosition = (0, 0), roSize = (0, 0), roRemoved = False
     , roLayerObject = mLayer, roLayerArea = Nothing }
+  void (broadcastEvent (OutputAdded out))
+
   io $ riverOutputV1Listen conn out $ \case
     RiverOutputV1Removed -> adjust ref out $ \o -> o { roRemoved = True }
     RiverOutputV1Position x y -> adjust ref out $ \o -> o { roPosition = (x, y) }
@@ -449,6 +451,8 @@ addSeat rt seat = do
     { rsObject = seat, rsRemoved = False
     , rsLayerObject = mLayer, rsLayerFocus = LayerFocusNone
     , rsPointer = (0, 0), rsXkbSeat = mXkbSeat }
+  void (broadcastEvent (SeatAdded seat))
+
   io $ riverSeatV1Listen conn seat $ \case
     RiverSeatV1Removed -> adjust ref seat $ \s -> s { rsRemoved = True }
     RiverSeatV1PointerEnter win -> writeIORef (rtHovered rt) (Just win)
@@ -503,18 +507,22 @@ reapClosed = do
   outs <- io (readIORef outRef)
   -- The layer shell objects are inert once removed is sent, but destroying
   -- them is still what completes destruction of the output.
-  forM_ [ o | o <- M.elems outs, roRemoved o ] $ \o -> io $ do
-    forM_ (roLayerObject o) (riverLayerShellOutputV1Destroy conn)
-    riverOutputV1Destroy conn (roObject o)
-    modifyIORef' outRef (M.delete (roObject o))
+  forM_ [ o | o <- M.elems outs, roRemoved o ] $ \o -> do
+    void (broadcastEvent (OutputRemoved (roObject o)))
+    io $ do
+      forM_ (roLayerObject o) (riverLayerShellOutputV1Destroy conn)
+      riverOutputV1Destroy conn (roObject o)
+      modifyIORef' outRef (M.delete (roObject o))
 
   seatRef <- asks riverSeats
   seats <- io (readIORef seatRef)
-  forM_ [ s | s <- M.elems seats, rsRemoved s ] $ \s -> io $ do
-    forM_ (rsLayerObject s) (riverLayerShellSeatV1Destroy conn)
-    forM_ (rsXkbSeat s) (riverXkbBindingsSeatV1Destroy conn)
-    riverSeatV1Destroy conn (rsObject s)
-    modifyIORef' seatRef (M.delete (rsObject s))
+  forM_ [ s | s <- M.elems seats, rsRemoved s ] $ \s -> do
+    void (broadcastEvent (SeatRemoved (rsObject s)))
+    io $ do
+      forM_ (rsLayerObject s) (riverLayerShellSeatV1Destroy conn)
+      forM_ (rsXkbSeat s) (riverXkbBindingsSeatV1Destroy conn)
+      riverSeatV1Destroy conn (rsObject s)
+      modifyIORef' seatRef (M.delete (rsObject s))
 
 -- | Nominate an output for layer surfaces that do not pick one themselves.
 --
@@ -569,8 +577,17 @@ syncScreens = do
                 Just a | rect_width a > 0 && rect_height a > 0 -> a
                 _ -> Rectangle x y (fromIntegral width) (fromIntegral height)
         ]
-  unless (null rects) $ modify $ \st ->
-    st { windowset = rescreen rects (windowset st) }
+  unless (null rects) $ do
+    before <- gets (map (screenRect . W.screenDetail) . screensOf . windowset)
+    modify $ \st -> st { windowset = rescreen rects (windowset st) }
+    -- Only when it actually changed.  A manage sequence runs for all sorts of
+    -- reasons and most of them leave the outputs alone; a config restarting
+    -- its status bars on every one of them would be unusable.
+    when (before /= rects) $ void (broadcastEvent ScreenLayoutChanged)
+
+-- | The screens a 'WindowSet' currently has, current first.
+screensOf :: WindowSet -> [W.Screen WorkspaceId (Layout Window) Window ScreenId ScreenDetail]
+screensOf ws = W.current ws : W.visible ws
 
 -- | Lay the given screen rectangles over the current workspaces, preserving
 -- which workspace is on which screen where possible.
@@ -738,6 +755,30 @@ applyLayout rt = do
 
   io $ writeIORef (rtPlacements rt) placements
   io $ writeIORef (rtVisible rt) (S.fromList (map fst placements))
+
+  -- Publish what the layout decided, so that the IO-shaped queries in
+  -- "XMonad.Core" -- getWindowAttributes, getGeometry -- have something to
+  -- answer with.  Every window river has told us about is included, not just
+  -- the placed ones: X11 answered for any window that existed, and a window on
+  -- a workspace that is not on screen still exists.  It is simply unmapped and
+  -- at the origin, which is what X11 would have said of an unmapped window
+  -- too.
+  bw <- asks (borderWidth . config)
+  allKnown <- io . readIORef =<< asks riverWindows
+  let placedMap = M.fromList placements
+      attrs w rw = case M.lookup w placedMap of
+        Just r -> WindowAttributes
+          { wa_x = rect_x r, wa_y = rect_y r
+          , wa_width = rect_width r, wa_height = rect_height r
+          , wa_border_width = bw, wa_map_state = waIsViewable
+          , wa_override_redirect = False }
+        Nothing -> let (dw, dh) = rwDimensions rw in WindowAttributes
+          { wa_x = 0, wa_y = 0
+          , wa_width = fromIntegral dw, wa_height = fromIntegral dh
+          , wa_border_width = bw, wa_map_state = waIsUnmapped
+          , wa_override_redirect = False }
+  io $ publishGeometry (M.mapWithKey attrs allKnown)
+  io $ publishSizeHints (M.map rwSizeHints allKnown)
 
   conn <- asks display
   winRef <- asks riverWindows

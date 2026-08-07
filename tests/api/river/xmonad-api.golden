@@ -32,7 +32,7 @@ XMonad | Directories' | data Directories' a = Directories {dataDir :: a, cfgDir 
 XMonad | Directories' | type Directories' :: * -> *
 XMonad | Display | type Display :: *
 XMonad | Display | type Display = Connection
-XMonad | Event | data Event = DestroyWindowEvent {ev_window :: Window} | WindowAdded {ev_window :: Window} | WindowTitleChanged {ev_window :: Window, ev_text :: (Maybe ByteString)} | WindowAppIdChanged {ev_window :: Window, ev_text :: (Maybe ByteString)} | OutputAdded {ev_output :: ObjectId} | OutputRemoved {ev_output :: ObjectId} | SeatAdded {ev_seat :: ObjectId} | SeatRemoved {ev_seat :: ObjectId} | SessionLocked | SessionUnlocked | KeyPressed {ev_state :: KeyMask, ev_keysym :: KeySym} | TimerFired Int
+XMonad | Event | data Event = DestroyWindowEvent {ev_window :: Window} | WindowAdded {ev_window :: Window} | WindowTitleChanged {ev_window :: Window, ev_text :: (Maybe ByteString)} | WindowAppIdChanged {ev_window :: Window, ev_text :: (Maybe ByteString)} | OutputAdded {ev_output :: ObjectId} | OutputRemoved {ev_output :: ObjectId} | SeatAdded {ev_seat :: ObjectId} | SeatRemoved {ev_seat :: ObjectId} | ScreenLayoutChanged | SessionLocked | SessionUnlocked | KeyPressed {ev_state :: KeyMask, ev_keysym :: KeySym} | TimerFired Int
 XMonad | Event | type Event :: *
 XMonad | ExtensionClass | class Typeable a => ExtensionClass a where initialValue :: a extensionType :: a -> StateExtension {-# MINIMAL initialValue #-}
 XMonad | ExtensionClass | type ExtensionClass :: * -> Constraint
@@ -93,6 +93,8 @@ XMonad | Typeable | class Typeable a where typeRep# :: TypeRep a {-# MINIMAL typ
 XMonad | Typeable | type Typeable :: forall k. k -> Constraint
 XMonad | Window | type Window :: *
 XMonad | Window | type Window = ObjectId
+XMonad | WindowAttributes | data WindowAttributes = WindowAttributes {wa_x :: Position, wa_y :: Position, wa_width :: Dimension, wa_height :: Dimension, wa_border_width :: Dimension, wa_map_state :: Int, wa_override_redirect :: Bool}
+XMonad | WindowAttributes | type WindowAttributes :: *
 XMonad | WindowSet | type WindowSet :: *
 XMonad | WindowSet | type WindowSet = StackSet WorkspaceId (Layout Window) Window ScreenId ScreenDetail
 XMonad | WindowSpace | type WindowSpace :: *
@@ -144,6 +146,9 @@ XMonad | focus | focus :: Window -> X ()
 XMonad | fromMessage | fromMessage :: Message m => SomeMessage -> Maybe m
 XMonad | getCleanedScreenInfo | getCleanedScreenInfo :: Display -> X [Rectangle]
 XMonad | getDirectories | getDirectories :: IO Directories
+XMonad | getGeometry | getGeometry :: Display -> Window -> IO (Window, Position, Position, Dimension, Dimension, Dimension, Int)
+XMonad | getWMNormalHints | getWMNormalHints :: Display -> Window -> IO SizeHints
+XMonad | getWindowAttributes | getWindowAttributes :: Display -> Window -> IO WindowAttributes
 XMonad | getXMonadCacheDir | getXMonadCacheDir :: X String
 XMonad | getXMonadDataDir | getXMonadDataDir :: X String
 XMonad | getXMonadDir | getXMonadDir :: X String
@@ -211,6 +216,9 @@ XMonad | unmanage | unmanage :: Window -> X ()
 XMonad | updateLayout | updateLayout :: WorkspaceId -> Maybe (Layout Window) -> X ()
 XMonad | userCode | userCode :: X a -> X (Maybe a)
 XMonad | userCodeDef | userCodeDef :: a -> X a -> X a
+XMonad | waIsUnmapped | waIsUnmapped :: Int
+XMonad | waIsUnviewable | waIsUnviewable :: Int
+XMonad | waIsViewable | waIsViewable :: Int
 XMonad | warpPointer | warpPointer :: Position -> Position -> X ()
 XMonad | whenJust | whenJust :: Monad m => Maybe a -> (a -> m ()) -> m ()
 XMonad | whenX | whenX :: X Bool -> X () -> X ()
@@ -221,6 +229,7 @@ XMonad | windows | windows :: (WindowSet -> WindowSet) -> X ()
 XMonad | withDisplay | withDisplay :: (Display -> X a) -> X a
 XMonad | withFocused | withFocused :: (Window -> X ()) -> X ()
 XMonad | withUnfocused | withUnfocused :: (Window -> X ()) -> X ()
+XMonad | withWindowAttributes | withWindowAttributes :: Display -> Window -> (WindowAttributes -> X ()) -> X ()
 XMonad | withWindowSet | withWindowSet :: (WindowSet -> X a) -> X a
 XMonad | xK_0 | xK_0 :: KeySym
 XMonad | xK_1 | xK_1 :: KeySym
@@ -590,7 +599,7 @@ XMonad.Core | Directories' | data Directories' a = Directories {dataDir :: a, cf
 XMonad.Core | Directories' | type Directories' :: * -> *
 XMonad.Core | Display | type Display :: *
 XMonad.Core | Display | type Display = Connection
-XMonad.Core | Event | data Event = DestroyWindowEvent {ev_window :: Window} | WindowAdded {ev_window :: Window} | WindowTitleChanged {ev_window :: Window, ev_text :: (Maybe ByteString)} | WindowAppIdChanged {ev_window :: Window, ev_text :: (Maybe ByteString)} | OutputAdded {ev_output :: ObjectId} | OutputRemoved {ev_output :: ObjectId} | SeatAdded {ev_seat :: ObjectId} | SeatRemoved {ev_seat :: ObjectId} | SessionLocked | SessionUnlocked | KeyPressed {ev_state :: KeyMask, ev_keysym :: KeySym} | TimerFired Int
+XMonad.Core | Event | data Event = DestroyWindowEvent {ev_window :: Window} | WindowAdded {ev_window :: Window} | WindowTitleChanged {ev_window :: Window, ev_text :: (Maybe ByteString)} | WindowAppIdChanged {ev_window :: Window, ev_text :: (Maybe ByteString)} | OutputAdded {ev_output :: ObjectId} | OutputRemoved {ev_output :: ObjectId} | SeatAdded {ev_seat :: ObjectId} | SeatRemoved {ev_seat :: ObjectId} | ScreenLayoutChanged | SessionLocked | SessionUnlocked | KeyPressed {ev_state :: KeyMask, ev_keysym :: KeySym} | TimerFired Int
 XMonad.Core | Event | type Event :: *
 XMonad.Core | ExtensionClass | class Typeable a => ExtensionClass a where initialValue :: a extensionType :: a -> StateExtension {-# MINIMAL initialValue #-}
 XMonad.Core | ExtensionClass | type ExtensionClass :: * -> Constraint
@@ -630,6 +639,8 @@ XMonad.Core | Typeable | class Typeable a where typeRep# :: TypeRep a {-# MINIMA
 XMonad.Core | Typeable | type Typeable :: forall k. k -> Constraint
 XMonad.Core | Window | type Window :: *
 XMonad.Core | Window | type Window = ObjectId
+XMonad.Core | WindowAttributes | data WindowAttributes = WindowAttributes {wa_x :: Position, wa_y :: Position, wa_width :: Dimension, wa_height :: Dimension, wa_border_width :: Dimension, wa_map_state :: Int, wa_override_redirect :: Bool}
+XMonad.Core | WindowAttributes | type WindowAttributes :: *
 XMonad.Core | WindowSet | type WindowSet :: *
 XMonad.Core | WindowSet | type WindowSet = StackSet WorkspaceId (Layout Window) Window ScreenId ScreenDetail
 XMonad.Core | WindowSpace | type WindowSpace :: *
@@ -656,6 +667,9 @@ XMonad.Core | catchX | catchX :: X a -> X a -> X a
 XMonad.Core | controlMask | controlMask :: KeyMask
 XMonad.Core | fromMessage | fromMessage :: Message m => SomeMessage -> Maybe m
 XMonad.Core | getDirectories | getDirectories :: IO Directories
+XMonad.Core | getGeometry | getGeometry :: Display -> Window -> IO (Window, Position, Position, Dimension, Dimension, Dimension, Int)
+XMonad.Core | getWMNormalHints | getWMNormalHints :: Display -> Window -> IO SizeHints
+XMonad.Core | getWindowAttributes | getWindowAttributes :: Display -> Window -> IO WindowAttributes
 XMonad.Core | getXMonadCacheDir | getXMonadCacheDir :: X String
 XMonad.Core | getXMonadDataDir | getXMonadDataDir :: X String
 XMonad.Core | getXMonadDir | getXMonadDir :: X String
@@ -686,9 +700,13 @@ XMonad.Core | trace | trace :: MonadIO m => String -> m ()
 XMonad.Core | uninstallSignalHandlers | uninstallSignalHandlers :: MonadIO m => m ()
 XMonad.Core | userCode | userCode :: X a -> X (Maybe a)
 XMonad.Core | userCodeDef | userCodeDef :: a -> X a -> X a
+XMonad.Core | waIsUnmapped | waIsUnmapped :: Int
+XMonad.Core | waIsUnviewable | waIsUnviewable :: Int
+XMonad.Core | waIsViewable | waIsViewable :: Int
 XMonad.Core | whenJust | whenJust :: Monad m => Maybe a -> (a -> m ()) -> m ()
 XMonad.Core | whenX | whenX :: X Bool -> X () -> X ()
 XMonad.Core | withDisplay | withDisplay :: (Display -> X a) -> X a
+XMonad.Core | withWindowAttributes | withWindowAttributes :: Display -> Window -> (WindowAttributes -> X ()) -> X ()
 XMonad.Core | withWindowSet | withWindowSet :: (WindowSet -> X a) -> X a
 XMonad.Core | xK_0 | xK_0 :: KeySym
 XMonad.Core | xK_1 | xK_1 :: KeySym
