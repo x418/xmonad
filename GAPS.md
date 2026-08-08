@@ -14,7 +14,8 @@ modifier masks, the five button numbers and 347 keysyms, and
 `XMonad.River.Keysym` exports `stringToKeysym`/`keysymToString`, with the
 lookup tables reachable through `XMonad.River`. The contrib layer is no longer
 absent either — `../xmonad-contrib-river` builds upstream contrib against this
-backend, and 103 of its 328 modules compile; see its `SURVEY.md`.
+backend, and 283 of its 334 modules compile; see its `SURVEY.md` for the count
+and its `future-work.md` §6 for why each of the remaining 25 does not.
 
 ## 1. No reference window manager
 

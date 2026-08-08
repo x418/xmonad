@@ -1,4 +1,6 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 -- | Everything the river backend offers that xmonad's API does not.
 --
 -- This module exists so that nothing river-specific leaks into "XMonad".  A
@@ -45,7 +47,27 @@ module XMonad.River (
     --
     -- | X11 answered @XGetWindowAttributes@ for any window; river never
     -- reports where a window is, because the window manager is what decided.
-    windowRect, moveResizeWindow, pointerPosition,
+    windowRect, moveResizeWindow, pointerPosition, windowUnderPointer,
+
+    -- * Stacking
+    --
+    -- | X11 let a window manager restack at any moment and the order stuck
+    -- until something else changed it.  River's render sequence re-applies the
+    -- layout's own order on every frame, so "raise this" has to be a standing
+    -- request rather than a one-off; these record one.
+    raiseWindow, restackWindows,
+
+    -- * Window relationships
+    --
+    -- | What @WM_TRANSIENT_FOR@ answered, under the name Wayland gives it.
+    windowParent,
+
+    -- * Counting outputs before there is a window manager
+    --
+    -- | X11 let anything open a second connection and ask Xinerama how many
+    -- screens there were.  This is the Wayland equivalent, and the only thing
+    -- here that does not need a running xmonad.
+    countOutputs,
 
     -- * Cursor
     --
@@ -65,6 +87,13 @@ module XMonad.River (
     -- | What Alt-Tab is built on: capture some keys for as long as a modifier
     -- is held, and finish when it is let go.
     whileModifiersHeld,
+
+    -- * Capturing keys for as long as you like
+    --
+    -- | What X11 called grabbing a key.  River has no grab; a binding is an
+    -- object, so this creates and destroys them.  Unlike 'submapNextKey' these
+    -- stand until removed, and coexist with the config's own bindings.
+    grabKeys, grabKeysUpDown, ungrabKeys,
 
     -- * Reading a key
     --
@@ -92,21 +121,25 @@ module XMonad.River (
 
 import Data.Bits ((.&.))
 import System.IO (hPutStrLn, stderr)
-import Data.IORef (atomicModifyIORef', readIORef, writeIORef)
+import Data.IORef (atomicModifyIORef', modifyIORef', readIORef, writeIORef)
 import Data.Maybe (fromMaybe, isJust)
 import Data.Word (Word32)
 import Control.Concurrent (forkIO, threadDelay)
+import Control.Exception (SomeException, handle)
 import Control.Monad (forM, forM_, void, when)
+import Control.Monad.IO.Class (MonadIO)
 import Control.Monad.Reader (ask, asks)
 import qualified Data.ByteString.Char8 as BC
 import qualified Data.Map.Strict as M
 
 import XMonad.Core
-import XMonad.Operations (applySizeHintsContents)
+import Data.List (find)
+import XMonad.Operations (applySizeHintsContents, pointWithin)
 import XMonad.River.Keyboard (riverModifiers)
 import XMonad.River.Keysym.Table (keysymTable, reverseKeysymTable)
 import qualified XMonad.River.Mailbox as MB
 import XMonad.River.Client (closeAllClients)
+import qualified XMonad.River.Connection as C
 import XMonad.River.Protocol.WindowManagement
 import XMonad.River.Protocol.XkbBindings
 import XMonad.River.Runtime (RestartRequested(..), currentSubmapGeneration, nextSubmapGeneration, setMainThread, setModifierWatcher, warnUnimplemented)
@@ -191,6 +224,140 @@ pointerPosition = do
     pure $ case M.elems seats of
         (s:_) -> Just (rsPointer s)
         []    -> Nothing
+
+-- | Which window the pointer is over.
+--
+-- X11's @queryPointer@ answered this as its @child@ result, because the server
+-- owned the window tree and could hit-test it.  River owns no such tree to
+-- ask: the window manager is what decided where every window went.  So the
+-- answer is computed from the placements the last layout run produced, which
+-- is the same information the server would have been reporting back.
+--
+-- 'Nothing' when the pointer is over no managed window, and when there is no
+-- pointer at all.  Windows the layout did not place -- on a workspace that is
+-- not on screen -- are not candidates, which is right: they are not under
+-- anything.
+windowUnderPointer :: X (Maybe Window)
+windowUnderPointer = pointerPosition >>= \case
+    Nothing -> pure Nothing
+    Just (px, py) -> do
+        placements <- io . readIORef =<< asks riverPlacements
+        pure $ fst <$> find (pointWithin px py . snd) placements
+
+-- | How many outputs the compositor has, over a connection of its own.
+--
+-- Every other query here answers from what river has told the running window
+-- manager.  This one does not need one: it opens an ordinary Wayland client
+-- connection, counts the @wl_output@ globals the registry advertises, and
+-- closes it again.  That is what a config calling @countScreens@ in @main@ --
+-- before xmonad starts, to size its workspace list -- needs, and it is exactly
+-- what the X11 version did with @openDisplay ""@ and Xinerama.
+--
+-- river permits one /window manager/, not one client, so this does not
+-- conflict with a session already running.  Answers @0@ if there is no
+-- compositor to ask, rather than throwing: a caller in @main@ has nowhere
+-- useful to catch.
+countOutputs :: MonadIO m => m Int
+countOutputs = io $ handle (\(_ :: SomeException) -> pure 0) $ do
+    conn <- C.connect
+    (_, globals) <- C.getRegistry conn
+    C.disconnect conn
+    pure $ length [ () | g <- globals, C.globalInterface g == BC.pack "wl_output" ]
+
+-- | Capture these keys until 'ungrabKeys', running the given action for each.
+--
+-- The river answer to X11's @grabKey@.  There is no grab to take: a key
+-- reaches a window manager because a @river_xkb_binding_v1@ exists for it, so
+-- "grabbing" is creating one and "ungrabbing" is destroying it.  Two
+-- consequences follow from that, and both are improvements:
+--
+-- * it is per keysym and modifier mask, never per keycode.  X11's @grabKey@
+--   took a @KeyCode@, which is why callers had to run 'mkGrabs' first; river
+--   binds the keysym directly, so the keymap never enters into it.
+-- * a captured key does not shadow the config's binding for the same key by
+--   accident -- both bindings exist, and river fires both.  A caller that
+--   wants exclusivity should say so by not choosing keys the config uses.
+--
+-- Replaces any previous set: this is the whole standing capture, not an
+-- addition to it, which is what a caller recomputing its keymap on every
+-- change wants.  Removing the last one restores the plain configuration.
+grabKeys :: M.Map (KeyMask, KeySym) (X ()) -> X ()
+grabKeys keymap = grabKeysUpDown (M.map (, pure ()) keymap)
+
+-- | As 'grabKeys', but with an action for the key going up as well as down.
+--
+-- X11 gave a window manager key releases only if it had asked for
+-- @keyReleaseMask@, and told press from release by the event type.  A river
+-- binding reports both without being asked, so this is the same capture with
+-- the second half wired up -- which is all "XMonad.Actions.UpKeys" ever
+-- wanted.
+grabKeysUpDown :: M.Map (KeyMask, KeySym) (X (), X ()) -> X ()
+grabKeysUpDown keymap = do
+    conf <- ask
+    ungrabKeys
+    let conn = display conf
+        bindingsGlobal = riverBindings conf
+    seats <- io (readIORef (riverSeats conf))
+    io . forM_ (M.elems seats) $ \seat ->
+      forM_ (M.toList keymap) $ \((mask, keysym), (onDown, onUp)) -> do
+        b <- riverXkbBindingsV1GetXkbBinding conn bindingsGlobal
+               (rsObject seat) keysym (riverModifiers mask)
+        modifyIORef' (riverExtraKeys conf) (M.insert b onDown)
+        riverXkbBindingV1Listen conn b $ \case
+          RiverXkbBindingV1Pressed  -> MB.post (riverMailbox conf) onDown
+          RiverXkbBindingV1Released -> MB.post (riverMailbox conf) onUp
+          _ -> pure ()
+        riverXkbBindingV1Enable conn b
+    manageDirty
+
+-- | Release everything 'grabKeys' captured.
+ungrabKeys :: X ()
+ungrabKeys = do
+    conf <- ask
+    let conn = display conf
+    existing <- io (readIORef (riverExtraKeys conf))
+    io $ forM_ (M.keys existing) $ \b -> do
+        riverXkbBindingV1Disable conn b
+        riverXkbBindingV1Destroy conn b
+    io (writeIORef (riverExtraKeys conf) M.empty)
+
+-- | Keep a window above the ones the layout placed.
+--
+-- X11's @raiseWindow@ was a request the server obeyed until someone else
+-- restacked.  Here the render sequence restacks from the layout every frame,
+-- so a one-off request would be undone before it was seen; this is recorded
+-- and re-applied each frame instead.  It lapses when the window stops being
+-- placed -- closed, or moved to a workspace that is not on screen -- so
+-- nothing has to remember to undo it.
+raiseWindow :: Window -> X ()
+raiseWindow w = restackWindows [w]
+
+-- | Keep these windows above the ones the layout placed, topmost first.
+--
+-- X11's @restackWindows@ took the same order: the head ends up on top.  The
+-- list replaces any previous request rather than adding to it, which is what
+-- a caller recomputing the whole order every 'logHook' wants.
+restackWindows :: [Window] -> X ()
+restackWindows ws = do
+    ref <- asks riverRestack
+    -- Stored bottom-to-top, because that is the order the render sequence
+    -- walks; the argument is topmost-first, as X11's was.
+    io (writeIORef ref (reverse ws))
+    manageDirty
+
+-- | The window this one is a dialog for, if any.
+--
+-- X11 spelled this @WM_TRANSIENT_FOR@ and answered it with
+-- @getTransientForHint@; Wayland spells it @xdg_toplevel.set_parent@ and river
+-- reports it as @river_window_v1.parent@.  Same relationship, same use --
+-- deciding that a window is a dialog and belongs on top of, or focused
+-- instead of, the window that raised it.
+--
+-- Unlike the X11 call this asks nothing: the answer is what river last said.
+windowParent :: Window -> X (Maybe Window)
+windowParent w = do
+    known <- io . readIORef =<< asks riverWindows
+    pure (M.lookup w known >>= rwParent)
 
 -- | Choose the XCursor theme the compositor draws with.
 --

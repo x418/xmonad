@@ -61,6 +61,7 @@ module XMonad.River.Wire
   , splitMessages
   ) where
 
+import Control.DeepSeq (NFData (rnf))
 import Control.Monad (when)
 import Data.Bits (shiftL, shiftR, (.&.), (.|.))
 import Data.ByteString (ByteString)
@@ -84,6 +85,16 @@ import Data.Store.Core
 -- client, ids at or above it by the server.
 newtype ObjectId = ObjectId { unObjectId :: Word32 }
   deriving (Eq, Ord)
+
+-- | Forcing an id is forcing a 'Word32'.
+--
+-- Present for parity rather than for speed: X11's @Window@ is a @Word64@ and
+-- so has this instance from @deepseq@ itself, and a contrib module storing
+-- windows in a @PersistentExtension@ derives @NFData@ over them.  Without it
+-- that @deriving@ clause fails, which would be a compile error about a
+-- strictness class rather than about anything river cannot do.
+instance NFData ObjectId where
+  rnf (ObjectId n) = rnf n
 
 -- | The @#5@ spelling is what wayland-debug and river's own logs use, so it
 -- stays.

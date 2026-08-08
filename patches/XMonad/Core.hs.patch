@@ -1,5 +1,5 @@
 --- src/XMonad/Core.hs	2026-08-06 14:14:13.108989784 -0600
-+++ src-river/XMonad/Core.hs	2026-08-07 14:36:12.359469886 -0600
++++ src-river/XMonad/Core.hs	2026-08-07 22:30:46.863434716 -0600
 @@ -16,13 +16,31 @@
  -- Copyright   :  (c) Spencer Janssen 2007
  -- License     :  BSD3-style (see LICENSE)
@@ -161,7 +161,7 @@
      , extensibleState  :: !(M.Map String (Either String StateExtension))
      -- ^ stores custom state information.
      --
-@@ -94,11 +177,59 @@
+@@ -94,11 +177,77 @@
  
  -- | XConf, the (read-only) window manager configuration.
  data XConf = XConf
@@ -207,6 +207,24 @@
 +      -- several bindings matching one physical key gets the press, so two
 +      -- live bindings for the same key is undefined rather than layered.
 +    , riverPlacements :: !(IORef [(Window, Rectangle)])
++    , riverExtraKeys :: !(IORef (M.Map ObjectId (X ())))
++      -- ^ Bindings installed at runtime, over and above the config's.
++      --
++      -- X11 called this grabbing a key: a window manager could ask the server
++      -- for one at any moment and give it back later.  River has no grab, so
++      -- what stands in for one is a @river_xkb_binding_v1@ created on demand;
++      -- this is where those live so they can be destroyed again.  See
++      -- 'XMonad.River.grabKeys'.
++    , riverRestack :: !(IORef [Window])
++      -- ^ Windows to raise above the layout's own order, bottom-to-top.
++      --
++      -- The render sequence restacks from the layout on every frame, so a
++      -- request made anywhere else -- a logHook raising the current
++      -- workspace, say -- is overwritten before anyone sees it.  This is
++      -- where such a request is kept so that it is re-applied every frame
++      -- instead, which is what "raise it and have it stay raised" has to
++      -- mean when something else owns the order.  Windows that are no longer
++      -- placed are dropped as they go.
 +      -- ^ Where the last layout run put each window, in river's global
 +      -- coordinate space.  This is the only record of a window's position:
 +      -- river reports a window's size but never where it is, because the
@@ -225,7 +243,7 @@
      , keyActions    :: !(M.Map (KeyMask, KeySym) (X ()))
                                        -- ^ a mapping of key presses to actions
      , buttonActions :: !(M.Map (KeyMask, Button) (Window -> X ()))
-@@ -115,10 +246,10 @@
+@@ -115,10 +264,10 @@
  data XConfig l = XConfig
      { normalBorderColor  :: !String              -- ^ Non focused windows border color. Default: \"#dddddd\"
      , focusedBorderColor :: !String              -- ^ Focused windows border color. Default: \"#ff0000\"
@@ -238,7 +256,7 @@
                                                   -- should also be run afterwards. mappend should be used for combining
                                                   -- event hooks in most cases.
      , workspaces         :: ![String]            -- ^ The list of workspaces' names
-@@ -132,8 +263,6 @@
+@@ -132,8 +281,6 @@
      , startupHook        :: !(X ())              -- ^ The action to perform on startup
      , focusFollowsMouse  :: !Bool                -- ^ Whether window entry events can change focus
      , clickJustFocuses   :: !Bool                -- ^ False to make a click which changes focus to be additionally passed to the window
@@ -247,7 +265,7 @@
      , handleExtraArgs    :: !([String] -> XConfig Layout -> IO (XConfig Layout))
                                                   -- ^ Modify the configuration, complain about extra arguments etc. with arguments that are not handled by default
      , extensibleConf     :: !(M.Map TypeRep ConfExtension)
-@@ -144,6 +273,43 @@
+@@ -144,6 +291,43 @@
      }
  
  
@@ -291,7 +309,7 @@
  type WindowSet   = StackSet  WorkspaceId (Layout Window) Window ScreenId ScreenDetail
  type WindowSpace = Workspace WorkspaceId (Layout Window) Window
  
-@@ -223,26 +389,91 @@
+@@ -223,26 +407,91 @@
  withWindowSet :: (WindowSet -> X a) -> X a
  withWindowSet f = gets windowset >>= f
  
@@ -399,7 +417,7 @@
  
  ------------------------------------------------------------------------
  -- LayoutClass handling. See particular instances in Operations.hs
-@@ -273,20 +504,11 @@
+@@ -273,20 +522,11 @@
  -- * 'description'
  --
  -- Note that any code which /uses/ 'LayoutClass' methods should only
@@ -422,7 +440,7 @@
      runLayout :: Workspace WorkspaceId (layout a) a
                -> Rectangle
                -> X ([(a, Rectangle)], Maybe (layout a))
-@@ -294,25 +516,13 @@
+@@ -294,25 +534,13 @@
  
      -- | Given a 'Rectangle' in which to place the windows, and a 'Stack'
      -- of windows, return a list of windows and their corresponding
@@ -451,7 +469,7 @@
      pureLayout  :: layout a -> Rectangle -> Stack a -> [(a, Rectangle)]
      pureLayout _ r s = [(focus s, r)]
  
-@@ -320,28 +530,17 @@
+@@ -320,28 +548,17 @@
      emptyLayout :: layout a -> Rectangle -> X ([(a, Rectangle)], Maybe (layout a))
      emptyLayout _ _ = return ([], Nothing)
  
@@ -483,7 +501,7 @@
      description :: layout a -> String
      description      = show
  
-@@ -374,7 +573,7 @@
+@@ -374,7 +591,7 @@
  fromMessage :: Message m => SomeMessage -> Maybe m
  fromMessage (SomeMessage m) = cast m
  
@@ -492,7 +510,7 @@
  instance Message Event
  
  -- | 'LayoutMessages' are core messages that all layouts (especially stateful
-@@ -398,11 +597,11 @@
+@@ -398,11 +615,11 @@
      -- | Defines an initial value for the state extension
      initialValue :: a
      -- | Specifies whether the state extension should be
@@ -508,7 +526,7 @@
      extensionType :: a -> StateExtension
      extensionType = StateExtension
  
-@@ -459,17 +658,6 @@
+@@ -459,17 +676,6 @@
          dupTo fd stdInput
          closeFd fd
  
@@ -526,7 +544,7 @@
  -- | This is basically a map function, running a function in the 'X' monad on
  -- each workspace with the output of that function being the modified workspace.
  runOnWorkspaces :: (WindowSpace -> X WindowSpace) -> X ()
-@@ -494,7 +682,6 @@
+@@ -494,7 +700,6 @@
  -- * @cacheDir@: This directory is used to store temporary files that
  -- can easily be recreated such as the configuration binary and any
  -- intermediate object files generated by GHC.
@@ -534,7 +552,7 @@
  --
  -- For how these directories are chosen, see 'getDirectories'.
  --
-@@ -521,9 +708,6 @@
+@@ -521,9 +726,6 @@
  --    @XDG_CONFIG_HOME@, and @XDG_CACHE_HOME@ (or their respective
  --    fallbacks).  These directories are created if necessary.
  --
@@ -544,7 +562,7 @@
  getDirectories :: IO Directories
  getDirectories = xmEnvDirs <|> xmDirs <|> xdgDirs
    where
-@@ -798,6 +982,10 @@
+@@ -798,6 +1000,10 @@
  
  -- | Check GHC output for deprecation warnings and notify the user if there
  -- were any. Report success otherwise.
@@ -555,7 +573,7 @@
  checkCompileWarnings :: Directories -> IO ()
  checkCompileWarnings dirs = do
      ghcErr <- readFile (errFileName dirs)
-@@ -808,7 +996,6 @@
+@@ -808,7 +1014,6 @@
                  ++ lines ghcErr
                  ++ ["","Please correct them or silence using {-# OPTIONS_GHC -Wno-deprecations #-}."]
          trace msg
@@ -563,7 +581,7 @@
        else
          trace "XMonad recompilation process exited with success!"
  
-@@ -820,10 +1007,7 @@
+@@ -820,10 +1025,7 @@
              ["Errors detected while compiling xmonad config: " <> srcFileName dirs]
              ++ lines (if null ghcErr then show status else ghcErr)
              ++ ["","Please check the file for errors."]
@@ -574,7 +592,7 @@
  
  -- | Recompile the xmonad configuration file when any of the following apply:
  --
-@@ -836,12 +1020,8 @@
+@@ -836,12 +1038,8 @@
  --
  --  * custom @build@ script is being used
  --
@@ -588,7 +606,7 @@
  --
  -- 'False' is returned if there are compilation errors.
  --
-@@ -869,8 +1049,8 @@
+@@ -869,8 +1067,8 @@
  whenX :: X Bool -> X () -> X ()
  whenX a f = a >>= \b -> when b f
  

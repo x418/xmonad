@@ -215,6 +215,24 @@ data XConf = XConf
       -- several bindings matching one physical key gets the press, so two
       -- live bindings for the same key is undefined rather than layered.
     , riverPlacements :: !(IORef [(Window, Rectangle)])
+    , riverExtraKeys :: !(IORef (M.Map ObjectId (X ())))
+      -- ^ Bindings installed at runtime, over and above the config's.
+      --
+      -- X11 called this grabbing a key: a window manager could ask the server
+      -- for one at any moment and give it back later.  River has no grab, so
+      -- what stands in for one is a @river_xkb_binding_v1@ created on demand;
+      -- this is where those live so they can be destroyed again.  See
+      -- 'XMonad.River.grabKeys'.
+    , riverRestack :: !(IORef [Window])
+      -- ^ Windows to raise above the layout's own order, bottom-to-top.
+      --
+      -- The render sequence restacks from the layout on every frame, so a
+      -- request made anywhere else -- a logHook raising the current
+      -- workspace, say -- is overwritten before anyone sees it.  This is
+      -- where such a request is kept so that it is re-applied every frame
+      -- instead, which is what "raise it and have it stay raised" has to
+      -- mean when something else owns the order.  Windows that are no longer
+      -- placed are dropped as they go.
       -- ^ Where the last layout run put each window, in river's global
       -- coordinate space.  This is the only record of a window's position:
       -- river reports a window's size but never where it is, because the

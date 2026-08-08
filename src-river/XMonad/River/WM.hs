@@ -49,7 +49,7 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
 import XMonad.Core
-import XMonad.Operations (StateFile (..), broadcastMessage, focus, readStateFile, writeStateToFile)
+import XMonad.Operations (StateFile (..), broadcastMessage, focus, readStateFile, scaleRationalRect, writeStateToFile)
 import XMonad.River.Runtime (RestartRequested(..), forgetBorderOverride, takeModifierWatcher, lookupBorderOverride, pidFilePath, publishGeometry, publishSizeHints, sendRestart, setMainThread, warnUnimplemented)
 import XMonad.River.Client (closeAllClients)
 import XMonad.River.Connection
@@ -177,6 +177,8 @@ run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs 
   bindingsRef <- newIORef M.empty
   submapRef   <- newIORef Nothing
   placeRef    <- newIORef []
+  restackRef  <- newIORef []
+  extraKeysRef <- newIORef M.empty
   rt <- Runtime
           <$> newIORef []
           <*> pure bindingsRef
@@ -235,6 +237,8 @@ run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs 
         , riverMailbox = mailbox
         , riverKeyBindings = bindingsRef
         , riverPlacements = placeRef
+        , riverExtraKeys = extraKeysRef
+        , riverRestack = restackRef
         , riverSubmap = submapRef
         , riverDragOrigin = dragOrigin
         , normalBorder = parseColor (normalBorderColor userConfig)
@@ -970,10 +974,26 @@ applyLayout rt = do
   placements <- fmap concat $ forM screens $ \scr -> do
     let wsp = W.workspace scr
         SD rect = W.screenDetail scr
-    (rs, mLayout) <- userCodeDef ([], Nothing) (runLayout wsp rect)
+        -- The floating layer, as upstream's 'windows' handles it.  Floats are
+        -- withheld from the layout -- it would tile them -- and placed from the
+        -- rectangles 'XMonad.Operations.float' recorded, scaled to the screen.
+        --
+        -- Leaving this out is not a small omission: it makes 'float' inert, so
+        -- every drag, keyboard move and doFloat hook is undone by the next
+        -- manage sequence, which looks like the mouse bindings not working at
+        -- all.
+        floats = W.floating ws
+        onWs = W.integrate' (W.stack wsp)
+        tiled = W.stack wsp >>= W.filter (`M.notMember` floats)
+        flt = [ (fw, scaleRationalRect rect rr)
+              | fw <- onWs, Just rr <- [M.lookup fw floats] ]
+    (rs, mLayout) <- userCodeDef ([], Nothing) (runLayout wsp { W.stack = tiled } rect)
     forM_ mLayout $ \l' -> modify $ \st ->
       st { windowset = updateLayout (W.tag wsp) l' (windowset st) }
-    pure rs
+    -- Floats last, because the render sequence place_tops this list in order,
+    -- so later is higher.  Upstream expresses the same thing the other way
+    -- round and then restacks.
+    pure (rs ++ flt)
 
   io $ writeIORef (rtPlacements rt) placements
   io $ writeIORef (rtVisible rt) (S.fromList (map fst placements))
@@ -1078,6 +1098,17 @@ renderSequence rt = do
 
   -- Stacking order: the layout list is in the desired bottom-to-top order.
   forM_ placements $ \(win, _) -> forM_ (M.lookup win known) $ \w ->
+    io (riverNodeV1PlaceTop conn (rwNode w))
+
+  -- Then anything asked to sit above that, re-applied every frame because this
+  -- loop would otherwise have just undone it.  Filtered to what the layout
+  -- placed, so a raised window that has since gone away or moved to another
+  -- workspace stops being raised rather than lingering as a stale request.
+  raised <- io . readIORef =<< asks riverRestack
+  let placed = S.fromList (map fst placements)
+      stillUp = filter (`S.member` placed) raised
+  io . flip writeIORef stillUp =<< asks riverRestack
+  forM_ stillUp $ \win -> forM_ (M.lookup win known) $ \w ->
     io (riverNodeV1PlaceTop conn (rwNode w))
 
 -- | A dimension bound river reports as zero or less was not stated.
