@@ -11,7 +11,7 @@ import Data.List (nub, genericLength)
 
 import Debug.Trace
 
-import Graphics.X11 (Rectangle(Rectangle))
+import XMonad.Core (Rectangle(Rectangle))
 import Control.Applicative
 
 --

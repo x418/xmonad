@@ -8,9 +8,9 @@ import Instances
 import Control.Applicative
 import XMonad.StackSet hiding (filter)
 import XMonad.Operations
-import Graphics.X11.Xlib.Types (Dimension)
+import XMonad.Core (Dimension)
 
-import Graphics.X11 (Rectangle(Rectangle))
+import XMonad.Core (Rectangle(Rectangle))
 import XMonad.Layout
 
 prop_screens (x :: T) = n `elem` screens x

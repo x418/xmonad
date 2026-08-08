@@ -9,7 +9,7 @@ import XMonad.StackSet hiding (filter)
 import XMonad.Core
 import XMonad.Layout
 
-import Graphics.X11.Xlib.Types (Rectangle(..))
+import XMonad.Core (Rectangle(..))
 
 import Control.Applicative
 import Data.List (sort)

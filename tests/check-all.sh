@@ -4,12 +4,12 @@
 #
 # Usage: tests/check-all.sh
 #
-# The ordering is the point.  `ghc -e :browse` reads whichever build of the
-# library is currently registered, so dumping or checking one backend's API
-# while the other is installed silently compares the wrong thing -- and the
-# failure looks like a real API regression, complete with a plausible diff.
-# That has cost time more than once.  Each API check therefore immediately
-# follows the build that makes it meaningful, and nothing is interleaved.
+# The ordering still matters.  `ghc -e :browse` reads whichever build of the
+# library is currently registered, so the API check has to follow the build
+# that makes it meaningful.  This used to matter far more, when two backends
+# were built from one repo and checking one while the other was installed
+# silently compared the wrong thing -- a failure that looked like a real API
+# regression, complete with a plausible diff.
 #
 # This is what CI runs; keep .github/workflows/river.yml in step.
 
@@ -23,19 +23,15 @@ export GHC
 step() { printf '%-22s ' "$1"; }
 ok()   { echo OK; }
 
-step "x11 source frozen"; ./tests/check-x11-source.sh >/dev/null; ok
+step "build";             stack build --flag xmonad:pedantic >/dev/null 2>&1; ok
+step "api golden";        ./tests/api/check-api.sh >/dev/null; ok
+step "tests";             stack test >/dev/null 2>&1; ok
 
-step "x11 build";         stack build --flag xmonad:pedantic >/dev/null 2>&1; ok
-step "x11 api golden";    ./tests/api/check-api.sh x11 >/dev/null; ok
-
-step "river build";       stack build --flag xmonad:river --flag xmonad:pedantic >/dev/null 2>&1; ok
-step "river api golden";  ./tests/api/check-api.sh river >/dev/null; ok
-step "river tests";       stack test --flag xmonad:river >/dev/null 2>&1; ok
-
-# These read the checked-in goldens rather than the built library, so they do
-# not care which backend is registered.
+# Reads the checked-in goldens rather than the built library: this fork's, and
+# upstream's as recorded by dump-api.sh from an upstream checkout.  Nothing is
+# built here, which is why losing the second source tree did not cost the
+# subset assertion.
 step "subset assertion";  ./tests/api/check-subset.sh >/dev/null; ok
-step "copy manifest";     ./tests/check-copies.sh >/dev/null; ok
 
 step "keysyms current"
 ./codegen/gen-keysyms.sh >/dev/null

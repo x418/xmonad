@@ -64,7 +64,7 @@ WM=${XMONAD_RIVER_WM:-}
 [ -n "$WM" ] || WM=$(find .stack-work/install -path '*9.10*' -name xmonad -type f -perm -u+x 2>/dev/null | head -1)
 if [ -z "$WM" ]; then
     echo "headless-restart: no river build found; run" >&2
-    echo "  stack build --flag xmonad:river" >&2
+    echo "  stack build" >&2
     exit 1
 fi
 case "$WM" in /*) ;; *) WM=$PWD/$WM ;; esac

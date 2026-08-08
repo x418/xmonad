@@ -1,0 +1,6 @@
+# The commit whose interface is recorded beside this file.
+#
+# Written by tests/api/dump-api.sh when given a checkout to read.
+# Nothing forces a re-record when that checkout moves on, so this is how
+# a reviewer tells how old the comparison in check-subset.sh has become.
+fa3926efabf5dfe39de553a4d89a43296ed7c996

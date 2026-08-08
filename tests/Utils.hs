@@ -2,7 +2,7 @@
 module Utils where
 
 import XMonad.StackSet hiding (filter)
-import Graphics.X11.Xlib.Types (Rectangle(..))
+import XMonad.Core (Rectangle(..))
 import Data.List (sortBy)
 
 -- Useful operation, the non-local workspaces

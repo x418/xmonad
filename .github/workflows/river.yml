@@ -11,7 +11,7 @@ name: River
 # entry cannot express.
 #
 # Before this existed, every line under src-river/ was uncompiled in CI, the
-# river-wire suite never ran, and none of the four consistency scripts ran
+# river-wire suite never ran, and none of the consistency scripts ran
 # anywhere -- they only protected the tree when someone remembered to invoke
 # them by hand.
 
@@ -27,24 +27,16 @@ jobs:
     steps:
       - name: Clone project
         uses: actions/checkout@v7
-        with:
-          # tests/check-x11-source.sh diffs the working tree against the commit
-          # recorded in tests/upstream-base.sha, which a shallow clone will not
-          # contain.
-          fetch-depth: 0
 
       - name: Install C dependencies
-        # Needed for the X11 half.  The river backend links nothing but is
-        # built alongside it, because the API checks compare the two.
+        # libxkbcommon only.  Nothing here links X11 any more: the X11 sources
+        # are gone and upstream's interface is a committed recording, which
+        # check-subset.sh reads without building anything.
         run: |
           set -ex
           sudo apt update -y
           sudo apt install -y \
-            libx11-dev \
-            libxext-dev \
-            libxinerama-dev \
-            libxrandr-dev \
-            libxss-dev \
+            libxkbcommon-dev \
             #
 
       - name: Refresh caches once a month
@@ -69,10 +61,8 @@ jobs:
         run: stack update
 
       - name: All consistency checks
-        # One script rather than a step per check, because the *order* is what
-        # makes them valid: `ghc -e :browse` reads whichever build is
-        # registered, so checking one backend's API while the other is
-        # installed compares the wrong thing and reports a regression that is
-        # not there.  Keeping the order in one place stops CI and a developer's
-        # shell from drifting apart.
+        # One script rather than a step per check, so that CI and a developer's
+        # shell cannot drift apart -- and because the order still matters:
+        # `ghc -e :browse` reads whichever build is registered, so the API
+        # check has to follow the build.
         run: ./tests/check-all.sh

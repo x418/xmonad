@@ -1,23 +1,37 @@
 #!/usr/bin/env bash
 #
-# Emit the normalized public API surface of the xmonad library.
+# Emit the normalized public API surface of an xmonad library.
 #
-# Usage: tests/api/dump-api.sh OUTDIR
+# Usage: tests/api/dump-api.sh OUTDIR [CHECKOUT]
 #
-#   OUTDIR receives two files:
+#   tests/api/dump-api.sh tests/api/river                 # this fork
+#   tests/api/dump-api.sh tests/api/upstream ../xmonad    # upstream xmonad
+#
+#   OUTDIR receives:
 #     xmonad-api.golden        xmonad's own 200-odd names, across all 8 modules
-#     xmonad-reexports.golden  the names XMonad re-exports from the backend's
+#     xmonad-reexports.golden  the names XMonad re-exports from an
 #                              X11-shaped compatibility surface
+#     source.sha               which commit was dumped -- only when CHECKOUT
+#                              is given, since otherwise it is this working
+#                              tree and git already knows
+#
+# CHECKOUT is what makes one script do both jobs, and there is only one job:
+# dumping whatever xmonad is registered.  Point it at another checkout and it
+# builds that one and reads its package database instead of this one's.  That
+# is the whole difference between recording this fork and recording upstream.
 #
 # Environment:
 #   GHC        how to invoke ghc.  Default "ghc".  Under stack, use
 #              GHC="stack exec -- ghc"; under cabal, "cabal exec -- ghc".
+#              Ignored when CHECKOUT is given -- that build's own stack is
+#              used, since the point is to read its package database.
 #   GHC_FLAGS  extra flags, e.g. -package-db for a non-default build dir.
 #
-# The point of this script is requirement 3 of river-design.md: the X11 build
-# and the river build must export the same API, so that xmonad-contrib and an
-# unmodified xmonad.hs compile against either.  Each backend, built and dumped,
-# must reproduce the checked-in golden files byte for byte.
+# The point of this script: this fork's API must remain a strict subset of
+# upstream's, so that xmonad-contrib and an unmodified xmonad.hs compile
+# against it.  Dumping both is what lets tests/api/check-subset.sh compare
+# them without building anything itself.  Upstream is a recording rather than a
+# build because this package no longer carries upstream's sources.
 #
 # Mechanism: `ghc -e ':browse'` rather than `ghc --show-iface`.  --show-iface
 # does emit an export list, but its declaration section is Core with unfoldings
@@ -43,11 +57,42 @@
 
 set -euo pipefail
 
-outdir=${1:?usage: dump-api.sh OUTDIR}
+outdir=${1:?usage: dump-api.sh OUTDIR [CHECKOUT]}
+checkout=${2:-}
+
 mkdir -p "$outdir"
+outdir=$(cd "$outdir" && pwd -P)
 
 GHC=${GHC:-ghc}
 GHC_FLAGS=${GHC_FLAGS:-}
+
+if [ -n "$checkout" ]; then
+    [ -f "$checkout/xmonad.cabal" ] || {
+        echo "dump-api: $checkout is not an xmonad checkout" >&2; exit 1; }
+    checkout=$(cd "$checkout" && pwd -P)
+    sha=$(git -C "$checkout" rev-parse HEAD)
+
+    # Not refused, only reported.  A fork's tool is going to be pointed at
+    # trees carrying local patches; what matters is that "recorded from a tree
+    # nobody else has" is visible when the golden later disagrees with someone.
+    if ! git -C "$checkout" diff --quiet HEAD; then
+        echo "dump-api: WARNING: $checkout has uncommitted changes;" >&2
+        echo "          the recording will include them" >&2
+    fi
+
+    echo "dump-api: building $checkout at $sha" >&2
+    ( cd "$checkout" && stack build ) >/dev/null
+    cd "$checkout"
+    GHC="stack exec -- ghc"
+
+    printf '%s\n' \
+      "# The commit whose interface is recorded beside this file." \
+      "#" \
+      "# Written by tests/api/dump-api.sh when given a checkout to read." \
+      "# Nothing forces a re-record when that checkout moves on, so this is how" \
+      "# a reviewer tells how old the comparison in check-subset.sh has become." \
+      "$sha" > "$outdir/source.sha"
+fi
 
 modules=(
     XMonad

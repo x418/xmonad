@@ -15,8 +15,8 @@ than verified.
 ## Build and install
 
 ```
-stack build --flag xmonad:river
-stack install --flag xmonad:river     # puts `xmonad` on PATH
+stack build
+stack install                        # puts `xmonad` on PATH
 ```
 
 The binary must be **installed**, not merely built. Under X11 this is

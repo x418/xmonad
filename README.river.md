@@ -1,9 +1,16 @@
 # The river backend
 
 ```
-stack build                      # X11, byte-for-byte upstream behaviour
-stack build --flag xmonad:river  # river/Wayland
+stack build
 ```
+
+This package builds against river/Wayland and nothing else. It began as a flag
+over two source trees — upstream's `src/` frozen beside a `src-river/` — and
+that is gone. What the second tree existed to prove is kept without it: this
+fork's API must remain a strict subset of upstream's, and `tests/api/upstream/`
+is upstream's own interface, recorded from a real checkout with
+`tests/api/dump-api.sh tests/api/upstream ../xmonad` and committed, so
+`tests/api/check-subset.sh` compares two files and builds nothing.
 
 **Status: it manages a window against a real compositor.**
 

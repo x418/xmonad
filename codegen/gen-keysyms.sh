@@ -13,7 +13,7 @@
 # ship a config where one key silently stops working.  Reading them from the
 # package that already has them makes the correspondence true by construction.
 #
-# The name list comes from the X11 build's own API dump, so a keysym xmonad
+# The name list comes from upstream xmonad's recorded API, so a keysym upstream
 # re-exports but this script missed would show up as a golden diff rather than
 # as a key that mysteriously does nothing.
 
@@ -22,9 +22,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 out=src-river/XMonad/River/Keysym.hs
-golden=tests/api/x11/xmonad-reexports.golden
+golden=tests/api/upstream/xmonad-reexports.golden
 
-[ -f "$golden" ] || { echo "gen-keysyms: need $golden; run dump-api.sh for x11 first" >&2; exit 1; }
+[ -f "$golden" ] || { echo "gen-keysyms: need $golden; record it with\n  tests/api/dump-api.sh tests/api/upstream ../xmonad" >&2; exit 1; }
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
