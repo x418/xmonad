@@ -118,7 +118,7 @@ and `systemctl --user start river-session.target` from the session script.
 - **`gnomeRegister`** — XSMP is X11-only. Use
   `systemctl --user start graphical-session.target` via the target above.
 - **Anything drawing its own windows through Xlib** — prompts, decorations,
-  tab bars. See `SURVEY.md` in `../xmonad-contrib-river`: `XMonad.Util.Font`
+  tab bars. See `SURVEY.md` in `../xmonad-river-contrib`: `XMonad.Util.Font`
   gates 146 of the 171 xmonad-contrib modules that do not yet compile, because
   text rendering under Wayland cannot go through `FontStruct` and `GC`. The
   prototype shelled out to `fuzzel` for prompts instead.
