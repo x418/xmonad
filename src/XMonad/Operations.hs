@@ -11,7 +11,7 @@
 -- Copyright   :  (c) Spencer Janssen 2007
 -- License     :  BSD3-style (see LICENSE)
 --
--- Operations, shadowing @src\/XMonad\/Operations.hs@.
+-- Operations, a rewrite of upstream's @src\/XMonad\/Operations.hs@.
 --
 -- This is where the two backends diverge most, and the divergence is not a
 -- matter of a few differing lines: upstream's file is 899 lines of Xlib calls,

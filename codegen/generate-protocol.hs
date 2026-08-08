@@ -452,6 +452,6 @@ main = mapM_ generate targets
             Just names -> [ n | n <- names, n `notElem` map ifaceName allIfaces ]
       unless (null missing) $
         error (xmlFile ++ ": no such interface(s): " ++ intercalate ", " missing)
-      let out = "src-river" </> map (\c -> if c == '.' then '/' else c) modName <.> "hs"
+      let out = "src" </> map (\c -> if c == '.' then '/' else c) modName <.> "hs"
       writeFile out (renderModule modName xmlFile ifaces)
       putStrLn ("wrote " ++ out ++ " (" ++ show (length ifaces) ++ " interfaces)")

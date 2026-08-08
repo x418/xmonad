@@ -10,7 +10,7 @@
 -- Copyright   :  (c) Spencer Janssen 2007
 -- License     :  BSD3-style (see LICENSE)
 --
--- The river backend's copy of @src\/XMonad\/Config.hs@.
+-- The river backend's copy of upstream xmonad's @src\/XMonad\/Config.hs@.
 --
 -- Differences from the X11 default, and only these:
 --

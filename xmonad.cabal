@@ -76,27 +76,23 @@ library
                  , transformers          >= 0.3
                  , unix
 
-  -- This package builds against river/Wayland and nothing else.  It began as a
-  -- flag over two source trees -- src/ frozen at upstream, src-river/ beside
-  -- it -- and that is gone; src-river/ is the only source there is.
+  -- This package builds against river/Wayland and nothing else.
   --
-  -- The governing rule survives the flag: if something cannot be faithfully
-  -- ported, it is not exported.  A name that is present but does nothing is
-  -- worse than a name that is absent -- absent fails at the call site, at
-  -- compile time, with the file and line in the error.  So this library's API
-  -- is deliberately a strict subset of upstream xmonad's, and
-  -- tests/api/unportable.txt is where each omission has to be justified, name
-  -- by name, or tests/api/check-subset.sh fails.
+  -- If something cannot be faithfully ported, it is not exported.  A name that
+  -- is present but does nothing is worse than a name that is absent -- absent
+  -- fails at the call site, at compile time, with the file and line in the
+  -- error.  So this library's API is deliberately a strict subset of upstream
+  -- xmonad's, and tests/api/unportable.txt is where each omission has to be
+  -- justified, name by name, or tests/api/check-subset.sh fails.
   --
-  -- What that check compares against is no longer a second build of this
-  -- package.  tests/api/upstream/ is upstream xmonad's own interface, recorded
-  -- from a real checkout by `tests/api/dump-api.sh tests/api/upstream ../xmonad`
-  -- and committed alongside the commit it came from.
+  -- tests/api/upstream/ is upstream xmonad's own interface, recorded from a
+  -- real checkout by `tests/api/dump-api.sh tests/api/upstream ../xmonad` and
+  -- committed alongside the commit it came from.
   --
   -- Nothing here is named Graphics.X11.  This does not re-export it and does
-  -- not imitate it; src-river/XMonad/Layout.hs imports XMonad.River.Types for
+  -- not imitate it; src/XMonad/Layout.hs imports XMonad.River.Types for
   -- the Rectangle and Event it needs.
-  hs-source-dirs:  src-river
+  hs-source-dirs:  src
   -- The XMonad.River.* modules are exposed: they are river's own API, named
   -- for what they are, and a river-specific contrib module has every reason
   -- to import them.

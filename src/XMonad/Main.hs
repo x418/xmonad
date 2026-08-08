@@ -7,7 +7,7 @@
 -- Copyright   :  (c) Spencer Janssen 2007
 -- License     :  BSD3-style (see LICENSE)
 --
--- The entry point, shadowing @src\/XMonad\/Main.hs@.
+-- The entry point, a rewrite of upstream's @src\/XMonad\/Main.hs@.
 --
 -- The X11 version is 471 lines, most of it an event handler translating Xlib
 -- events into calls on "XMonad.Operations".  There is no equivalent here: river

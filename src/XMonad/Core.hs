@@ -19,11 +19,11 @@
 -- The 'X' monad, a state monad transformer over 'IO', for the window
 -- manager state, and support routines.
 --
--- This is the river backend's copy of @src\/XMonad\/Core.hs@.  It is
+-- This is the river backend's copy of upstream xmonad's @src\/XMonad\/Core.hs@,
 -- deliberately kept as close to that file as it can be -- 84% of it is shared,
--- and the divergence is tracked as @patches\/XMonad\/Core.hs.patch@ so that an
--- upstream change either applies cleanly or conflicts loudly.  See
--- tests/check-copies.sh.
+-- so that an upstream change to the compile path or the directory logic can be
+-- carried over rather than re-derived.  Keep the divergence below small and
+-- deliberate; everything else should stay byte-identical to upstream.
 --
 -- What differs, and only what differs:
 --

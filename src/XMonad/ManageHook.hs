@@ -8,7 +8,7 @@
 -- Copyright   :  (c) Spencer Janssen 2007
 -- License     :  BSD3-style (see LICENSE)
 --
--- An EDSL for ManageHooks, shadowing @src\/XMonad\/ManageHook.hs@.
+-- An EDSL for ManageHooks, a rewrite of upstream's @src\/XMonad\/ManageHook.hs@.
 --
 -- The algebra -- @-->@, @=?@, @\<&&\>@, @composeAll@, @doF@ and friends -- is
 -- backend-independent and is carried over unchanged.  What differs is where

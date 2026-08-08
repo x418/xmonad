@@ -10,7 +10,7 @@ name: River
 # baseline, so they need both halves built in the same job, which a matrix
 # entry cannot express.
 #
-# Before this existed, every line under src-river/ was uncompiled in CI, the
+# Before this existed, every line under src/ was uncompiled in CI, the
 # river-wire suite never ran, and none of the consistency scripts ran
 # anywhere -- they only protected the tree when someone remembered to invoke
 # them by hand.

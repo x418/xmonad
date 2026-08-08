@@ -160,7 +160,7 @@ type Window = ObjectId
 -- events, river delivers as accumulated state on 'RiverWindow' instead, so
 -- there is nothing to translate.
 --
--- 'DestroyWindowEvent' keeps its X11 spelling because @src\/XMonad\/Layout.hs@
+-- 'DestroyWindowEvent' keeps its X11 spelling because @XMonad.Layout@
 -- matches on it by name to release a layout's per-window state, and
 -- @river_window_v1.closed@ means exactly what the X11 event meant.  The rest
 -- are named for what river actually reports.

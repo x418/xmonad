@@ -6,7 +6,7 @@
 --
 -- Useful exports for configuration files.
 --
--- This is the river backend's copy, shadowing @src\/XMonad.hs@.
+-- This is the river backend's copy of upstream xmonad's @src\/XMonad.hs@.
 --
 -- The one difference is the important one: it does __not__ re-export
 -- @Graphics.X11@ or @Graphics.X11.Xlib.Extras@.  The X11 build re-exports

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Regenerate src-river/XMonad/River/Keysym.hs from the X11 package's own values.
+# Regenerate src/XMonad/River/Keysym.hs from the X11 package's own values.
 #
 # Usage: codegen/gen-keysyms.sh
 #
@@ -21,7 +21,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-out=src-river/XMonad/River/Keysym.hs
+out=src/XMonad/River/Keysym.hs
 golden=tests/api/upstream/xmonad-reexports.golden
 
 [ -f "$golden" ] || { echo "gen-keysyms: need $golden; record it with\n  tests/api/dump-api.sh tests/api/upstream ../xmonad" >&2; exit 1; }
