@@ -61,6 +61,7 @@ import XMonad.River.Protocol.LayerShell
 import XMonad.River.Protocol.XkbBindings
 import XMonad.River.Wire (ObjectId, isNullObject)
 import XMonad.River.Types
+import XMonad.River.State (RiverState(..))
 import qualified XMonad.StackSet as W
 
 --------------------------------------------------------------------------------
@@ -224,23 +225,25 @@ run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs 
       xconf = XConf
         { config = userConfig
         , display = conn
-        , riverManager = manager
-        , riverBindings = bindings
-        , riverCompositor = compositor
-        , riverShm = shm
-        , riverWindows = windowsRef
-        , riverOutputs = outputsRef
-        , riverSeats = seatsRef
-        , riverDirty = dirtyRef
-        , inManageSeq = manageRef
-        , riverRestart = restartRef
-        , riverMailbox = mailbox
-        , riverKeyBindings = bindingsRef
-        , riverPlacements = placeRef
-        , riverExtraKeys = extraKeysRef
-        , riverRestack = restackRef
-        , riverSubmap = submapRef
-        , riverDragOrigin = dragOrigin
+        , riverState = RiverState
+            { riverManager = manager
+            , riverBindings = bindings
+            , riverCompositor = compositor
+            , riverShm = shm
+            , riverWindows = windowsRef
+            , riverOutputs = outputsRef
+            , riverSeats = seatsRef
+            , riverDirty = dirtyRef
+            , inManageSeq = manageRef
+            , riverRestart = restartRef
+            , riverMailbox = mailbox
+            , riverKeyBindings = bindingsRef
+            , riverPlacements = placeRef
+            , riverExtraKeys = extraKeysRef
+            , riverRestack = restackRef
+            , riverSubmap = submapRef
+            , riverDragOrigin = dragOrigin
+            }
         , normalBorder = parseColor (normalBorderColor userConfig)
         , focusedBorder = parseColor (focusedBorderColor userConfig)
         , keyActions = keys userConfig userConfig
@@ -412,7 +415,7 @@ addWindow :: ObjectId -> X ()
 addWindow win = do
   conn <- asks display
   node <- io (riverWindowV1GetNode conn win)
-  ref <- asks riverWindows
+  ref <- asks (riverWindows . riverState)
   io $ modifyIORef' ref $ M.insert win RiverWindow
     { rwObject = win, rwNode = node
     , rwAppId = Nothing, rwTitle = Nothing, rwPid = Nothing
@@ -455,7 +458,7 @@ adjust ref k f = modifyIORef' ref (M.adjust f k)
 addOutput :: Runtime -> ObjectId -> X ()
 addOutput rt out = do
   conn <- asks display
-  ref <- asks riverOutputs
+  ref <- asks (riverOutputs . riverState)
 
   mLayer <- forM (rtLayerShell rt) $ \shell -> io $ do
     lo <- riverLayerShellV1GetOutput conn shell out
@@ -481,7 +484,7 @@ addOutput rt out = do
 addSeat :: Runtime -> ObjectId -> X ()
 addSeat rt seat = do
   conn <- asks display
-  ref <- asks riverSeats
+  ref <- asks (riverSeats . riverState)
 
   mLayer <- forM (rtLayerShell rt) $ \shell -> io $ do
     ls <- riverLayerShellV1GetSeat conn shell seat
@@ -497,7 +500,7 @@ addSeat rt seat = do
   -- The object a submap requests @ensure_next_key_eaten@ on.  Created once per
   -- seat, because doing it twice is a protocol error, and only when river
   -- offers version 2 or better -- the request does not exist before that.
-  bindingsGlobal <- asks riverBindings
+  bindingsGlobal <- asks (riverBindings . riverState)
   mXkbSeat <- if rtXkbVersion rt < 2 then pure Nothing else io $ do
     xs <- riverXkbBindingsV1GetSeat conn bindingsGlobal seat
     riverXkbBindingsSeatV1Listen conn xs $ \case
@@ -553,7 +556,7 @@ addSeat rt seat = do
     RiverSeatV1OpDelta dx dy -> queueAction rt $ do
       drag <- gets dragging
       whenJust drag $ \(motion, _) -> do
-        (ox, oy) <- io . readIORef =<< asks riverDragOrigin
+        (ox, oy) <- io . readIORef =<< asks (riverDragOrigin . riverState)
         motion (ox + dx) (oy + dy)
     RiverSeatV1OpRelease -> do
       riverSeatV1OpEnd conn seat
@@ -567,7 +570,7 @@ addSeat rt seat = do
 
 manageSequence :: Runtime -> X ()
 manageSequence rt = do
-  asks inManageSeq >>= \r -> io (writeIORef r True)
+  asks (inManageSeq . riverState) >>= \r -> io (writeIORef r True)
   restoreState rt
   reapClosed
   syncScreens
@@ -576,7 +579,7 @@ manageSequence rt = do
   adoptNewWindows
   runPending rt
   applyLayout rt
-  asks inManageSeq >>= \r -> io (writeIORef r False)
+  asks (inManageSeq . riverState) >>= \r -> io (writeIORef r False)
 
 -- | Pick up where the previous window manager left off, if it left a state
 -- file.
@@ -642,7 +645,7 @@ windowsInStateFile path = handle (\(_ :: SomeException) -> pure 0) $ do
 reapClosed :: X ()
 reapClosed = do
   conn <- asks display
-  ref <- asks riverWindows
+  ref <- asks (riverWindows . riverState)
   ws <- io (readIORef ref)
   let closed = [ w | w <- M.elems ws, rwClosed w ]
   forM_ closed $ \w -> do
@@ -653,7 +656,7 @@ reapClosed = do
       riverWindowV1Destroy conn (rwObject w)
       modifyIORef' ref (M.delete (rwObject w))
 
-  outRef <- asks riverOutputs
+  outRef <- asks (riverOutputs . riverState)
   outs <- io (readIORef outRef)
   -- The layer shell objects are inert once removed is sent, but destroying
   -- them is still what completes destruction of the output.
@@ -664,7 +667,7 @@ reapClosed = do
       riverOutputV1Destroy conn (roObject o)
       modifyIORef' outRef (M.delete (roObject o))
 
-  seatRef <- asks riverSeats
+  seatRef <- asks (riverSeats . riverState)
   seats <- io (readIORef seatRef)
   forM_ [ s | s <- M.elems seats, rsRemoved s ] $ \s -> do
     void (broadcastEvent (SeatRemoved (rsObject s)))
@@ -685,7 +688,7 @@ reapClosed = do
 -- case of the previous default being unplugged.
 nominateLayerOutput :: Runtime -> X ()
 nominateLayerOutput rt = forM_ (rtLayerShell rt) $ \_ -> do
-  outs <- io . readIORef =<< asks riverOutputs
+  outs <- io . readIORef =<< asks (riverOutputs . riverState)
   ws <- gets windowset
   let SD current = W.screenDetail (W.current ws)
       live = filter (not . roRemoved) (M.elems outs)
@@ -712,7 +715,7 @@ nominateLayerOutput rt = forM_ (rtLayerShell rt) $ \_ -> do
 -- reconnects, which is what @XMonad.Actions.PhysicalScreens@ relies on.
 syncScreens :: X ()
 syncScreens = do
-  outs <- io . readIORef =<< asks riverOutputs
+  outs <- io . readIORef =<< asks (riverOutputs . riverState)
   let rects =
         [ rect
         | o <- sortOn roPosition (filter (not . roRemoved) (M.elems outs))
@@ -769,7 +772,7 @@ rescreen rects ws = ws
 -- sway's IPC cannot provide.
 adoptNewWindows :: X ()
 adoptNewWindows = do
-  ref <- asks riverWindows
+  ref <- asks (riverWindows . riverState)
   ws <- io (readIORef ref)
   let fresh = [ w | w <- M.elems ws, rwNew w, not (rwClosed w) ]
   conn <- asks display
@@ -845,7 +848,7 @@ runStartupHook rt = do
 -- | Create river bindings for any seat that does not have them yet.
 createBindings :: Runtime -> X ()
 createBindings rt = do
-  seats <- io . readIORef =<< asks riverSeats
+  seats <- io . readIORef =<< asks (riverSeats . riverState)
   bound <- io (readIORef (rtBoundSeats rt))
   let new = [ s | s <- M.keys seats, not (S.member s bound) ]
   forM_ new $ \seat -> do
@@ -855,7 +858,7 @@ createBindings rt = do
 bindSeat :: Runtime -> ObjectId -> X ()
 bindSeat rt seat = do
   conn <- asks display
-  bindingsGlobal <- asks riverBindings
+  bindingsGlobal <- asks (riverBindings . riverState)
   ks <- asks keyActions
   bs <- asks buttonActions
 
@@ -916,7 +919,7 @@ bindSeat rt seat = do
 bindPanic :: Runtime -> ObjectId -> X ()
 bindPanic rt seat = do
   conn <- asks display
-  bindingsGlobal <- asks riverBindings
+  bindingsGlobal <- asks (riverBindings . riverState)
   b <- io (riverXkbBindingsV1GetXkbBinding conn bindingsGlobal seat
              xK_Escape (riverModifiers (controlMask .|. mod1Mask .|. shiftMask)))
   io $ riverXkbBindingV1Listen conn b $ \case
@@ -1006,7 +1009,7 @@ applyLayout rt = do
   -- at the origin, which is what X11 would have said of an unmapped window
   -- too.
   bw <- asks (borderWidth . config)
-  allKnown <- io . readIORef =<< asks riverWindows
+  allKnown <- io . readIORef =<< asks (riverWindows . riverState)
   let placedMap = M.fromList placements
       attrs w rw = case M.lookup w placedMap of
         Just r -> WindowAttributes
@@ -1023,7 +1026,7 @@ applyLayout rt = do
   io $ publishSizeHints (M.map rwSizeHints allKnown)
 
   conn <- asks display
-  winRef <- asks riverWindows
+  winRef <- asks (riverWindows . riverState)
   known <- io (readIORef winRef)
 
   -- Dimensions are window management state, so they go here rather than in
@@ -1037,7 +1040,7 @@ applyLayout rt = do
   -- is exclusive, and in the non-exclusive case setting focus in this same
   -- manage sequence would silently steal the keyboard back — which is the
   -- difference between a fuzzel prompt you can type into and one you cannot.
-  seats <- io . readIORef =<< asks riverSeats
+  seats <- io . readIORef =<< asks (riverSeats . riverState)
   forM_ (M.elems seats) $ \s ->
     unless (layerHasFocus (rsLayerFocus s)) $
       case W.peek ws of
@@ -1057,7 +1060,7 @@ renderSequence rt = do
   conn <- asks display
   placements <- io (readIORef (rtPlacements rt))
   visible <- io (readIORef (rtVisible rt))
-  winRef <- asks riverWindows
+  winRef <- asks (riverWindows . riverState)
   known <- io (readIORef winRef)
   bw <- asks (borderWidth . config)
   focusedCol <- asks focusedBorder
@@ -1104,10 +1107,10 @@ renderSequence rt = do
   -- loop would otherwise have just undone it.  Filtered to what the layout
   -- placed, so a raised window that has since gone away or moved to another
   -- workspace stops being raised rather than lingering as a stale request.
-  raised <- io . readIORef =<< asks riverRestack
+  raised <- io . readIORef =<< asks (riverRestack . riverState)
   let placed = S.fromList (map fst placements)
       stillUp = filter (`S.member` placed) raised
-  io . flip writeIORef stillUp =<< asks riverRestack
+  io . flip writeIORef stillUp =<< asks (riverRestack . riverState)
   forM_ stillUp $ \win -> forM_ (M.lookup win known) $ \w ->
     io (riverNodeV1PlaceTop conn (rwNode w))
 

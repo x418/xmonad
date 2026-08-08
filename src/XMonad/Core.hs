@@ -148,26 +148,15 @@ import Data.Monoid (Ap(..))
 import qualified Data.Map as M
 import qualified Data.Set as S
 
-import XMonad.River.Connection (Connection)
+import XMonad.River.Connection (Connection, Display)
 import XMonad.River.Keysym
 import XMonad.River.Mailbox (Mailbox)
-import XMonad.River.Runtime (lookupGeometry, lookupSizeHints, sendRestart, setBorderColor, setBorderWidth)
+import XMonad.River.State (RiverState(..))
+import XMonad.River.Runtime (getGeometry, getWMNormalHints, getWindowAttributes, lookupGeometry,
+                             sendRestart, setWindowBorder, setWindowBorderWidth)
 import XMonad.River.Types
 import XMonad.River.Wire (ObjectId, nullObject)
 
--- | The handle through which the window manager talks to the compositor.
---
--- X11's @Display@ was the connection to the X server, and this is the
--- connection to the Wayland one -- the protocol even calls its root object
--- @wl_display@.  Defining the alias rather than dropping the name is what lets
--- 'withDisplay', 'XMonad.Operations.getCleanedScreenInfo' and
--- 'XMonad.Operations.isFixedSizeOrTransient' keep the signatures they have
--- upstream, so code that merely threads a display through still compiles.
---
--- What does /not/ carry over is anything that called an Xlib function on it.
--- Those names are simply absent, so such code fails at the call that is
--- genuinely unportable rather than here.
-type Display = Connection
 
 -- | XState, the (mutable) window manager state.
 data XState = XState
@@ -187,73 +176,8 @@ data XState = XState
 data XConf = XConf
     { display       :: !Display        -- ^ the compositor connection
     , config        :: !(XConfig Layout)       -- ^ initial user configuration
-    , riverManager  :: !ObjectId               -- ^ the @river_window_manager_v1@ global
-    , riverBindings :: !ObjectId               -- ^ the @river_xkb_bindings_v1@ global
-    , riverCompositor :: !(Maybe ObjectId)
-      -- ^ the @wl_compositor@ global, for surfaces the window manager draws
-      -- itself.  'Nothing' on a compositor that does not advertise one, which
-      -- should not happen but is not worth crashing over -- a session without
-      -- decorations beats no session.
-    , riverShm      :: !(Maybe ObjectId)
-      -- ^ the @wl_shm@ global, for the buffers those surfaces are drawn into.
-    , riverWindows  :: !(IORef (M.Map ObjectId RiverWindow))
-    , riverOutputs  :: !(IORef (M.Map ObjectId RiverOutput))
-    , riverSeats    :: !(IORef (M.Map ObjectId RiverSeat))
-    , riverDirty    :: !(IORef Bool)
-      -- ^ set when state changed outside a manage sequence, so that one must
-      -- be requested with @manage_dirty@
-    , inManageSeq   :: !(IORef Bool)
-      -- ^ guards requests river only permits during a manage sequence
-    , riverRestart  :: !(IORef (Maybe (FilePath, [String])))
-      -- ^ program and arguments to exec once river confirms this window
-      -- manager has stopped.  Not a shell command string: @sh -c@ forks
-      -- rather than execs for anything but the simplest word, so routing the
-      -- restart through a shell left one behind on every @M-q@, each the
-      -- parent of the next.
-    , riverMailbox :: !(Mailbox (X ()))
-      -- ^ How a thread that is not the event loop gets work done.  X11 let a
-      -- background thread post a client message to the root window; there is
-      -- no such relay here, so the channel is ours.  See
-      -- "XMonad.River.Mailbox".
-    , riverKeyBindings :: !(IORef (M.Map ObjectId (X ())))
-      -- ^ The @river_xkb_binding_v1@ object created for each of the config's
-      -- key bindings, and what it runs.  Shared with the event loop rather
-      -- than private to it because a submap has to disable the whole set for
-      -- as long as it is open: river leaves it to compositor policy which of
-      -- several bindings matching one physical key gets the press, so two
-      -- live bindings for the same key is undefined rather than layered.
-    , riverPlacements :: !(IORef [(Window, Rectangle)])
-    , riverExtraKeys :: !(IORef (M.Map ObjectId (X ())))
-      -- ^ Bindings installed at runtime, over and above the config's.
-      --
-      -- X11 called this grabbing a key: a window manager could ask the server
-      -- for one at any moment and give it back later.  River has no grab, so
-      -- what stands in for one is a @river_xkb_binding_v1@ created on demand;
-      -- this is where those live so they can be destroyed again.  See
-      -- 'XMonad.River.grabKeys'.
-    , riverRestack :: !(IORef [Window])
-      -- ^ Windows to raise above the layout's own order, bottom-to-top.
-      --
-      -- The render sequence restacks from the layout on every frame, so a
-      -- request made anywhere else -- a logHook raising the current
-      -- workspace, say -- is overwritten before anyone sees it.  This is
-      -- where such a request is kept so that it is re-applied every frame
-      -- instead, which is what "raise it and have it stay raised" has to
-      -- mean when something else owns the order.  Windows that are no longer
-      -- placed are dropped as they go.
-      -- ^ Where the last layout run put each window, in river's global
-      -- coordinate space.  This is the only record of a window's position:
-      -- river reports a window's size but never where it is, because the
-      -- window manager is the thing that decided.  See
-      -- 'XMonad.River.windowRect'.
-    , riverSubmap :: !(IORef (Maybe (X ())))
-      -- ^ What to do if a key no submap is waiting for is pressed: tear the
-      -- submap down and run its default action.  'Nothing' when no submap is
-      -- open.
-    , riverDragOrigin :: !(IORef (Position, Position))
-      -- ^ Where the pointer was when the current interactive operation began.
-      -- river reports a drag as a delta from its start; 'mouseDrag' promises
-      -- its caller an absolute position, so the origin has to be remembered.
+    , riverState    :: !(RiverState X)
+      -- ^ everything river-specific; see "XMonad.River.State"
     , normalBorder  :: !Pixel         -- ^ border colour of unfocused windows
     , focusedBorder :: !Pixel         -- ^ border colour of the focused window
     , keyActions    :: !(M.Map (KeyMask, KeySym) (X ()))
@@ -298,43 +222,6 @@ data XConfig l = XConfig
                                                  -- provides additional information and a simple interface for using this.
     }
 
-
--- | The modifier masks, with X11's values -- which are also river's.
---
--- @river_seat_v1.modifiers@ assigns shift=1, ctrl=4, mod1=8, mod3=32, mod4=64,
--- mod5=128, exactly matching @ShiftMask@ and friends.  This is not a
--- coincidence to be grateful for so much as the reason the port is possible at
--- all: it means @mod4Mask@ keeps both its value and its meaning, and a keymap
--- moves across as data.
---
--- 'lockMask' and 'mod2Mask' are the exception.  river has no bit for either --
--- caps lock and num lock are resolved before the window manager sees a
--- binding -- so they keep their X11 values for arithmetic that combines masks,
--- but no binding will ever match on them.  'XMonad.Operations.cleanMask' is
--- the identity here for the same reason.
-shiftMask, lockMask, controlMask, mod1Mask, mod2Mask, mod3Mask, mod4Mask,
-  mod5Mask, noModMask :: KeyMask
-shiftMask   = 1
-lockMask    = 2
-controlMask = 4
-mod1Mask    = 8
-mod2Mask    = 16
-mod3Mask    = 32
-mod4Mask    = 64
-mod5Mask    = 128
-noModMask   = 0
-
--- | X11 button numbers.
---
--- river's pointer bindings take Linux input event codes instead, so these are
--- translated at the point of use rather than being the same numbers.  They
--- keep X11's spelling because that is what a config writes.
-button1, button2, button3, button4, button5 :: Button
-button1 = 1
-button2 = 2
-button3 = 3
-button4 = 4
-button5 = 5
 
 type WindowSet   = StackSet  WorkspaceId (Layout Window) Window ScreenId ScreenDetail
 type WindowSpace = Workspace WorkspaceId (Layout Window) Window
@@ -425,71 +312,6 @@ withWindowAttributes :: Display -> Window -> (WindowAttributes -> X ()) -> X ()
 withWindowAttributes _ win f = do
     wa <- io (lookupGeometry win)
     catchX (whenJust wa f) (return ())
-
--- | A window's attributes.
---
--- Kept in 'IO' with the same signature the X11 version had, so that the
--- @io $ getWindowAttributes d w@ spelling used throughout xmonad-contrib still
--- compiles.  There is no server to ask, so the answer comes from what the last
--- layout run decided; see 'XMonad.River.Types.WindowAttributes'.
---
--- Throws for a window river has never mentioned, as @XGetWindowAttributes@
--- did.  Callers that would rather not, and most should not, can use
--- 'withWindowAttributes'.
-getWindowAttributes :: Display -> Window -> IO WindowAttributes
-getWindowAttributes _ win = lookupGeometry win >>= \case
-    Just wa -> pure wa
-    Nothing -> ioError . userError $
-        "getWindowAttributes: no such window: " ++ show win
-
--- | A window's size hints.
---
--- Same signature as X11's, so @io $ getWMNormalHints d w@ still compiles.
--- River reports a minimum and a maximum and nothing else; see
--- 'XMonad.River.Types.SizeHints' for what the remaining fields do.
--- | Override how wide a border the window manager draws around one window.
---
--- Zero removes it, which is what "XMonad.Layout.NoBorders" is built on.
---
--- The 'Display' is accepted and unused, as elsewhere: there is one connection
--- and 'XConf' already has it.  Keeping the parameter lets a call site written
--- for X11 compile unchanged.
-setWindowBorderWidth :: Display -> Window -> Dimension -> IO ()
-setWindowBorderWidth _ = setBorderWidth
-
--- | Override the colour of one window's border.
---
--- Takes a 'Pixel', as X11 did.  What a 'Pixel' /is/ differs -- there is no
--- colormap to index into, so it is the packed colour itself -- but the
--- signature and the meaning at the call site are unchanged.  Border colours
--- reach the compositor as RGBA, so this widens; a caller that wants to say
--- something a 'Pixel' cannot, such as a transparent border, wants
--- 'XMonad.River.Types.BorderColor' and 'XMonad.River.Runtime.setBorderColor'.
-setWindowBorder :: Display -> Window -> Pixel -> IO ()
-setWindowBorder _ w = setBorderColor w . pixelColor
-
--- | X11's event type tag, kept for the handful of signatures that name it.
-type EventType = Word32
-
-keyPress, keyRelease :: EventType
-keyPress   = 2
-keyRelease = 3
-
-getWMNormalHints :: Display -> Window -> IO SizeHints
-getWMNormalHints _ = lookupSizeHints
-
--- | Geometry in the tuple shape X11's @getGeometry@ returned:
--- @(root, x, y, width, height, border width, depth)@.
---
--- The first component is 'nullWindow' rather than a root window id, because
--- there is no root window; the last is zero, because there is no visual depth
--- to report.  Callers in xmonad-contrib discard both.
-getGeometry :: Display -> Window
-            -> IO (Window, Position, Position, Dimension, Dimension, Dimension, Int)
-getGeometry dpy win = do
-    wa <- getWindowAttributes dpy win
-    pure ( nullObject
-         , wa_x wa, wa_y wa, wa_width wa, wa_height wa, wa_border_width wa, 0 )
 
 -- | True if the given window is the root window
 --

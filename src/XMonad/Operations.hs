@@ -75,6 +75,7 @@ module XMonad.Operations (
 
 import XMonad.Core
 import XMonad.River.Runtime (setBorderColor)
+import XMonad.River.State (RiverState(..))
 import XMonad.River.Types
 import XMonad.River.Protocol.WindowManagement
 import qualified XMonad.StackSet as W
@@ -100,7 +101,7 @@ import Control.Monad (forM_, guard, join, unless, void, when)
 
 isFixedSizeOrTransient :: Display -> Window -> X Bool
 isFixedSizeOrTransient _ w = do
-    known <- io . readIORef =<< asks riverWindows
+    known <- io . readIORef =<< asks (riverWindows . riverState)
     pure $ case M.lookup w known of
         Nothing -> False
         Just rw ->
@@ -122,7 +123,7 @@ unmanage = windows . W.delete
 killWindow :: Window -> X ()
 killWindow w = do
     conn <- asks display
-    known <- io . readIORef =<< asks riverWindows
+    known <- io . readIORef =<< asks (riverWindows . riverState)
     when (M.member w known) $ io (riverWindowV1Close conn w)
 
 -- | Kill the currently focused client.
@@ -148,7 +149,7 @@ kill = withFocused killWindow
 windows :: (WindowSet -> WindowSet) -> X ()
 windows f = do
     modify $ \st -> st { windowset = f (windowset st) }
-    inSeq <- io . readIORef =<< asks inManageSeq
+    inSeq <- io . readIORef =<< asks (inManageSeq . riverState)
     unless inSeq requestManageSequence
     asks (logHook . config) >>= userCodeDef ()
 
@@ -158,7 +159,7 @@ windows f = do
 requestManageSequence :: X ()
 requestManageSequence = do
     conn <- asks display
-    manager <- asks riverManager
+    manager <- asks (riverManager . riverState)
     io (riverWindowManagerV1ManageDirty conn manager)
 
 -- | Re-run the layout.  Under river this is a request for another manage
@@ -261,7 +262,7 @@ nubScreens xs = nub . filter (\x -> not $ any (x `containedIn`) xs) $ xs
 
 getCleanedScreenInfo :: Display -> X [Rectangle]
 getCleanedScreenInfo _ = do
-    outs <- io . readIORef =<< asks riverOutputs
+    outs <- io . readIORef =<< asks (riverOutputs . riverState)
     pure $ nubScreens
         [ rect
         | o <- sortOn roPosition (filter (not . roRemoved) (M.elems outs))
@@ -417,7 +418,7 @@ cleanMask = return
 
 writeStateToFile :: X ()
 writeStateToFile = do
-    known <- io . readIORef =<< asks riverWindows
+    known <- io . readIORef =<< asks (riverWindows . riverState)
     let identOf w = B8.unpack <$> (rwIdentifier =<< M.lookup w known)
 
         maybeShow (t, Right (PersistentExtension ext)) = Just (t, show ext)
@@ -483,7 +484,7 @@ readStateFile xmc = do
 
     io (removeFile path)
 
-    known <- io . readIORef =<< asks riverWindows
+    known <- io . readIORef =<< asks (riverWindows . riverState)
     let byIdent = M.fromList
           [ (B8.unpack i, rwObject w)
           | w <- M.elems known, Just i <- [rwIdentifier w] ]
@@ -533,8 +534,8 @@ readStateFile xmc = do
 restart :: String -> Bool -> X ()
 restart cmd resume = do
     conn <- asks display
-    manager <- asks riverManager
-    ref <- asks riverRestart
+    manager <- asks (riverManager . riverState)
+    ref <- asks (riverRestart . riverState)
     broadcastMessage ReleaseResources
     when resume writeStateToFile
     io (writeIORef ref (Just (cmd, [])))
@@ -560,7 +561,7 @@ type D = (Dimension, Dimension)
 floatLocation :: Window -> X (ScreenId, W.RationalRect)
 floatLocation w = do
     ws <- gets windowset
-    known <- io . readIORef =<< asks riverWindows
+    known <- io . readIORef =<< asks (riverWindows . riverState)
     let sc = W.current ws
         sr = screenRect (W.screenDetail sc)
         sw = max 1 (fromIntegral (rect_width sr))
@@ -619,11 +620,11 @@ mouseDrag f done = do
         Just _ -> return () -- already dragging
         Nothing -> do
             conn <- asks display
-            seats <- io . readIORef =<< asks riverSeats
+            seats <- io . readIORef =<< asks (riverSeats . riverState)
             case M.elems seats of
                 [] -> return ()
                 (s:_) -> do
-                    origin <- asks riverDragOrigin
+                    origin <- asks (riverDragOrigin . riverState)
                     io (writeIORef origin (rsPointer s))
                     io (riverSeatV1OpStartPointer conn (rsObject s))
                     modify $ \st -> st { dragging = Just (f, cleanup) }
@@ -637,7 +638,7 @@ mouseDrag f done = do
 warpPointer :: Position -> Position -> X ()
 warpPointer x y = do
     conn <- asks display
-    seats <- io . readIORef =<< asks riverSeats
+    seats <- io . readIORef =<< asks (riverSeats . riverState)
     forM_ (M.keys seats) $ \seat -> io (riverSeatV1PointerWarp conn seat x y)
 
 -- | Accumulate mouse motion events.
@@ -654,14 +655,14 @@ warpPointer x y = do
 
 mouseMoveWindow :: Window -> X ()
 mouseMoveWindow w = whenX (isClient w) $ do
-    known <- io . readIORef =<< asks riverWindows
+    known <- io . readIORef =<< asks (riverWindows . riverState)
     ws <- gets windowset
     let sr = screenRect (W.screenDetail (W.current ws))
     forM_ (M.lookup w known) $ \_ -> do
-        (ox, oy) <- io . readIORef =<< asks riverDragOrigin
+        (ox, oy) <- io . readIORef =<< asks (riverDragOrigin . riverState)
         mouseDrag
             (\ex ey -> do
-                node <- io . readIORef =<< asks riverWindows
+                node <- io . readIORef =<< asks (riverWindows . riverState)
                 conn <- asks display
                 forM_ (M.lookup w node) $ \rw ->
                     io $ riverNodeV1SetPosition conn (rwNode rw)
@@ -673,11 +674,11 @@ mouseMoveWindow w = whenX (isClient w) $ do
 
 mouseResizeWindow :: Window -> X ()
 mouseResizeWindow w = whenX (isClient w) $ do
-    known <- io . readIORef =<< asks riverWindows
+    known <- io . readIORef =<< asks (riverWindows . riverState)
     forM_ (M.lookup w known) $ \rw0 -> do
         let (w0, h0) = rwDimensions rw0
             hints = rwSizeHints rw0
-        (ox, oy) <- io . readIORef =<< asks riverDragOrigin
+        (ox, oy) <- io . readIORef =<< asks (riverDragOrigin . riverState)
         mouseDrag
             (\ex ey -> do
                 conn <- asks display
@@ -726,7 +727,7 @@ data StateFile = StateFile
 
 mkAdjust :: Window -> X (D -> D)
 mkAdjust w = do
-    known <- io . readIORef =<< asks riverWindows
+    known <- io . readIORef =<< asks (riverWindows . riverState)
     bw <- asks (borderWidth . config)
     pure $ case M.lookup w known of
         Nothing -> id

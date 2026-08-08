@@ -13,6 +13,7 @@
 module XMonad.River.Connection
   ( -- * Connection
     Connection
+  , Display
   , connect
   , connectTo
   , disconnect
@@ -395,3 +396,17 @@ bindGlobal conn reg globals iface minVersion maxVersion =
           -- wl_registry.bind(name, new_id)
           request conn reg 0 (argUInt (globalName g) <> argNewIdAny iface ver oid)
           pure (Just (oid, ver))
+
+-- | The handle through which the window manager talks to the compositor.
+--
+-- X11's @Display@ was the connection to the X server, and this is the
+-- connection to the Wayland one -- the protocol even calls its root object
+-- @wl_display@.  Defining the alias rather than dropping the name is what lets
+-- 'withDisplay', 'XMonad.Operations.getCleanedScreenInfo' and
+-- 'XMonad.Operations.isFixedSizeOrTransient' keep the signatures they have
+-- upstream, so code that merely threads a display through still compiles.
+--
+-- What does /not/ carry over is anything that called an Xlib function on it.
+-- Those names are simply absent, so such code fails at the call that is
+-- genuinely unportable rather than here.
+type Display = Connection

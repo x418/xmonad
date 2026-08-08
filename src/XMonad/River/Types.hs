@@ -19,6 +19,10 @@ module XMonad.River.Types
   , KeySym
   , Button
   , ButtonMask
+  , shiftMask, lockMask, controlMask, mod1Mask, mod2Mask, mod3Mask, mod4Mask
+  , mod5Mask, noModMask
+  , button1, button2, button3, button4, button5
+  , EventType, keyPress, keyRelease
     -- * Windows
   , Window
     -- * Events
@@ -369,3 +373,47 @@ data LayerFocus
 layerHasFocus :: LayerFocus -> Bool
 layerHasFocus LayerFocusNone = False
 layerHasFocus _              = True
+
+-- | The modifier masks, with X11's values -- which are also river's.
+--
+-- @river_seat_v1.modifiers@ assigns shift=1, ctrl=4, mod1=8, mod3=32, mod4=64,
+-- mod5=128, exactly matching @ShiftMask@ and friends.  This is not a
+-- coincidence to be grateful for so much as the reason the port is possible at
+-- all: it means @mod4Mask@ keeps both its value and its meaning, and a keymap
+-- moves across as data.
+--
+-- 'lockMask' and 'mod2Mask' are the exception.  river has no bit for either --
+-- caps lock and num lock are resolved before the window manager sees a
+-- binding -- so they keep their X11 values for arithmetic that combines masks,
+-- but no binding will ever match on them.  'XMonad.Operations.cleanMask' is
+-- the identity here for the same reason.
+shiftMask, lockMask, controlMask, mod1Mask, mod2Mask, mod3Mask, mod4Mask,
+  mod5Mask, noModMask :: KeyMask
+shiftMask   = 1
+lockMask    = 2
+controlMask = 4
+mod1Mask    = 8
+mod2Mask    = 16
+mod3Mask    = 32
+mod4Mask    = 64
+mod5Mask    = 128
+noModMask   = 0
+
+-- | X11 button numbers.
+--
+-- river's pointer bindings take Linux input event codes instead, so these are
+-- translated at the point of use rather than being the same numbers.  They
+-- keep X11's spelling because that is what a config writes.
+button1, button2, button3, button4, button5 :: Button
+button1 = 1
+button2 = 2
+button3 = 3
+button4 = 4
+button5 = 5
+
+-- | X11's event type tag, kept for the handful of signatures that name it.
+type EventType = Word32
+
+keyPress, keyRelease :: EventType
+keyPress   = 2
+keyRelease = 3

@@ -18,6 +18,11 @@ module XMonad.River.Runtime
   , lookupSizeHints
   , setBorderWidth
   , setBorderColor
+  , getWindowAttributes
+  , getWMNormalHints
+  , getGeometry
+  , setWindowBorderWidth
+  , setWindowBorder
   , lookupBorderOverride
   , forgetBorderOverride
   , nextSubmapGeneration
@@ -38,7 +43,10 @@ import qualified Control.Exception as E
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
-import XMonad.River.Types (BorderColor, Dimension, Window, WindowAttributes, SizeHints, noSizeHints)
+import XMonad.River.Types (BorderColor, Dimension, Pixel, pixelColor, Position, Window,
+                           WindowAttributes(..), SizeHints, noSizeHints)
+import XMonad.River.Connection (Display)
+import XMonad.River.Wire (ObjectId, nullObject)
 
 {-# NOINLINE geometryRef #-}
 geometryRef :: IORef (M.Map Window WindowAttributes)
@@ -224,3 +232,61 @@ warnUnimplemented name explanation = liftIO $ do
 {-# NOINLINE warnedRef #-}
 warnedRef :: IORef (S.Set String)
 warnedRef = unsafePerformIO (newIORef S.empty)
+
+-- | A window's attributes.
+--
+-- Kept in 'IO' with the same signature the X11 version had, so that the
+-- @io $ getWindowAttributes d w@ spelling used throughout xmonad-contrib still
+-- compiles.  There is no server to ask, so the answer comes from what the last
+-- layout run decided; see 'XMonad.River.Types.WindowAttributes'.
+--
+-- Throws for a window river has never mentioned, as @XGetWindowAttributes@
+-- did.  Callers that would rather not, and most should not, can use
+-- 'withWindowAttributes'.
+getWindowAttributes :: Display -> Window -> IO WindowAttributes
+getWindowAttributes _ win = lookupGeometry win >>= \case
+    Just wa -> pure wa
+    Nothing -> ioError . userError $
+        "getWindowAttributes: no such window: " ++ show win
+
+-- | A window's size hints.
+--
+-- Same signature as X11's, so @io $ getWMNormalHints d w@ still compiles.
+-- River reports a minimum and a maximum and nothing else; see
+-- 'XMonad.River.Types.SizeHints' for what the remaining fields do.
+getWMNormalHints :: Display -> Window -> IO SizeHints
+getWMNormalHints _ = lookupSizeHints
+
+-- | Override how wide a border the window manager draws around one window.
+--
+-- Zero removes it, which is what "XMonad.Layout.NoBorders" is built on.
+--
+-- The 'Display' is accepted and unused, as elsewhere: there is one connection
+-- and 'XConf' already has it.  Keeping the parameter lets a call site written
+-- for X11 compile unchanged.
+setWindowBorderWidth :: Display -> Window -> Dimension -> IO ()
+setWindowBorderWidth _ = setBorderWidth
+
+-- | Override the colour of one window's border.
+--
+-- Takes a 'Pixel', as X11 did.  What a 'Pixel' /is/ differs -- there is no
+-- colormap to index into, so it is the packed colour itself -- but the
+-- signature and the meaning at the call site are unchanged.  Border colours
+-- reach the compositor as RGBA, so this widens; a caller that wants to say
+-- something a 'Pixel' cannot, such as a transparent border, wants
+-- 'XMonad.River.Types.BorderColor' and 'XMonad.River.Runtime.setBorderColor'.
+setWindowBorder :: Display -> Window -> Pixel -> IO ()
+setWindowBorder _ w = setBorderColor w . pixelColor
+
+-- | Geometry in the tuple shape X11's @getGeometry@ returned:
+-- @(root, x, y, width, height, border width, depth)@.
+--
+-- The first component is 'nullWindow' rather than a root window id, because
+-- there is no root window; the last is zero, because there is no visual depth
+-- to report.  Callers in xmonad-contrib discard both.
+getGeometry :: Display -> Window
+            -> IO (Window, Position, Position, Dimension, Dimension, Dimension, Int)
+getGeometry dpy win = do
+    wa <- getWindowAttributes dpy win
+    pure ( nullObject
+         , wa_x wa, wa_y wa, wa_width wa, wa_height wa, wa_border_width wa, 0 )

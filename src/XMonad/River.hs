@@ -144,6 +144,7 @@ import XMonad.River.Protocol.WindowManagement
 import XMonad.River.Protocol.XkbBindings
 import XMonad.River.Runtime (RestartRequested(..), currentSubmapGeneration, nextSubmapGeneration, setMainThread, setModifierWatcher, warnUnimplemented)
 import XMonad.River.Types
+import XMonad.River.State (RiverState(..))
 
 -- | Run an action on the event loop, from any thread.
 --
@@ -152,7 +153,7 @@ import XMonad.River.Types
 -- change only during a sequence, so it is the earliest moment the action could
 -- legally do anything.
 postAction :: XConf -> X () -> IO ()
-postAction c = MB.post (riverMailbox c)
+postAction c = MB.post (riverMailbox (riverState c))
 
 -- | Ask the compositor to start a manage sequence, because state it cannot see
 -- has changed.
@@ -161,7 +162,7 @@ postAction c = MB.post (riverMailbox c)
 -- effect.
 manageDirty :: X ()
 manageDirty = do
-  ref <- asks riverDirty
+  ref <- asks (riverDirty . riverState)
   io (writeIORef ref True)
 
 -- | End the Wayland session, taking the compositor with it.
@@ -172,7 +173,7 @@ manageDirty = do
 exitSession :: X ()
 exitSession = do
     conn <- asks display
-    manager <- asks riverManager
+    manager <- asks (riverManager . riverState)
     io (riverWindowManagerV1ExitSession conn manager)
 
 -- | Where a window is, in river's global coordinate space.
@@ -188,7 +189,7 @@ exitSession = do
 -- has to be given one here.
 windowRect :: Window -> X (Maybe Rectangle)
 windowRect w = do
-    placements <- io . readIORef =<< asks riverPlacements
+    placements <- io . readIORef =<< asks (riverPlacements . riverState)
     pure (lookup w placements)
 
 -- | Put a window at an absolute position and size.
@@ -204,7 +205,7 @@ windowRect w = do
 moveResizeWindow :: Window -> Rectangle -> X ()
 moveResizeWindow w r = do
     conn <- asks display
-    known <- io . readIORef =<< asks riverWindows
+    known <- io . readIORef =<< asks (riverWindows . riverState)
     forM_ (M.lookup w known) $ \rw -> do
         let (width, height) = applySizeHintsContents (rwSizeHints rw)
                 (rect_width r, rect_height r)
@@ -220,7 +221,7 @@ moveResizeWindow w r = do
 -- at all.
 pointerPosition :: X (Maybe (Position, Position))
 pointerPosition = do
-    seats <- io . readIORef =<< asks riverSeats
+    seats <- io . readIORef =<< asks (riverSeats . riverState)
     pure $ case M.elems seats of
         (s:_) -> Just (rsPointer s)
         []    -> Nothing
@@ -241,7 +242,7 @@ windowUnderPointer :: X (Maybe Window)
 windowUnderPointer = pointerPosition >>= \case
     Nothing -> pure Nothing
     Just (px, py) -> do
-        placements <- io . readIORef =<< asks riverPlacements
+        placements <- io . readIORef =<< asks (riverPlacements . riverState)
         pure $ fst <$> find (pointWithin px py . snd) placements
 
 -- | How many outputs the compositor has, over a connection of its own.
@@ -296,16 +297,16 @@ grabKeysUpDown keymap = do
     conf <- ask
     ungrabKeys
     let conn = display conf
-        bindingsGlobal = riverBindings conf
-    seats <- io (readIORef (riverSeats conf))
+        bindingsGlobal = riverBindings (riverState conf)
+    seats <- io (readIORef (riverSeats (riverState conf)))
     io . forM_ (M.elems seats) $ \seat ->
       forM_ (M.toList keymap) $ \((mask, keysym), (onDown, onUp)) -> do
         b <- riverXkbBindingsV1GetXkbBinding conn bindingsGlobal
                (rsObject seat) keysym (riverModifiers mask)
-        modifyIORef' (riverExtraKeys conf) (M.insert b onDown)
+        modifyIORef' (riverExtraKeys (riverState conf)) (M.insert b onDown)
         riverXkbBindingV1Listen conn b $ \case
-          RiverXkbBindingV1Pressed  -> MB.post (riverMailbox conf) onDown
-          RiverXkbBindingV1Released -> MB.post (riverMailbox conf) onUp
+          RiverXkbBindingV1Pressed  -> MB.post (riverMailbox (riverState conf)) onDown
+          RiverXkbBindingV1Released -> MB.post (riverMailbox (riverState conf)) onUp
           _ -> pure ()
         riverXkbBindingV1Enable conn b
     manageDirty
@@ -315,11 +316,11 @@ ungrabKeys :: X ()
 ungrabKeys = do
     conf <- ask
     let conn = display conf
-    existing <- io (readIORef (riverExtraKeys conf))
+    existing <- io (readIORef (riverExtraKeys (riverState conf)))
     io $ forM_ (M.keys existing) $ \b -> do
         riverXkbBindingV1Disable conn b
         riverXkbBindingV1Destroy conn b
-    io (writeIORef (riverExtraKeys conf) M.empty)
+    io (writeIORef (riverExtraKeys (riverState conf)) M.empty)
 
 -- | Keep a window above the ones the layout placed.
 --
@@ -339,7 +340,7 @@ raiseWindow w = restackWindows [w]
 -- a caller recomputing the whole order every 'logHook' wants.
 restackWindows :: [Window] -> X ()
 restackWindows ws = do
-    ref <- asks riverRestack
+    ref <- asks (riverRestack . riverState)
     -- Stored bottom-to-top, because that is the order the render sequence
     -- walks; the argument is topmost-first, as X11's was.
     io (writeIORef ref (reverse ws))
@@ -356,7 +357,7 @@ restackWindows ws = do
 -- Unlike the X11 call this asks nothing: the answer is what river last said.
 windowParent :: Window -> X (Maybe Window)
 windowParent w = do
-    known <- io . readIORef =<< asks riverWindows
+    known <- io . readIORef =<< asks (riverWindows . riverState)
     pure (M.lookup w known >>= rwParent)
 
 -- | Choose the XCursor theme the compositor draws with.
@@ -383,7 +384,7 @@ windowParent w = do
 setCursorTheme :: String -> Int -> X ()
 setCursorTheme name size = do
     conn <- asks display
-    seats <- io . readIORef =<< asks riverSeats
+    seats <- io . readIORef =<< asks (riverSeats . riverState)
     io $ forM_ (M.elems seats) $ \s ->
         riverSeatV1SetXcursorTheme conn (rsObject s)
           (BC.pack name) (fromIntegral size)
@@ -481,9 +482,9 @@ whileModifiersHeld
 whileModifiersHeld mods captures onKey onDone = do
     conf <- ask
     let conn = display conf
-        bindingsGlobal = riverBindings conf
-    seats <- io (readIORef (riverSeats conf))
-    globals <- io (readIORef (riverKeyBindings conf))
+        bindingsGlobal = riverBindings (riverState conf)
+    seats <- io (readIORef (riverSeats (riverState conf)))
+    globals <- io (readIORef (riverKeyBindings (riverState conf)))
 
     let xkbSeats = [ x | s <- M.elems seats, Just x <- [rsXkbSeat s] ]
     if null xkbSeats
@@ -527,7 +528,7 @@ whileModifiersHeld mods captures onKey onDone = do
         io $ forM_ xkbSeats $ \x ->
             riverXkbBindingsSeatV1ModifiersWatch conn x (riverModifiers mods)
   where
-    post conf = MB.post (riverMailbox conf)
+    post conf = MB.post (riverMailbox (riverState conf))
 
 -- | Read one key press and run the action it selects.
 --
@@ -562,9 +563,9 @@ submapNextKey subKeys onUnbound = do
     conf <- ask
     gen <- io nextSubmapGeneration
     let conn = display conf
-        bindingsGlobal = riverBindings conf
-    seats <- io (readIORef (riverSeats conf))
-    globals <- io (readIORef (riverKeyBindings conf))
+        bindingsGlobal = riverBindings (riverState conf)
+    seats <- io (readIORef (riverSeats (riverState conf)))
+    globals <- io (readIORef (riverKeyBindings (riverState conf)))
 
     io $ forM_ (M.keys globals) (riverXkbBindingV1Disable conn)
 
@@ -578,7 +579,7 @@ submapNextKey subKeys onUnbound = do
     -- way the submap ends.  Runs in the manage sequence that follows the key
     -- press, which is the earliest either request is legal.
     let reset = do
-            io (writeIORef (riverSubmap conf) Nothing)
+            io (writeIORef (riverSubmap (riverState conf)) Nothing)
             io $ forM_ temps $ \(b, _) -> do
                 riverXkbBindingV1Disable conn b
                 riverXkbBindingV1Destroy conn b
@@ -589,14 +590,14 @@ submapNextKey subKeys onUnbound = do
             RiverXkbBindingV1Pressed -> do
                 -- Take the submap slot, so that this and ate_unbound_key
                 -- cannot both fire a teardown.
-                taken <- atomicModifyIORef' (riverSubmap conf) (\s -> (Nothing, s))
-                when (isJust taken) $ MB.post (riverMailbox conf) $ do
+                taken <- atomicModifyIORef' (riverSubmap (riverState conf)) (\s -> (Nothing, s))
+                when (isJust taken) $ MB.post (riverMailbox (riverState conf)) $ do
                     reset
                     fromMaybe (pure ()) (M.lookup k subKeys)
             _ -> pure ()
         riverXkbBindingV1Enable conn b
 
-    io (writeIORef (riverSubmap conf) (Just (reset >> onUnbound)))
+    io (writeIORef (riverSubmap (riverState conf)) (Just (reset >> onUnbound)))
 
     -- Ask to be told about a key that is not in the submap, so it can be
     -- abandoned.  Without this -- on version 1, where the request does not
@@ -625,11 +626,11 @@ submapNextKey subKeys onUnbound = do
         threadDelay submapDeadlineMicros
         stillOurs <- (== gen) <$> currentSubmapGeneration
         when stillOurs $ do
-            taken <- atomicModifyIORef' (riverSubmap conf) (\s -> (Nothing, s))
+            taken <- atomicModifyIORef' (riverSubmap (riverState conf)) (\s -> (Nothing, s))
             forM_ taken $ \abandon -> do
                 hPutStrLn stderr
                   "xmonad-river: submap abandoned after 60s; restoring bindings"
-                MB.post (riverMailbox conf) abandon
+                MB.post (riverMailbox (riverState conf)) abandon
 
 -- | How long a submap may stay open before it gives up and restores the
 -- config's bindings.  See 'submapNextKey'.

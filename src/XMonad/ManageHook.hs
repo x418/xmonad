@@ -51,6 +51,7 @@ import qualified Data.ByteString.Char8 as BC
 import qualified Data.Map as M
 
 import XMonad.Core
+import XMonad.River.State (RiverState(..))
 import XMonad.River.Types
 import XMonad.Operations (floatLocation, reveal)
 import qualified XMonad.StackSet as W
@@ -98,7 +99,7 @@ askWindow :: Query (Maybe RiverWindow)
 askWindow = do
     w <- ask
     liftX $ do
-        ref <- asks riverWindows
+        ref <- asks (riverWindows . riverState)
         M.lookup w <$> io (readIORef ref)
 
 -- | Return the window title; i.e., the string a client sets with

@@ -106,6 +106,7 @@ library
                    XMonad.River.Mailbox
                    XMonad.River.Runtime
                    XMonad.River.Socket
+                   XMonad.River.State
                    XMonad.River.Surface
                    XMonad.River.Protocol.Core
                    XMonad.River.Protocol.LayerShell
