@@ -4,9 +4,15 @@
 -- Copyright : (c) Don Stewart
 -- License   : BSD3
 --
+-- Maintainer: Don Stewart <dons@galois.com>
+-- Stability : provisional
+-- Portability:
+--
+--------------------------------------------------------------------
+--
 -- Useful exports for configuration files.
 --
--- This is the river backend's copy of upstream xmonad's @src\/XMonad.hs@.
+-- River backend notes.
 --
 -- The one difference is the important one: it does __not__ re-export
 -- @Graphics.X11@ or @Graphics.X11.Xlib.Extras@.  The X11 build re-exports

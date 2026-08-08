@@ -16,8 +16,16 @@
 -- Copyright   :  (c) Spencer Janssen 2007
 -- License     :  BSD3-style (see LICENSE)
 --
+-- Maintainer  :  spencerjanssen@gmail.com
+-- Stability   :  unstable
+-- Portability :  not portable, uses cunning newtype deriving
+--
 -- The 'X' monad, a state monad transformer over 'IO', for the window
 -- manager state, and support routines.
+--
+-----------------------------------------------------------------------------
+--
+-- River backend notes.
 --
 -- This is the river backend's copy of upstream xmonad's @src\/XMonad\/Core.hs@,
 -- deliberately kept as close to that file as it can be -- 84% of it is shared,
@@ -408,7 +416,7 @@ withWindowSet :: (WindowSet -> X a) -> X a
 withWindowSet f = gets windowset >>= f
 
 
--- | Run an action with a window's attributes, if river knows the window.
+-- | Safely access window attributes.
 --
 -- Same contract as the X11 version, which skipped the action when the server
 -- answered @BadWindow@; here it is skipped for a window river has never
@@ -483,7 +491,7 @@ getGeometry dpy win = do
     pure ( nullObject
          , wa_x wa, wa_y wa, wa_width wa, wa_height wa, wa_border_width wa, 0 )
 
--- | True if the given window is the root window.
+-- | True if the given window is the root window
 --
 -- Always 'False'.  That is not a stub: river has no root window, so nothing is
 -- it, and the question has a correct total answer rather than an unavailable
@@ -522,11 +530,20 @@ readsLayout (Layout l) s = [(Layout (asTypeOf x l), rs) | (x, rs) <- reads s]
 -- * 'description'
 --
 -- Note that any code which /uses/ 'LayoutClass' methods should only
--- ever call 'runLayout', 'handleMessage', and 'description'!
+-- ever call 'runLayout', 'handleMessage', and 'description'!  In
+-- other words, the only calls to 'doLayout', 'pureMessage', and other
+-- such methods should be from the default implementations of
+-- 'runLayout', 'handleMessage', and so on.  This ensures that the
+-- proper methods will be used, regardless of the particular methods
+-- that any 'LayoutClass' instance chooses to define.
 class (Show (layout a), Typeable layout) => LayoutClass layout a where
 
     -- | By default, 'runLayout' calls 'doLayout' if there are any
-    --   windows to be laid out, and 'emptyLayout' otherwise.
+    --   windows to be laid out, and 'emptyLayout' otherwise.  Most
+    --   instances of 'LayoutClass' probably do not need to implement
+    --   'runLayout'; it is only useful for layouts which wish to make
+    --   use of more of the 'Workspace' information (for example,
+    --   "XMonad.Layout.PerWorkspace").
     runLayout :: Workspace WorkspaceId (layout a) a
               -> Rectangle
               -> X ([(a, Rectangle)], Maybe (layout a))
@@ -534,13 +551,25 @@ class (Show (layout a), Typeable layout) => LayoutClass layout a where
 
     -- | Given a 'Rectangle' in which to place the windows, and a 'Stack'
     -- of windows, return a list of windows and their corresponding
-    -- Rectangles.  The order of windows in this list should be the
-    -- desired stacking order.
+    -- Rectangles.  If an element is not given a Rectangle by
+    -- 'doLayout', then it is not shown on screen.  The order of
+    -- windows in this list should be the desired stacking order.
+    --
+    -- Also possibly return a modified layout (by returning @Just
+    -- newLayout@), if this layout needs to be modified (e.g. if it
+    -- keeps track of some sort of state).  Return @Nothing@ if the
+    -- layout does not need to be modified.
+    --
+    -- Layouts which do not need access to the 'X' monad ('IO', window
+    -- manager state, or configuration) and do not keep track of their
+    -- own state should implement 'pureLayout' instead of 'doLayout'.
     doLayout    :: layout a -> Rectangle -> Stack a
                 -> X ([(a, Rectangle)], Maybe (layout a))
     doLayout l r s   = return (pureLayout l r s, Nothing)
 
-    -- | This is a pure version of 'doLayout'.
+    -- | This is a pure version of 'doLayout', for cases where we
+    -- don't need access to the 'X' monad to determine how to lay out
+    -- the windows, and we don't need to modify the layout itself.
     pureLayout  :: layout a -> Rectangle -> Stack a -> [(a, Rectangle)]
     pureLayout _ r s = [(focus s, r)]
 
@@ -548,17 +577,28 @@ class (Show (layout a), Typeable layout) => LayoutClass layout a where
     emptyLayout :: layout a -> Rectangle -> X ([(a, Rectangle)], Maybe (layout a))
     emptyLayout _ _ = return ([], Nothing)
 
-    -- | 'handleMessage' performs message handling.
+    -- | 'handleMessage' performs message handling.  If
+    -- 'handleMessage' returns @Nothing@, then the layout did not
+    -- respond to the message and the screen is not refreshed.
+    -- Otherwise, 'handleMessage' returns an updated layout and the
+    -- screen is refreshed.
+    --
+    -- Layouts which do not need access to the 'X' monad to decide how
+    -- to handle messages should implement 'pureMessage' instead of
+    -- 'handleMessage' (this restricts the risk of error, and makes
+    -- testing much easier).
     handleMessage :: layout a -> SomeMessage -> X (Maybe (layout a))
     handleMessage l  = return . pureMessage l
 
     -- | Respond to a message by (possibly) changing our layout, but
-    -- taking no other action.
+    -- taking no other action.  If the layout changes, the screen will
+    -- be refreshed.
     pureMessage :: layout a -> SomeMessage -> Maybe (layout a)
     pureMessage _ _  = Nothing
 
     -- | This should be a human-readable string that is used when
-    -- selecting layouts by name.
+    -- selecting layouts by name.  The default implementation is
+    -- 'show', which is in some cases a poor default.
     description :: layout a -> String
     description      = show
 
@@ -615,11 +655,11 @@ class Typeable a => ExtensionClass a where
     -- | Defines an initial value for the state extension
     initialValue :: a
     -- | Specifies whether the state extension should be
-    -- persistent.
+    -- persistent. Setting this method to 'PersistentExtension'
+    -- will make the stored data survive restarts, but
+    -- requires a to be an instance of Read and Show.
     --
-    -- Means the same thing here as under X11: a 'PersistentExtension' is
-    -- written to the state file by 'XMonad.Operations.writeStateToFile' and
-    -- survives @M-q@, a 'StateExtension' does not.
+    -- It defaults to 'StateExtension', i.e. no persistence.
     extensionType :: a -> StateExtension
     extensionType = StateExtension
 
@@ -725,6 +765,9 @@ type Directories = Directories' FilePath
 -- 3. Otherwise, use the @xmonad@ directory in @XDG_DATA_HOME@,
 --    @XDG_CONFIG_HOME@, and @XDG_CACHE_HOME@ (or their respective
 --    fallbacks).  These directories are created if necessary.
+--
+-- The xmonad configuration file (or the build script, if present) is
+-- always assumed to be in @cfgDir@.
 --
 getDirectories :: IO Directories
 getDirectories = xmEnvDirs <|> xmDirs <|> xdgDirs
@@ -1037,6 +1080,9 @@ compileFailed dirs status = do
 --    the @lib@ directory (under the configuration directory)
 --
 --  * custom @build@ script is being used
+--
+-- The -i flag is used to restrict recompilation to the xmonad.hs file only,
+-- and any files in the aforementioned @lib@ directory.
 --
 -- Compilation errors (if any) are logged to the @xmonad.errors@ file
 -- in the xmonad data directory.

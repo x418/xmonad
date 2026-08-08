@@ -7,7 +7,15 @@
 -- Copyright   :  (c) Spencer Janssen 2007
 -- License     :  BSD3-style (see LICENSE)
 --
--- The entry point, a rewrite of upstream's @src\/XMonad\/Main.hs@.
+-- Maintainer  :  spencerjanssen@gmail.com
+-- Stability   :  unstable
+-- Portability :  not portable, uses mtl, X11, posix
+--
+-- xmonad, a minimalist, tiling window manager for Wayland
+--
+-----------------------------------------------------------------------------
+--
+-- River backend notes.
 --
 -- The X11 version is 471 lines, most of it an event handler translating Xlib
 -- events into calls on "XMonad.Operations".  There is no equivalent here: river

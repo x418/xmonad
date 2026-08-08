@@ -1,16 +1,27 @@
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
+{-# OPTIONS_GHC -fno-warn-missing-signatures -fno-warn-orphans #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
-{-# OPTIONS_GHC -Wno-missing-signatures #-}
-{-# OPTIONS_GHC -Wno-orphans #-}
-
-------------------------------------------------------------------------------
+-----------------------------------------------------------------------------
 -- |
 -- Module      :  XMonad.Config
 -- Copyright   :  (c) Spencer Janssen 2007
 -- License     :  BSD3-style (see LICENSE)
 --
--- The river backend's copy of upstream xmonad's @src\/XMonad\/Config.hs@.
+-- Maintainer  :  dons@galois.com
+-- Stability   :  stable
+-- Portability :  portable
+--
+-- This module specifies the default configuration values for xmonad.
+--
+-- DO NOT MODIFY THIS FILE!  It won't work.  You may configure xmonad
+-- by providing your own @~\/.xmonad\/xmonad.hs@ that overrides
+-- specific fields in the default config, 'def'.  For a starting point, you can
+-- copy the @xmonad.hs@ found in the @man@ directory, or look at
+-- examples on the xmonad wiki.
+--
+------------------------------------------------------------------------
+--
+-- River backend notes.
 --
 -- Differences from the X11 default, and only these:
 --
@@ -24,7 +35,7 @@
 --   because under river exiting only hands the seat to the next window
 --   manager -- the compositor keeps running.
 --
-------------------------------------------------------------------------------
+------------------------------------------------------------------------
 
 module XMonad.Config (defaultConfig, Default(..)) where
 
@@ -51,10 +62,21 @@ import Data.Monoid
 import qualified Data.Map as M
 
 -- | The default number of workspaces (virtual screens) and their names.
+-- By default we use numeric strings, but any string may be used as a
+-- workspace name. The number of workspaces is determined by the length
+-- of this list.
+--
+-- A tagging example:
+--
+-- > workspaces = ["web", "irc", "code" ] ++ map show [4..9]
+--
 workspaces :: [WorkspaceId]
 workspaces = map show [1 .. 9 :: Int]
 
--- | modMask lets you specify which modkey you want to use.
+-- | modMask lets you specify which modkey you want to use. The default
+-- is mod1Mask ("left alt").  You may also consider using mod3Mask
+-- ("right alt"), which does not conflict with emacs keybindings. The
+-- "windows key" is usually mod4Mask.
 --
 -- These are numerically X11's masks, because @river_seat_v1.modifiers@ uses
 -- X11's values: shift=1, ctrl=4, mod1=8, mod3=32, mod4=64, mod5=128.
@@ -62,6 +84,7 @@ defaultModMask :: KeyMask
 defaultModMask = mod1Mask
 
 -- | Width of the window border in pixels.
+--
 borderWidth :: Dimension
 borderWidth = 1
 
@@ -76,12 +99,30 @@ focusedBorderColor = "#ff0000"
 ------------------------------------------------------------------------
 -- Window rules
 
+-- | Execute arbitrary actions and WindowSet manipulations when managing
+-- a new window. You can use this to, for example, always float a
+-- particular program, or have a client always appear on a particular
+-- workspace.
+--
+-- To find the app_id associated with a program, match on 'className' or
+-- 'appName'; both are @xdg_toplevel.set_app_id@.  There is no @xprop@
+-- equivalent, because Wayland has no window properties to dump.
+--
 manageHook :: ManageHook
 manageHook = idHook
 
 ------------------------------------------------------------------------
 -- Logging
 
+-- | Perform an arbitrary action on each internal state change or river event.
+-- Examples include:
+--
+--      * do nothing
+--
+--      * log the state to stdout
+--
+-- See the 'DynamicLog' extension for examples.
+--
 logHook :: X ()
 logHook = return ()
 
@@ -90,6 +131,7 @@ logHook = return ()
 
 -- | Defines a custom handler function for river events. The function should
 -- return (All True) if the default handler is to be run afterwards.
+-- To combine event hooks, use mappend or mconcat from Data.Monoid.
 handleEventHook :: Event -> X All
 handleEventHook _ = return (All True)
 
@@ -119,7 +161,8 @@ layout = tiled ||| Mirror tiled ||| Full
 ------------------------------------------------------------------------
 -- Key bindings:
 
--- | The preferred terminal program.
+-- | The preferred terminal program, which is used in a binding below and by
+-- certain contrib modules.
 terminal :: String
 terminal = "foot"
 
@@ -132,8 +175,11 @@ clickJustFocuses :: Bool
 clickJustFocuses = True
 
 -- | The xmonad key bindings. Add, modify or remove key bindings here.
+--
+-- (The comment formatting character is used when generating the manpage)
+--
 keys :: XConfig Layout -> M.Map (KeyMask, KeySym) (X ())
-keys conf@XConfig {XMonad.modMask = modMask} = M.fromList $
+keys conf@(XConfig {XMonad.modMask = modMask}) = M.fromList $
     -- launching and killing programs
     [ ((modMask .|. shiftMask, xK_Return), spawn $ XMonad.terminal conf) -- %! Launch terminal
     , ((modMask,               xK_p     ), spawn "fuzzel") -- %! Launch fuzzel
@@ -193,17 +239,17 @@ keys conf@XConfig {XMonad.modMask = modMask} = M.fromList $
     helpCommand :: X ()
     helpCommand = trace help
 
--- | Mouse bindings: default actions bound to mouse events.
+-- | Mouse bindings: default actions bound to mouse events
 --
 -- Interactive move and resize run over river's seat operation cycle
 -- (@op_start_pointer@ \/ @op_delta@ \/ @op_release@) rather than by the window
 -- manager grabbing the pointer, but the bindings are the ones xmonad has
 -- always had.
 mouseBindings :: XConfig Layout -> M.Map (KeyMask, Button) (Window -> X ())
-mouseBindings XConfig {XMonad.modMask = modMask} = M.fromList
+mouseBindings (XConfig {XMonad.modMask = modMask}) = M.fromList
     -- mod-button1 %! Set the window to floating mode and move by dragging
     [ ((modMask, button1), \w -> focus w >> mouseMoveWindow w
-                                         >> windows W.shiftMaster)
+                                          >> windows W.shiftMaster)
     -- mod-button2 %! Raise the window to the top of the stack
     , ((modMask, button2), windows . (W.shiftMaster .) . W.focusWindow)
     -- mod-button3 %! Set the window to floating mode and resize by dragging
@@ -227,7 +273,7 @@ instance (a ~ Choose Tall (Choose (Mirror Tall) Full)) => Default (XConfig a) wh
     , XMonad.manageHook         = manageHook
     , XMonad.handleEventHook    = handleEventHook
     , XMonad.focusFollowsMouse  = focusFollowsMouse
-    , XMonad.clickJustFocuses   = clickJustFocuses
+    , XMonad.clickJustFocuses       = clickJustFocuses
     , XMonad.handleExtraArgs = \ xs theConf -> case xs of
                 [] -> return theConf
                 _ -> fail ("unrecognized flags:" ++ show xs)

@@ -1,14 +1,17 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-
--- --------------------------------------------------------------------------
+-----------------------------------------------------------------------------
 -- |
 -- Module      :  XMonad.ManageHook
 -- Copyright   :  (c) Spencer Janssen 2007
 -- License     :  BSD3-style (see LICENSE)
 --
--- An EDSL for ManageHooks, a rewrite of upstream's @src\/XMonad\/ManageHook.hs@.
+-- Maintainer  :  spencerjanssen@gmail.com
+-- Stability   :  unstable
+--
+-- An EDSL for ManageHooks
+--
+-----------------------------------------------------------------------------
+--
+-- River backend notes.
 --
 -- The algebra -- @-->@, @=?@, @\<&&\>@, @composeAll@, @doF@ and friends -- is
 -- backend-independent and is carried over unchanged.  What differs is where
@@ -98,12 +101,14 @@ askWindow = do
         ref <- asks riverWindows
         M.lookup w <$> io (readIORef ref)
 
--- | Return the window title, i.e. @xdg_toplevel.set_title@.
+-- | Return the window title; i.e., the string a client sets with
+-- @xdg_toplevel.set_title@ -- the same string X11 clients put in
+-- @_NET_WM_NAME@.
 title :: Query String
 title = maybe "" (maybe "" BC.unpack . rwTitle) <$> askWindow
 
--- | Return the application name.  River has no separate instance name, so this
--- is @app_id@, the same string as 'className'.
+-- | Return the application name; i.e., @app_id@.  River has no separate
+-- instance name, so this is the same string as 'className'.
 appName :: Query String
 appName = className
 
@@ -111,11 +116,12 @@ appName = className
 resource :: Query String
 resource = appName
 
--- | Return the resource class, i.e. @xdg_toplevel.set_app_id@.
+-- | Return the resource class; i.e., the string a client sets with
+-- @xdg_toplevel.set_app_id@.
 className :: Query String
 className = maybe "" (maybe "" BC.unpack . rwAppId) <$> askWindow
 
--- | Return whether the window will be a floating window or not.
+-- | Return whether the window will be a floating window or not
 willFloat :: Query Bool
 willFloat = do
     w <- ask
@@ -129,7 +135,7 @@ doF = return . Endo
 doFloat :: ManageHook
 doFloat = ask >>= \w -> doF . W.float w . snd =<< liftX (floatLocation w)
 
--- | Remove the window from the 'WindowSet'.
+-- | Reveal the window and remove it from the 'WindowSet'.
 doIgnore :: ManageHook
 doIgnore = ask >>= \w -> liftX (reveal w) >> doF (W.delete w)
 
