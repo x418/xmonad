@@ -50,18 +50,48 @@
 -- manager binding still fires while a layer surface holds an exclusive grab,
 -- and is the one thing that can still be pressed when a prompt has stopped
 -- responding.
+--
+-- == The startup watchdog
+--
+-- A prompt that opens correctly and is then left alone is indistinguishable,
+-- from the outside, from one that has taken the keyboard and cannot use it:
+-- both are silent.  So silence is not what is watched.  What is watched is
+-- whether the prompt ever became /able/ to read the keyboard, which is settled
+-- within a moment of opening and needs nothing from the user:
+--
+-- * the compositor configured the surface, without which nothing is on screen;
+-- * the seat has a keyboard at all;
+-- * it granted keyboard focus, which a @keyboard_interactivity = exclusive@
+--   surface is given as soon as it maps rather than when someone types;
+-- * a keymap arrived and parsed, without which a keycode can never become a
+--   keysym and 'csOnKey' can never fire.
+--
+-- Any of those missing means every keystroke is going to a surface that will
+-- never do anything with it -- which is the failure this whole module is built
+-- to avoid -- and no amount of waiting will change it.  'startupDeadlineMicros'
+-- after the client starts, such a prompt is closed and the reason is logged.
+--
+-- Deliberately /not/ a timeout on keystrokes.  A prompt waiting while someone
+-- reads the screen is idle for minutes and is working perfectly; closing it
+-- would turn a rare failure into a routine one.
 module XMonad.River.Client
   ( ClientSpec(..)
   , ClientHandle(..)
   , Anchor(..)
   , startClient
   , closeAllClients
+  , readFdText
+    -- ^ Exported for @tests\/river-prompt-spec.hs@, which reads a keymap twice
+    -- to check that the second read still works.  That is the one property of
+    -- this function worth a test and the one it got wrong; see its haddock.
   ) where
 
-import Control.Concurrent (ThreadId, forkIO, killThread, myThreadId)
+import Control.Concurrent (ThreadId, forkIO, killThread, myThreadId, threadDelay)
 import Control.Monad (forM_, unless, void, when)
-import Data.Bits ((.|.))
+import Data.Bits ((.&.), (.|.))
 import Data.IORef
+import Data.List (intercalate)
+import Data.Maybe (isJust, isNothing)
 import Data.Word (Word32)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BC
@@ -79,9 +109,10 @@ import XMonad.River.Xkb
 import System.IO (hPutStrLn, stderr)
 import System.Posix.IO (closeFd)
 import qualified Control.Exception as E
-import System.IO.Error (isEOFError)
-import System.Posix.IO.ByteString (fdRead)
-import System.Posix.Types (Fd)
+import Foreign.C.Types (CChar (..), CInt (..), CSize (..))
+import Foreign.Marshal.Alloc (allocaBytes)
+import Foreign.Ptr (Ptr, plusPtr)
+import System.Posix.Types (COff (..), CSsize (..), Fd (Fd))
 
 -- | Where on the screen the window sits.
 data Anchor = AnchorTop | AnchorBottom | AnchorCentre
@@ -188,6 +219,16 @@ data Client = Client
   , clBuffer  :: !(IORef (Maybe Buffer))
   , clSize    :: !(IORef (Int, Int))
   , clXkb     :: !(IORef (Maybe XkbState))
+  , clKeyboard :: !(IORef (Maybe ObjectId))
+    -- ^ The @wl_keyboard@, once the seat has said it has one.  'Nothing' means
+    -- it never did, which is the difference between a prompt that is waiting
+    -- and one that will wait forever.
+  , clHadFocus :: !(IORef Bool)
+    -- ^ Whether the compositor has ever given this surface keyboard focus.
+    --
+    -- Latched rather than tracking the current state: the watchdog's question
+    -- is whether the grab ever worked, and a prompt that has since /lost/ focus
+    -- is not eating anyone's keystrokes.
   , clRunning :: !(IORef Bool)
   , clConfigured :: !(IORef Bool)
     -- ^ Whether the compositor has sent a @configure@ and it has been acked.
@@ -238,10 +279,12 @@ clientMain spec inbox = do
       bufRef <- newIORef Nothing
       sizeRef <- newIORef (csWidth spec, csHeight spec)
       xkbRef <- newIORef Nothing
+      kbRef <- newIORef Nothing
+      focusRef <- newIORef False
       running <- newIORef True
       configured <- newIORef False
-      let cl = Client conn shm surface layer bufRef sizeRef xkbRef running
-                      configured
+      let cl = Client conn shm surface layer bufRef sizeRef xkbRef kbRef
+                      focusRef running configured
 
       when (csKeyboard spec) $
         forM_ mSeat $ \(seat, _) -> setupKeyboard spec cl seat
@@ -262,6 +305,7 @@ clientMain spec inbox = do
       -- Everything above has created a surface that may be holding the
       -- keyboard.  From here on the only acceptable outcome is that it is
       -- destroyed, so the loop runs under a handler rather than in the open.
+      watchStartup spec cl inbox
       loop spec cl inbox `E.finally` shutdown spec cl
 
     _ -> do
@@ -283,11 +327,38 @@ anchorBits = \case
                   .|. zwlrLayerSurfaceV1AnchorRight
   AnchorCentre -> 0   -- no anchor: the compositor centres it
 
+-- | Take the seat's keyboard, once it says it has one.
+--
+-- Asking unconditionally is a protocol error -- @wl_seat.get_keyboard called
+-- when no keyboard capability has existed@ -- and the compositor answers it by
+-- dropping the connection, so a prompt opened on a seat with no keyboard used
+-- to die with a raw @ProtocolError@ traceback and no explanation.  A seat with
+-- no keyboard is not a hypothetical: it is every seat before its first input
+-- device is added, and every headless one.
+--
+-- Capabilities arrive as an event and can be sent more than once, hence the
+-- listener and the guard against taking the keyboard twice.
 setupKeyboard :: ClientSpec -> Client -> ObjectId -> IO ()
-setupKeyboard spec cl seat = do
+setupKeyboard spec cl seat =
+  wlSeatListen (clConn cl) seat $ \case
+    WlSeatCapabilities caps
+      | caps .&. wlSeatCapabilityKeyboard /= 0 -> do
+          taken <- readIORef (clKeyboard cl)
+          when (isNothing taken) $ do
+            kb <- wlSeatGetKeyboard (clConn cl) seat
+            writeIORef (clKeyboard cl) (Just kb)
+            listenKeyboard spec cl kb
+    _ -> pure ()
+
+listenKeyboard :: ClientSpec -> Client -> ObjectId -> IO ()
+listenKeyboard spec cl kb = do
   let conn = clConn cl
-  kb <- wlSeatGetKeyboard conn seat
   wlKeyboardListen conn kb $ \case
+    -- Focus, which an exclusive layer surface is given when it maps rather
+    -- than when anyone types.  Recorded for the watchdog and nothing else;
+    -- see the module header.
+    WlKeyboardEnter _serial surf _keys
+      | surf == clSurface cl -> writeIORef (clHadFocus cl) True
     -- The keymap arrives as a descriptor holding the text xkb parses.  This is
     -- the one place the whole design needed fd passing to work.
     WlKeyboardKeymap _fmt fd size -> do
@@ -310,6 +381,74 @@ setupKeyboard spec cl seat = do
           guarded "key handler" (csOnKey spec sym txt)
     _ -> pure ()
 
+-- | How long a client has to become usable before it is assumed broken.
+--
+-- Generous on purpose.  Everything it checks is settled within a round trip of
+-- the surface being created, so ten seconds is not a guess at how long the
+-- compositor might take -- it is the margin by which the answer is already in.
+startupDeadlineMicros :: Int
+startupDeadlineMicros = 10 * 1000 * 1000
+
+-- | How long to wait for a client to close itself before killing its thread.
+closeGraceMicros :: Int
+closeGraceMicros = 1 * 1000 * 1000
+
+-- | Close a client that never became able to read the keyboard.
+--
+-- See the module header for why this watches capability rather than silence.
+-- The escalation matters as much as the check: 'Close' is posted first, which
+-- is the orderly route and the one that works when the loop is healthy and only
+-- the keyboard is not.  A loop that does not answer within 'closeGraceMicros'
+-- is wedged as well as useless, and gets what 'closeAllClients' gives -- the
+-- asynchronous exception that unwinds through the handler around 'loop'.
+--
+-- Note what this thread does /not/ do: touch 'clConn'.  One thread owns that
+-- connection, and it is not this one.
+watchStartup :: ClientSpec -> Client -> Mailbox Request -> IO ()
+watchStartup spec cl inbox = do
+  tid <- myThreadId
+  void . forkIO $ do
+    threadDelay startupDeadlineMicros
+    alive <- readIORef (clRunning cl)
+    when alive $ do
+      faults <- startupFaults spec cl
+      unless (null faults) $ do
+        hPutStrLn stderr $
+          "xmonad-river: closing a prompt that never became usable: "
+            ++ intercalate "; " faults
+            ++ ".  Every keystroke was going to it and it could not have "
+            ++ "answered any of them."
+        MB.post inbox Close
+        threadDelay closeGraceMicros
+        stuck <- readIORef (clRunning cl)
+        when stuck $ do
+          hPutStrLn stderr
+            "xmonad-river: that prompt did not answer its own close request \
+            \either, so killing its thread"
+          killThread tid
+
+-- | What is wrong with a client that has had 'startupDeadlineMicros' to start.
+--
+-- Empty means nothing is: it drew, it has focus, and it can turn a keycode
+-- into a keysym.  Whether anyone has typed at it is not asked, and must not
+-- be -- an idle prompt and a wedged one look the same from here, and only one
+-- of them should be closed.
+startupFaults :: ClientSpec -> Client -> IO [String]
+startupFaults spec cl = do
+  configured <- readIORef (clConfigured cl)
+  keyboard   <- readIORef (clKeyboard cl)
+  focused    <- readIORef (clHadFocus cl)
+  xkb        <- readIORef (clXkb cl)
+  pure $ concat
+    [ [ "the compositor never configured its surface" | not configured ]
+    , [ "the seat has no keyboard"
+      | csKeyboard spec, isNothing keyboard ]
+    , [ "it was never given keyboard focus"
+      | csKeyboard spec, isJust keyboard, not focused ]
+    , [ "the compositor's keymap never arrived, or did not parse"
+      | csKeyboard spec, isJust keyboard, isNothing xkb ]
+    ]
+
 -- | Run one of the caller's callbacks without letting it take the client down.
 --
 -- These are the one place arbitrary code runs on this thread: a prompt's key
@@ -330,28 +469,58 @@ guarded what act = act `E.catch` \e -> hPutStrLn stderr
 
 -- | Read the keymap out of the descriptor the compositor sent.
 --
--- The size comes from the event rather than from reading to end-of-file,
--- because the mapping is not necessarily exhausted where the text ends.
+-- __Positioned reads, never sequential ones.__  This is not a style
+-- preference; a plain @read@ here breaks every prompt after the first, and did.
+--
+-- wlroots keeps one read-only descriptor for the keymap and hands that same
+-- descriptor to every client -- see @seat_client_send_keymap@, which sends
+-- @keyboard->keymap_fd@ itself rather than a fresh open.  Passing a descriptor
+-- over a Wayland socket gives the receiver a new number for the /same open file
+-- description/, which means the same file offset.  So a client that reads
+-- sequentially leaves that shared offset at end-of-file, and the next client to
+-- ask for the keymap -- the next prompt of the session -- reads zero bytes, gets
+-- an empty keymap, fails to parse it and cannot turn a single keystroke into a
+-- keysym.  It never recovers, because nothing ever rewinds the offset.
+--
+-- Worse than it first looks: the offset belongs to the compositor's one open
+-- file description, so it is shared by every client for the whole session.
+-- Whichever client drains it first breaks the keymap for all of them, until
+-- river builds a new one -- which is why the symptom reads as "the first
+-- prompt after a keymap change works and no other one does".
+--
+-- The protocol's own answer is @mmap@ with @MAP_PRIVATE@, for exactly this
+-- reason.  @pread@ is the same guarantee -- an explicit offset, no shared state
+-- touched -- without the unmapping bookkeeping, and libc has it.
+-- @tests\/river-prompt-spec.hs --keymap-probe-sequential@ demonstrates the old
+-- behaviour against a live compositor, if it ever needs demonstrating again.
 --
 -- Bytes, not text, until the whole thing has arrived: a keymap is UTF-8 and a
 -- chunked read can land mid-sequence, so decoding per chunk would corrupt any
--- keysym name outside ASCII.  That is what the deprecation on the text-mode
--- fdRead is warning about.
+-- keysym name outside ASCII.
 readFdText :: Fd -> Int -> IO String
-readFdText fd size = BC.unpack <$> go size BS.empty
+readFdText (Fd fd) size
+  | size <= 0 = pure ""
+  | otherwise = allocaBytes size $ \buf -> do
+      got <- go buf 0
+      -- The advertised size counts the terminator, and an interior NUL in a
+      -- Haskell String is a trap waiting for whoever marshals it back out.
+      BC.unpack . BS.takeWhile (/= 0) <$> BS.packCStringLen (buf, got)
   where
-    go 0 acc = pure acc
-    go n acc = do
-      -- fdRead throws on end-of-file rather than returning empty, so a
-      -- descriptor holding fewer bytes than the event advertised -- or one
-      -- whose connection has since died -- has to be caught rather than
-      -- tested for.  A truncated keymap is still worth parsing; throwing here
-      -- would take the prompt down.
-      chunk <- E.catch (fdRead fd (fromIntegral (min n 4096)))
-                       (\e -> if isEOFError e then pure BS.empty else E.throwIO e)
-      if BS.null chunk
-        then pure acc
-        else go (n - BS.length chunk) (acc <> chunk)
+    go buf got
+      | got >= size = pure got
+      | otherwise = do
+          n <- c_pread fd (buf `plusPtr` got)
+                          (fromIntegral (size - got)) (fromIntegral got)
+          -- Short reads are legal and a zero is end-of-file; a negative is an
+          -- error.  All three end the loop with what has arrived, because a
+          -- truncated keymap is still worth trying to parse and throwing here
+          -- would take the prompt down with it.
+          if n <= 0 then pure got else go buf (got + fromIntegral n)
+
+-- | @pread(2)@: read at an explicit offset, leaving the descriptor's own
+-- offset alone.  The @unix@ package does not wrap it.
+foreign import ccall unsafe "pread"
+  c_pread :: CInt -> Ptr CChar -> CSize -> COff -> IO CSsize
 
 redraw :: ClientSpec -> Client -> IO ()
 redraw spec cl = do

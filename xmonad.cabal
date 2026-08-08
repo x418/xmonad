@@ -136,6 +136,7 @@ library
                      XMonad.River.Xkb
                      XMonad.River.WM
     build-depends:   bytestring
+                   , deepseq
                    , network
                    , store-core
     -- The only C in the package, and only under this flag.  Wayland attaches
@@ -256,6 +257,23 @@ test-suite river-wire
   -- The wire codec, the only part of the river stack testable without a
   -- compositor.  Everything above it is unverified until run against a real
   -- river; see README.river.md.
+  if !flag(river)
+    buildable: False
+
+executable river-prompt-spec
+  main-is:        river-prompt-spec.hs
+  hs-source-dirs: tests
+  build-depends:  base
+                , bytestring
+                , unix
+                , xmonad
+  default-language: Haskell2010
+  ghc-options:    -Wall -threaded
+
+  -- An executable rather than a test-suite, because it is only meaningful with
+  -- a compositor to talk to and `stack test` has none: tests/headless-prompt.sh
+  -- starts a headless river and runs this inside it.  -threaded because a
+  -- client is a thread and the watchdog is another.
   if !flag(river)
     buildable: False
 

@@ -16,10 +16,20 @@ round-trips against a real server (55 globals enumerated correctly),
 configure(s)`, which is the only signal that proves a layout reached the
 compositor.
 
-That is one window, laid out once, on a headless backend. It is not a working
-desktop. What has *not* run: drawing, prompts, keyboard input, the mailbox,
-workspace switching, and everything in xmonad-contrib. Those remain
-compile-time evidence only.
+`tests/headless-prompt.sh` covers the other half of the input story, and is
+the one to run when touching `XMonad.River.Client`. It stands a prompt's layer
+surface up inside the same headless river — via `tests/river-prompt-spec.hs`,
+which drives `startClient` directly — and asserts that a surface asking for an
+exclusive keyboard grab never outlives the thread servicing it: the startup
+watchdog closes one that can never read the keyboard, leaves alone one that
+never wanted it, survives a draw callback that throws, and yields to
+`closeAllClients`. River's own log is the check that matters — every
+`'xmonad-prompt' mapped` must be matched by a `destroyed`.
+
+That is one window, laid out once, on a headless backend, and prompts that open
+and close but are never typed into. It is not a working desktop. What has *not*
+run: drawing, real keyboard input, the mailbox, workspace switching, and
+everything in xmonad-contrib. Those remain compile-time evidence only.
 
 ## Why river, and why this is possible
 
