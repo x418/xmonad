@@ -1,3 +1,15 @@
+## Default terminal
+
+Looks like claude chose "foot"
+
+## Revisit CI setup
+
+Shouldn't be so gnarly
+
+## My idiosyncratic patches
+
+Should resolve. Was sendRestart exposed before?
+
 ## A blocking action wedges the event loop
 
 The event loop is single-threaded and is sole owner of both the connection and

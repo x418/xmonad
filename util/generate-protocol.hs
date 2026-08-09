@@ -3,27 +3,9 @@
 
 -- | Generates Haskell bindings from Wayland protocol XML.
 --
--- Run from the xmonad-river directory:
---
--- > ./util/generate-protocol.hs
---
--- The XML is not checked in.  It is downloaded on demand into @protocol/@,
--- which is gitignored, from the pinned upstream revisions in 'waylandTag' and
--- 'riverCommit'.  Both name an immutable revision, which is what makes this
--- reproducible without vendoring several hundred kilobytes of other people's
--- XML: bumping a protocol is a one-line diff whose provenance is stated,
--- rather than a large opaque blob whose origin has to be taken on trust.
---
--- The generated modules /are/ checked in, so this only needs to be re-run when
--- a pin moves.  Generating at build time was rejected deliberately: it would
--- put a custom Setup.hs, an xml parsing dependency and a network fetch in the
--- path of every rebuild, and the M-q recompile loop is the thing this project
--- most needs to keep fast.
---
--- The snapshot is pinned above for the same reason the protocols are: this
--- script's output is checked in and diffed by @tests/check-all.sh@, so it has
--- to produce the same bytes on a machine that has never built the project.
--- Keep it in step with @stack.yaml@.
+-- The source XML is not checked in. It is downloaded on demand into
+-- @protocol/@, which is gitignored, from the pinned upstream revisions in
+-- 'waylandCommit' and 'riverCommit'.
 
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -39,6 +21,67 @@ import System.Process (callProcess)
 import qualified Data.Map as M
 import qualified Data.Text as T
 import qualified Text.XML as X
+
+-- | The wayland release @wayland.xml@ is taken from.
+waylandCommit :: String
+waylandCommit = "1.24.0"
+
+-- | The river commit the river protocols are taken from. A version tag would be
+-- preferred, but these are not yet tagged.
+riverCommit :: String
+riverCommit = "bfab9ea75985e048ca31b919ccd6dfc676da6dd5"
+
+-- | Where the wayland XML is downloaded to.
+protocolDir :: FilePath
+protocolDir = "protocol"
+
+-- | Each protocol file: its name here, and where to get it.
+sources :: [(FilePath, String)]
+sources =
+  [ ( "wayland.xml"
+    , wayland "protocol/wayland.xml" )
+  , ( "river-window-management-v1.xml"
+    , river "protocol/river-window-management-v1.xml" )
+  , ( "river-xkb-bindings-v1.xml"
+    , river "protocol/river-xkb-bindings-v1.xml" )
+  , ( "river-layer-shell-v1.xml"
+    , river "protocol/river-layer-shell-v1.xml" )
+  , ( "wlr-layer-shell-unstable-v1.xml"
+    , river "protocol/upstream/wlr-layer-shell-unstable-v1.xml" )
+  ]
+  where
+    wayland p =
+      "https://gitlab.freedesktop.org/wayland/wayland/-/raw/" ++ waylandCommit ++ "/" ++ p
+    river p =
+      "https://codeberg.org/river/river/raw/commit/" ++ riverCommit ++ "/" ++ p
+
+-- | Which protocol files to generate, what to call the resulting modules, and
+-- which interfaces to take from each.
+--
+-- 'Nothing' means every interface in the file.  @wayland.xml@ needs a
+-- selection: it defines the whole core protocol, most of which a window
+-- manager never binds, and two of its interfaces -- @wl_keyboard.keymap@ and
+-- @wl_data_source.send@ -- carry descriptors in *events*, which the generator
+-- does not support.  Taking only what is needed keeps that limitation from
+-- mattering.
+--
+-- @wl_display@ and @wl_registry@ are deliberately absent: "XMonad.River.Connection"
+-- implements them by hand, because id allocation, error reporting and the
+-- registry dance are the connection rather than ordinary protocol traffic.
+targets :: [(FilePath, String, Maybe [String])]
+targets =
+  [ ("river-window-management-v1.xml", "XMonad.River.Protocol.WindowManagement", Nothing)
+  , ("river-xkb-bindings-v1.xml",      "XMonad.River.Protocol.XkbBindings", Nothing)
+  , ("river-layer-shell-v1.xml",       "XMonad.River.Protocol.LayerShell", Nothing)
+  , ("wayland.xml",                    "XMonad.River.Protocol.Core",
+      Just [ "wl_compositor", "wl_shm", "wl_shm_pool", "wl_surface"
+              , "wl_buffer", "wl_region", "wl_callback"
+              -- For prompts, which run as an ordinary Wayland client on a second
+              -- connection so that they get real keyboard input.  See
+              -- XMonad.River.Client.
+              , "wl_seat", "wl_keyboard", "wl_output" ])
+  , ("wlr-layer-shell-unstable-v1.xml", "XMonad.River.Protocol.LayerShellClient", Nothing)
+  ]
 
 --------------------------------------------------------------------------------
 -- Protocol model
@@ -209,11 +252,6 @@ argEncoder a = case argType a of
   TFd     -> "mempty"
   where v = safeVar (argName a)
 
--- | How an event argument is decoded.
--- | The local name a claimed descriptor is bound to.
-fdVar :: Argument -> String
-fdVar a = "fd_" ++ safeVar (argName a)
-
 argDecoder :: Argument -> String
 argDecoder a = case argType a of
   TInt    -> "getInt"
@@ -227,6 +265,9 @@ argDecoder a = case argType a of
   -- connection before decoding and spliced in with pure, which keeps the
   -- applicative in argument order without consuming input.  See renderListener.
   TFd     -> "pure " ++ fdVar a
+
+fdVar :: Argument -> String
+fdVar a = "fd_" ++ safeVar (argName a)
 
 --------------------------------------------------------------------------------
 -- Rendering
@@ -253,9 +294,6 @@ renderModule modName source ifaces = unlines $
   where
     allArgs = [ a | i <- ifaces, m <- ifaceRequests i ++ ifaceEvents i, a <- msgArgs m ]
     uses t = any ((== t) . argType) allArgs
-    -- ByteString and Word16 are always needed: every interface gets an
-    -- Unknown event constructor carrying the raw body and opcode, and every
-    -- interface exports its name as a ByteString.
     imports = concat
       [ [ "import Data.ByteString (ByteString)" ]
       , [ "import Data.Int (Int32)" | uses TInt ]
@@ -263,8 +301,7 @@ renderModule modName source ifaces = unlines $
       , [ "import System.Posix.Types (Fd)" | uses TFd ]
       ]
 
--- | Renders a list with one prefix for the first element and another for the
--- rest, which is how Haskell export and import lists are laid out.
+-- | Adds a prefix to the first element and another to the rest.
 prefixFirst :: String -> String -> [String] -> [String]
 prefixFirst _ _ [] = []
 prefixFirst p1 pn (x:xs) = (p1 ++ x) : map (pn ++) xs
@@ -345,11 +382,6 @@ renderRequest i m =
     encoded = case msgArgs m of
       [] -> "mempty"
       as -> intercalate " <> " (map argEncoder as)
-    -- A destructor request also drops the local listener, so that events the
-    -- server had already queued for the object are discarded rather than
-    -- delivered to a handler that no longer has any state to update.
-    -- Descriptors are handed to the connection alongside the bytes rather
-    -- than encoded into them; see XMonad.River.Socket.
     fdArgs = [ a | a <- msgArgs m, argType a == TFd ]
     send = case fdArgs of
       [] -> "request conn self " ++ show (msgOpcode m) ++ " (" ++ encoded ++ ")"
@@ -425,51 +457,6 @@ renderListener i =
 --------------------------------------------------------------------------------
 -- Protocol sources
 
--- | The wayland release @wayland.xml@ is taken from.
-waylandTag :: String
-waylandTag = "1.24.0"
-
--- | The river commit the river protocols are taken from.
---
--- A commit rather than a tag because @river-window-management-v1@ and its
--- companions exist only on @main@: no river release has shipped them yet.
--- Whenever they do, this becomes a tag.
-riverCommit :: String
-riverCommit = "bfab9ea75985e048ca31b919ccd6dfc676da6dd5"
-
--- | Where downloaded XML lands.  Gitignored; see the note at the top of this
--- file.
-protocolDir :: FilePath
-protocolDir = "protocol"
-
--- | Each protocol file: its name here, and where to get it.
---
--- @wlr-layer-shell-unstable-v1.xml@ comes from river's own vendored copy
--- rather than from wlr-protocols, which carries no tags at all -- and this way
--- one pin covers every protocol but the core one, and covers it with the exact
--- bytes the compositor was built against.
-sources :: [(FilePath, String)]
-sources =
-  [ ( "wayland.xml"
-    , wayland "protocol/wayland.xml" )
-  , ( "river-window-management-v1.xml"
-    , river "protocol/river-window-management-v1.xml" )
-  , ( "river-xkb-bindings-v1.xml"
-    , river "protocol/river-xkb-bindings-v1.xml" )
-  , ( "river-layer-shell-v1.xml"
-    , river "protocol/river-layer-shell-v1.xml" )
-  , ( "wlr-layer-shell-unstable-v1.xml"
-    , river "protocol/upstream/wlr-layer-shell-unstable-v1.xml" )
-  ]
-  where
-    wayland p =
-      "https://gitlab.freedesktop.org/wayland/wayland/-/raw/" ++ waylandTag ++ "/" ++ p
-    river p =
-      "https://codeberg.org/river/river/raw/commit/" ++ riverCommit ++ "/" ++ p
-
--- | Downloads whatever is not already there.  Both pins name an immutable
--- revision, so a file that exists is the right file and a re-run costs no
--- network; to pick up a moved pin, delete @protocol/@.
 fetchSources :: IO ()
 fetchSources = do
   createDirectoryIfMissing True protocolDir
@@ -480,43 +467,12 @@ fetchSources = do
       have <- doesFileExist path
       unless have $ do
         putStrLn ("fetching " ++ name)
-        -- --retry because codeberg resets a stream now and again when these
-        -- are fetched back to back, and a transient reset should not look
-        -- like a failed generation.
         callProcess "curl"
           [ "-fsSL", "--proto", "=https", "--tlsv1.2"
           , "--retry", "3", "--retry-all-errors", "-o", path, url ]
 
 --------------------------------------------------------------------------------
 -- Main
-
--- | Which protocol files to generate, what to call the resulting modules, and
--- which interfaces to take from each.
---
--- 'Nothing' means every interface in the file.  @wayland.xml@ needs a
--- selection: it defines the whole core protocol, most of which a window
--- manager never binds, and two of its interfaces -- @wl_keyboard.keymap@ and
--- @wl_data_source.send@ -- carry descriptors in *events*, which the generator
--- does not support.  Taking only what is needed keeps that limitation from
--- mattering.
---
--- @wl_display@ and @wl_registry@ are deliberately absent: "XMonad.River.Connection"
--- implements them by hand, because id allocation, error reporting and the
--- registry dance are the connection rather than ordinary protocol traffic.
-targets :: [(FilePath, String, Maybe [String])]
-targets =
-  [ ("river-window-management-v1.xml", "XMonad.River.Protocol.WindowManagement", Nothing)
-  , ("river-xkb-bindings-v1.xml",      "XMonad.River.Protocol.XkbBindings", Nothing)
-  , ("river-layer-shell-v1.xml",       "XMonad.River.Protocol.LayerShell", Nothing)
-  , ("wayland.xml",                    "XMonad.River.Protocol.Core",
-      Just [ "wl_compositor", "wl_shm", "wl_shm_pool", "wl_surface"
-           , "wl_buffer", "wl_region", "wl_callback"
-           -- For prompts, which run as an ordinary Wayland client on a second
-           -- connection so that they get real keyboard input.  See
-           -- XMonad.River.Client.
-           , "wl_seat", "wl_keyboard", "wl_output" ])
-  , ("wlr-layer-shell-unstable-v1.xml", "XMonad.River.Protocol.LayerShellClient", Nothing)
-  ]
 
 main :: IO ()
 main = fetchSources >> mapM_ generate targets

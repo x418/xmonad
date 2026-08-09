@@ -24,32 +24,6 @@
 -- manager state, and support routines.
 --
 -----------------------------------------------------------------------------
---
--- River backend notes.
---
--- This is the river backend's copy of upstream xmonad's @src\/XMonad\/Core.hs@,
--- deliberately kept as close to that file as it can be -- 84% of it is shared,
--- so that an upstream change to the compile path or the directory logic can be
--- carried over rather than re-derived.  Keep the divergence below small and
--- deliberate; everything else should stay byte-identical to upstream.
---
--- What differs, and only what differs:
---
--- * 'XConf' holds a river 'Connection' where the X11 build holds an Xlib
---   @Display@, but the field and the type keep their names: @type Display =
---   Connection@, because that is what the value is.  So 'withDisplay' works.
---   What has no Wayland counterpart is everything X11 reached for *through*
---   the display -- @getAtom@, @atom_WM_*@, @withWindowAttributes@ -- and those
---   are absent rather than present and inert.  See tests/api/unportable.txt.
---   'isRoot' is the exception: "is this the root window" has a correct total
---   answer here.
--- * @clientMask@ and @rootMask@ are gone from 'XConfig': river delivers exactly
---   the events the window management protocol defines, with no mask to select.
--- * 'Event' is river's event type rather than Xlib's.
--- * Border colours are RGBA quadruples, which is what @set_borders@ takes,
---   rather than an X11 @Pixel@ resolved against a colormap.
---
------------------------------------------------------------------------------
 
 module XMonad.Core (
     X(..), WindowSet, WindowSpace, WorkspaceId,

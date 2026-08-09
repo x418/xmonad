@@ -78,8 +78,6 @@ workspaces = map show [1 .. 9 :: Int]
 -- ("right alt"), which does not conflict with emacs keybindings. The
 -- "windows key" is usually mod4Mask.
 --
--- These are numerically X11's masks, because @river_seat_v1.modifiers@ uses
--- X11's values: shift=1, ctrl=4, mod1=8, mod3=32, mod4=64, mod5=128.
 defaultModMask :: KeyMask
 defaultModMask = mod1Mask
 
@@ -322,7 +320,7 @@ help = unlines ["The default modifier key is 'alt'. Default keybindings:",
     "mod-period (mod-.)   Deincrement the number of windows in the master area",
     "",
     "-- quit, or restart",
-    "mod-Shift-q  Quit, ending the Wayland session",
+    "mod-Shift-q  Quit xmonad",
     "mod-q        Restart xmonad",
     "",
     "-- Workspaces & screens",
