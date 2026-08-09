@@ -59,7 +59,7 @@ consequences matter:
 There is no dependency on `libwayland`. None of the river window management
 protocols pass file descriptors, and fd passing (`SCM_RIGHTS`) is the only part
 of the wire format that genuinely needs C — so the package carries about a
-hundred lines of it in `cbits/wl-fd.c`, reached through `XMonad.River.Socket`,
+hundred lines of it in `src/cbits/wl-fd.c`, reached through `XMonad.River.Socket`,
 rather than the whole of libwayland. That was forced by drawing: a `wl_buffer`
 comes from a `wl_shm_pool`, which comes from `wl_shm.create_pool`, which takes
 a descriptor. Exactly one request in the drawing path does. Serialization uses `store-core`,
@@ -131,7 +131,7 @@ this backend. That is the intended outcome, not a regression to be papered over.
 | --- | --- |
 | Wire codec | `store-core`. 14 tests, including byte sequences derived from the spec. |
 | Connection | Socket, object id recycling, registry, dispatch, roundtrip. |
-| Protocol bindings | Generated from the XML in `protocol/`, checked in. |
+| Protocol bindings | Generated and checked in. `util/generate-protocol.hs` downloads the XML from pinned wayland and river revisions, hash-checked, into a gitignored `protocol/`. |
 | Manage/render loop | Layout and focus in the manage sequence; position, order, borders and hide/show in render — matching river's split of the two state categories. |
 | Workspaces | river has no workspace concept; hidden workspaces use `river_window_v1.hide`/`show`. |
 | Layouts | `LayoutClass`, `Tall`, `Full`, `Mirror`, `\|\|\|`. |

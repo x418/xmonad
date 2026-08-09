@@ -34,7 +34,7 @@ step "tests";             stack test >/dev/null 2>&1; ok
 step "subset assertion";  ./tests/api/check-subset.sh >/dev/null; ok
 
 step "keysyms current"
-./codegen/gen-keysyms.sh >/dev/null
+./util/gen-keysyms.sh >/dev/null
 git diff --quiet -- src/XMonad/River/Keysym.hs src/XMonad/River/Keysym/Table.hs
 ok
 

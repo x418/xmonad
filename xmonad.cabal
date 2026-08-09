@@ -126,7 +126,7 @@ library
   -- network cannot express and whose CMSG_* macros are not worth
   -- reimplementing against hard-coded struct offsets.  See
   -- XMonad.River.Socket.
-  c-sources:       cbits/wl-fd.c
+  c-sources:       src/cbits/wl-fd.c
   -- libxkbcommon turns the compositor's keymap and a raw evdev keycode into
   -- a keysym and the text it produces.  Needed for prompts: a binding per
   -- keysym can express shortcuts but not typing -- no dead keys, no compose,

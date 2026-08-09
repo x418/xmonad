@@ -8,7 +8,7 @@
 -- both take a mandatory 'N.SockAddr' and always set @msg_name@, which Linux
 -- rejects with @EISCONN@ on a connected socket, and its @sendFd@ uses a
 -- different single-byte protocol of its own.  So the @msghdr@ work happens in
--- @cbits\/wl-fd.c@, where the @CMSG_*@ macros exist.
+-- @src\/cbits\/wl-fd.c@, where the @CMSG_*@ macros exist.
 --
 -- This is the only C in the package and it exists only under @-f river@.  It
 -- is here because drawing needs it: a @wl_buffer@ comes from a @wl_shm_pool@,
@@ -43,7 +43,7 @@ foreign import ccall unsafe "hs_wl_recvmsg_fds"
                 -> IO CInt
 
 -- | The most descriptors one message may carry.  Kept in step with the array
--- sizes in @cbits\/wl-fd.c@, which rejects more.
+-- sizes in @src\/cbits\/wl-fd.c@, which rejects more.
 maxFds :: Int
 maxFds = 16
 

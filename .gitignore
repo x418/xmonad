@@ -30,3 +30,6 @@ tags
 
 # nix artifacts
 result
+
+# Protocol XML downloaded by util/generate-protocol.hs
+/protocol/
