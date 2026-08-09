@@ -10,6 +10,25 @@ Shouldn't be so gnarly
 
 Should resolve. Was sendRestart exposed before?
 
+## Assert that some modules are identical
+
+## TODO
+
+**Nothing tests the loop.** The suites cover `XMonad.StackSet` and the wire
+codec. The concurrency invariants — no torn reads, ops delivered exactly once,
+liveness filtering complete — are precisely what property tests cannot reach.
+`tests/headless-river.sh` and `tests/headless-prompt.sh` are the only harnesses
+that run against a real compositor, and they would need extending.
+
+**The shared-`IORef` audit is the real surface area of that change.** `XConf`
+carries about eleven of them and each needs an owner. `rtBindings` and
+`rtSubmap` are the awkward pair: they are deliberately shared between the IO
+callbacks and `X` code today, which is exactly the sharing the split breaks.
+
+## Rename closeAllPrompts
+
+Utility to generically interrupt the worker?
+
 ## A blocking action wedges the event loop
 
 The event loop is single-threaded and is sole owner of both the connection and
