@@ -78,6 +78,7 @@ data Op
   | OpWarpPointer Seat Position
   | OpPointerOpStart Seat PointerOp | OpPointerOpEnd Seat
   | OpSetTiled Window Word32
+  | OpOpenSubmap [(KeyMask, KeySym)]
   | OpDecorations Window Decorations
 ```
 
@@ -91,7 +92,7 @@ value and writing a socket, with no user code in the path, so a blocked action
 degrades to exactly upstream's failure mode: window management stops until it
 returns, and the session keeps running.
 
-Three things this forces:
+Four things this forces:
 
 - **Liveness filtering is the loop's job, at transmit time.** The worker's
   `World` is always slightly stale, so a plan can name a window river has since
@@ -106,6 +107,14 @@ Three things this forces:
 - **The manage-hook ordering guarantee becomes load-bearing.** A window absent
   from the current plan must stay hidden until a plan includes it, or it flashes
   on screen unmanaged.
+- **Input routing is loop state.** Anything that has to be coherent with a key
+  press — which bindings are enabled, whether a submap is open — belongs to the
+  loop rather than the worker. `submapNextKey` becomes an op naming the key set;
+  the loop arms the bindings, asks for the next unbound key, holds the deadline,
+  and posts back which key was chosen, leaving the worker only the action to
+  run. `grabKeys` and `whileModifiersHeld` have the identical shape and get the
+  identical treatment. Without this the `ate_unbound_key` callback would be
+  reading a slot the worker is concurrently writing.
 
 **Latency, and a bounded wait.** A plan costs every binding an extra round trip:
 today a binding's effect lands in the sequence it triggered, afterwards it lands
@@ -116,6 +125,14 @@ This is not the timeout that was tried and rejected — that one bounded the
 damage of a block that still happened, and its bound was on how long a person
 thought. This one bounds a wait for a computation that either finished or did
 not, and blocking is impossible either way.
+
+**A plan may require its sequence.** Some publications are only correct if they
+land in the sequence that provoked them. Arming a submap is the case: it has to
+be atomic with the key press that opened it, or the config's own bindings are
+still live when the next key arrives. Such a plan is marked, and the loop waits
+longer for it than the ordinary few milliseconds. The wait is still bounded —
+an unbounded one is the freeze this design exists to remove — so it is a strong
+preference and not a guarantee.
 
 **What it buys beyond responsiveness:** a wedged action becomes killable.
 `throwTo` the worker and the loop never notices, which generalizes
@@ -128,9 +145,15 @@ serialized, in order; a blocking helper can keep blocking and keep returning its
 
 ## Known issues and open questions
 
-**Submaps become a race.** "Is a submap open" moves to the worker, but the
-`ate_unbound_key` callback runs on the loop. A key arriving as a submap opens or
-closes is currently serialized by there being one thread, and will not be.
+**A submap can still arm late.** Loop-owned input routing removes the data race,
+but not the delay: if the worker is behind an action that overran its wait, the
+sequence goes out without the submap and the config's globals are live for a
+round trip — up to about 100ms when a client is slow to ack a configure, which
+is inside the speed at which people type a chord. Pressing the second key there
+runs its global binding instead. A real guarantee needs the loop to know the key
+set *before* the worker runs, which means declaring submap prefixes rather than
+discovering them inside an opaque `X ()`; that is a change on the contrib side,
+recorded here so it is not rediscovered.
 
 **Abort granularity would be "since the last publish".** `throwTo` mid-action
 loses the `StateT` frame, so an action that made three `windows` calls and then
