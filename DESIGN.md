@@ -22,6 +22,16 @@ and pointer events in all windows). To address this, a protocol thread ensures
 that responses are always sent promptly. A separate worker thread runs user
 code, owns `XState`, and communicates with the protocol thread.
 
+**`xmonad --restart` handled via a unix socket.** Before, X11 messages were used
+for restart. Because it is a socket rather than a signal, the request can be
+answered. Refusing to restart -- the successor's executable is gone, the worker
+had to be aborted -- reaches the terminal that asked, with an exit status,
+instead of only the session log.
+
+**Restart hands over with a bounded grace period.** A restart request arrives on
+the protocol thread, which asks the worker to finish its current action, waits a
+little, and only then tears down and writes state.
+
 ## Planned architecture: a worker thread and a published plan
 
 Invert who owns what.
@@ -122,17 +132,12 @@ serialized, in order; a blocking helper can keep blocking and keep returning its
 `ate_unbound_key` callback runs on the loop. A key arriving as a submap opens or
 closes is currently serialized by there being one thread, and will not be.
 
-**Restart is the highest-risk path in that refactor.** `sendRestart` throws into
-the loop, but the teardown it triggers — `broadcastMessage ReleaseResources >>
-writeStateToFile` — is worker work. If the worker is wedged in the very action
-being escaped, restart must abort it first, then run teardown, without losing
-state. Getting this wrong drops the session instead of restarting it.
-
 **Abort granularity would be "since the last publish".** `throwTo` mid-action
 loses the `StateT` frame, so an action that made three `windows` calls and then
-hung leaves the first two applied. Defensible — partial application looks the
-same on X11 — but it is a decision, and it argues for publishing on every
-`windows` rather than at the end of an action.
+hung leaves the first two applied. The grace period above means this is only
+reached when an action overruns rather than on every restart, but it is still a
+decision, and it argues for publishing on every `windows` rather than at the end
+of an action. How long the grace period should be is unsettled.
 
 **A dead worker would be worse than a crash.** Today `userCode` catches per
 action. A worker that dies under a live loop leaves a window manager that still

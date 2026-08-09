@@ -28,9 +28,9 @@
 -- * There are no event masks to select, so @clientMask@ and @rootMask@ are
 --   gone from 'XConfig' and from here.
 -- * The default terminal and launcher follow the Wayland convention.
--- * @mod-q@ restarts through 'sendRestart' rather than shelling out to
---   @xmonad --restart@, and the help binding writes to stderr instead of
---   spawning an @xmessage@, which is an X11 client.
+-- * @mod-q@'s fallback and the help binding write to stderr where upstream
+--   spawns an @xmessage@, which is an X11 client.  The recompile-and-restart
+--   itself is upstream's, unchanged.
 -- * @mod-shift-q@ ends the Wayland session rather than exiting the process,
 --   because under river exiting only hands the seat to the next window
 --   manager -- the compositor keeps running.
@@ -213,7 +213,7 @@ keys conf@(XConfig {XMonad.modMask = modMask}) = M.fromList $
 
     -- quit, or restart
     , ((modMask .|. shiftMask, xK_q     ), exitSession) -- %! Quit xmonad, ending the Wayland session
-    , ((modMask              , xK_q     ), io sendRestart) -- %! Restart xmonad
+    , ((modMask              , xK_q     ), spawn "if type xmonad; then xmonad --recompile && xmonad --restart; else echo 'xmonad not in $PATH:' \"$PATH\" >&2; fi") -- %! Restart xmonad
 
     , ((modMask .|. shiftMask, xK_slash ), helpCommand) -- %! Print a summary of the default keybindings
     -- repeat the binding for non-American layout keyboards
