@@ -85,6 +85,15 @@ data Op
 Both live behind one `IORef (Plan, [Op])`: a single `atomicModifyIORef'`
 replaces the plan and drains the ops to empty.
 
+**The worker publishes at every `windows`.** Upstream's `windows` applies
+immediately — it issues the X requests and the screen updates — so an action
+that lays out, works, and lays out again shows the first result straight away.
+Matching that means one publish per `windows` call rather than one when the
+action returns. Aborting an action therefore leaves exactly what was already on
+screen: nothing un-happens. This is not atomic, and an action needing two
+`windows` calls for one logical change can be interrupted between them — but an
+exception in that same action does the same under X11.
+
 `manage_start` then means "transmit the current plan, `manage_finish`". If the
 worker has published nothing new, the loop re-affirms the plan it already has —
 a valid, cheap, consistent sequence. Response time is bounded by serializing a
@@ -145,6 +154,8 @@ serialized, in order; a blocking helper can keep blocking and keep returning its
 
 ## Known issues and open questions
 
+FIXME: address these
+
 **A submap can still arm late.** Loop-owned input routing removes the data race,
 but not the delay: if the worker is behind an action that overran its wait, the
 sequence goes out without the submap and the config's globals are live for a
@@ -155,12 +166,26 @@ set *before* the worker runs, which means declaring submap prefixes rather than
 discovering them inside an opaque `X ()`; that is a change on the contrib side,
 recorded here so it is not rediscovered.
 
-**Abort granularity would be "since the last publish".** `throwTo` mid-action
-loses the `StateT` frame, so an action that made three `windows` calls and then
-hung leaves the first two applied. The grace period above means this is only
-reached when an action overruns rather than on every restart, but it is still a
-decision, and it argues for publishing on every `windows` rather than at the end
-of an action. How long the grace period should be is unsettled.
+**Where the state file gets written from is unsettled.** Publishing at every
+`windows` means the loop always holds a snapshot it could serialize itself, so a
+restart need not wait on the worker at all: write from the last publish and
+exec. That would take the worker off the restart path entirely, at the cost of
+`broadcastMessage ReleaseResources`, which is user code and would become
+best-effort — skipped when the worker is wedged. Cheaper here than under X11,
+where there were server resources to hand back, but still a behaviour change.
+The alternative is to keep writing from the worker and accept that a wedged
+worker degrades the restart.
+
+**How long the grace period should be is unsettled**, both the ordinary one and
+the longer wait for a plan that requires its sequence. Too short and a submap
+arms late; too long and every restart feels slow.
+
+**Cooperative cancellation is not an option, and this is why.** Setting a flag
+for the worker to check cannot work for the case that matters: a blocked
+`readProcess` never returns to check anything. So aborting is `throwTo` or
+nothing. It is still worth throwing before an exec rather than just exec'ing,
+so that `bracket` and `finally` in user code get to run — with a bound on the
+unwinding, since a `finally` that blocks must not hold a restart hostage.
 
 **A dead worker would be worse than a crash.** Today `userCode` catches per
 action. A worker that dies under a live loop leaves a window manager that still
