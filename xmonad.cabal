@@ -234,6 +234,21 @@ test-suite river-wire
   -- Everything above it is unverified until run against a real river; see
   -- README.river.md.
 
+executable river-submap-spec
+  main-is:        river-submap-spec.hs
+  hs-source-dirs: tests
+  build-depends:  base
+                , containers
+                , unix
+                , xmonad
+  default-language: Haskell2010
+  ghc-options:    -Wall -threaded
+
+  -- A window manager rather than a client: a submap is made of bindings, and
+  -- only the window manager has any.  So it links the library and calls
+  -- 'launch' with a config of its own, the way somebody's xmonad.hs does.
+  -- tests/headless-submap.sh runs it inside a headless river and reads its log.
+
 executable river-prompt-spec
   main-is:        river-prompt-spec.hs
   hs-source-dirs: tests
