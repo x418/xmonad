@@ -17,49 +17,45 @@
 
 
 ################################################################################
-# 1. Implementable, but the timing semantics differ and that needs deciding
+# 1. The request can be sent; it just will not survive
 #
-# river permits window management state to change only during a manage
-# sequence, and applies rendering state only at render_finish.  Upstream these
-# are all "do it now" operations, and callers rely on that.  They could be
-# exported as operations queued for the next sequence, but a contrib module
-# that assumes immediacy would then see surprising ordering rather than a
-# compile error -- which is the tradeoff the whole backend is built to avoid.
+# This section used to say the obstacle was timing -- that river permits window
+# management state to change only during a manage sequence, so these would have
+# to be queued, and a contrib module assuming immediacy would see surprising
+# ordering.  That has now been tried, and the diagnosis was wrong twice over.
 #
-# Held back deliberately.  Worth revisiting once something real has run against
-# river and the ordering hazards are concrete rather than theoretical.
+# Queuing works, and costs nothing.  XMonad.River.Plan.Op is the queue, and
+# kill, warpPointer, moveResizeWindow, the interactive drags and the decoration
+# requests all go through it.  There is no ordering surprise, because the queue
+# is drained *after* the manage sequence computes and *before* it finishes: an
+# op emitted by a binding action, a manage hook or a mailbox action goes out in
+# the very sequence that provoked it.  The latency is zero, not one sequence.
+#
+# The real obstacle is that under river these are not settable state at all.
+# Placement and keyboard focus are *derived*: applyLayout recomputes
+# planPlacements from the layout and planFocus from W.peek, unconditionally, on
+# every manage sequence -- and essentially every action requests one.  So
+# setFocusX for any window that is not the stack top, or tileWindow for any
+# rectangle the layout did not choose, is reverted before anyone sees it.
+#
+# That is worse than not exporting them.  A name that typechecks, works for one
+# sequence and then silently stops is exactly the failure the rule at the top
+# of this file exists to prevent -- and it is a failure no compile error and no
+# runtime error would report.
+#
+# Exporting them would mean making placement and focus settable, which means
+# giving the plan a notion of an override that survives recomputation.  That is
+# a real design question and not a small one; it is not merely a matter of
+# routing the request.
 
-manage                  FIX: adopt into the WindowSet, deferred to the next manage_start.  See WM.adoptNewWindows.
-tileWindow              FIX: record the placement; propose_dimensions at manage, set_position at render.
-setTopFocus             FIX: river_seat_v1.focus_window, deferred to the end of the manage sequence.
-setFocusX               FIX: as setTopFocus, plus clear_focus when the target is gone.
-setInitialProperties    FIX: set_borders + set_tiled + set_capabilities at adopt time.
-
-
-################################################################################
-# 2. State across a restart -- fixed; nothing is dropped for it any more
-#
-# This section used to list StateFile, writeStateToFile, readStateFile and
-# stateFileName, on the grounds that river object ids are per-connection and
-# recycled after wl_display.delete_id, so an id written by one window manager
-# is meaningless to its successor.  That much is still true; the conclusion
-# was wrong.
-#
-# river_window_v1.identifier is generated from the window's
-# ext_foreign_toplevel_handle_v1, which belongs to the window and not to the
-# window manager's connection -- river creates one only if the window has none
-# already, with a comment saying so is for the restarting-window-manager case.
-# And the open question here, whether identifier is delivered for every window
-# before the first manage_start, is answered yes by construction:
-# WindowManager.manageStart() iterates every window, sending window and
-# identifier, and only then sends manage_start.
-#
-# So the state file is keyed on identifier and resolved during the first manage
-# sequence.  See XMonad.Operations.StateFile and XMonad.River.WM.restoreState.
-
+manage                  FIX: adopt into the WindowSet.  WM.adoptNewWindows already does this; what is missing is a name for it, not a mechanism.
+tileWindow              FIX: needs a placement override the layout does not overwrite.  The transport exists (Plan.planPlacements); the persistence does not.
+setTopFocus             FIX: as setFocusX.  Note that Plan.planFocus already IS W.peek, so this one is a no-op by construction rather than merely fragile.
+setFocusX               FIX: needs a focus override that survives the next applyLayout.  transmitManage already sends focus_window, and clear_focus when the target is gone.
+setInitialProperties    FIX: borders are in the plan and use_ssd is an op; set_tiled and set_capabilities are not wired.  The nearest of these to exportable.
 
 ################################################################################
-# 3. A degenerate answer would be truthful, but the answer would mislead
+# 2. A degenerate answer would be truthful, but the answer would mislead
 #
 # `pure ()` is vacuously correct for both of these -- river grabs nothing, so
 # there is nothing to release and nothing to configure.  They are held back
@@ -91,7 +87,7 @@ setButtonGrab           HELD: `pure ()` would accept a Bool that river already d
 
 
 ################################################################################
-# 4. No fix -- Wayland has no such concept
+# 3. No fix -- Wayland has no such concept
 #
 # Where a name's *purpose* survives under a different spelling, that is noted.
 #

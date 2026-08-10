@@ -28,30 +28,31 @@ answered. Refusing to restart -- the successor's executable is gone, the worker
 had to be aborted -- reaches the terminal that asked, with an exit status,
 instead of only the session log.
 
+The listener has a thread of its own rather than an fd in the event loop's wait
+set. The request most worth delivering is the one sent to a window manager that
+has stopped reading, so a listener sharing the loop's fate could not serve it;
+on its own thread it can still interrupt a wedged loop, which is what keeps
+`xmonad --restart` an escape hatch. The listening descriptor is close-on-exec,
+without which the successor of a restart inherits it, concludes another window
+manager owns the path, and quietly accepts connections nobody reads.
+
 **Restart hands over with a bounded grace period.** A restart request arrives on
 the protocol thread, which asks the worker to finish its current action, waits a
 little, and only then tears down and writes state.
 
-## Planned architecture: a worker thread and a published plan
+## Architecture: a worker thread and a published plan
 
-Invert who owns what.
+Who owns what.
 
 - A **worker thread** owns `XState` and runs *all* user code — binding actions,
   manage hooks, `runLayout`, window adoption — serialized, in upstream's order.
 - The **loop** owns the connection and nothing else. It never runs user code.
 
-Two immutable snapshots cross between them, each swapped atomically, so neither
-side ever sees a torn read.
-
-Loop → worker, the compositor's view:
-
-```haskell
-data World = World
-  { worldWindows :: !(M.Map Window RiverWindow)
-  , worldOutputs :: !(M.Map Output RiverOutput)
-  , worldSeats   :: !(M.Map Seat   RiverSeat)
-  }
-```
+Loop → worker, the compositor's view: the window, output and seat maps. Written
+only by the loop, read by the worker, each behind its own `IORef` so a read is a
+pointer load and never a torn one. The worker's view is therefore always
+slightly stale, which is why transmitting filters against the live maps rather
+than trusting the plan.
 
 Worker → loop, what the compositor should be told. It splits in two, and the
 split is the crux of the design: most of what a sequence sends is a *total
@@ -68,8 +69,9 @@ data Plan = Plan
   , planBorders    :: !(M.Map Window (Dimension, RGBA))
   , planVisible    :: !(S.Set Window)
   , planRaised     :: ![Window]
-  , planFocus      :: !(M.Map Seat FocusTarget)  -- FocusWindow w | ClearFocus
-  , planBindings   :: !(M.Map ObjectId Bool)     -- submaps enable/disable these
+  , planFocus      :: !FocusTarget               -- FocusWindow w | ClearFocus
+  , planLayerDefault :: !(Maybe (ObjectId, Maybe ObjectId))
+  , planMustLand   :: !Bool                      -- see below
   }
 
 -- Delivered once, then dropped.
@@ -77,13 +79,34 @@ data Op
   = OpClose Window
   | OpWarpPointer Seat Position
   | OpPointerOpStart Seat PointerOp | OpPointerOpEnd Seat
-  | OpSetTiled Window Word32
-  | OpOpenSubmap [(KeyMask, KeySym)]
-  | OpDecorations Window Decorations
+  | OpSetPosition Window Position Position
+  | OpProposeDimensions Window Dimension Dimension
+  | OpUseDecorations Window Bool
+  | OpCaptureInput [(KeyMask, KeySym)] KeyMask Bool Int
+  | OpGrabKeys [(KeyMask, KeySym)] | OpUngrabKeys
 ```
 
-Both live behind one `IORef (Plan, [Op])`: a single `atomicModifyIORef'`
-replaces the plan and drains the ops to empty.
+A second, smaller queue carries what needs no sequence and must not wait for
+one — `exit_session`, `stop`, `set_xcursor_theme`. Those are drained on every
+pass of the loop, because waiting for a sequence would mean waiting for
+something nothing is going to ask for.
+
+The plan is replaced; the ops are drained. Re-sending a plan is free, and
+re-sending an op is a bug.
+
+**Ops come before the thread split, not after.** `Connection` buffers requests
+in `IORef`s and is not thread-safe, so a worker thread may not touch it at all
+— and until `kill`, `warpPointer` and the interactive drags stop issuing their
+own requests, user code touches it constantly. Routing them through the queue
+is what makes the worker possible, so it has to land first.
+
+Nothing reachable from `X` issues a request any more. Each case was split by
+which thread the work belongs to: the window, output and seat handlers do their
+protocol work and their bookkeeping on the loop and hand back only the hook a
+config might have installed; `reapClosed` keeps the `WindowSet` half while
+`reapObjects` destroys the objects; the layer-surface default became a field of
+the plan; `requestManageSequence` sets a flag the loop drains rather than
+sending `manage_dirty` itself.
 
 **The worker publishes at every `windows`.** Upstream's `windows` applies
 immediately — it issues the X requests and the screen updates — so an action
@@ -109,10 +132,10 @@ Four things this forces:
   `renderSequence` do today do not disappear — they move, and they must cover
   every reference: placements, borders, visible, raised, focus, and each op. One
   missed reference is a protocol error, which disconnects the window manager.
-- **Compositor events become worker work.** `window`/`output`/`seat` mutate
-  `XState`, so the loop can only forward them. A window that appears while an
-  action is blocked is not adopted until the action returns — which is precisely
-  what X11 does.
+- **Compositor events split.** The bookkeeping is the loop's; only the hook a
+  config installed goes to the worker. A window that appears while an action is
+  blocked is recorded at once but not adopted into the `WindowSet` until the
+  action returns — which is precisely what X11 does.
 - **The manage-hook ordering guarantee becomes load-bearing.** A window absent
   from the current plan must stay hidden until a plan includes it, or it flashes
   on screen unmanaged.
@@ -155,6 +178,19 @@ serialized, in order; a blocking helper can keep blocking and keep returning its
 ## Known issues and open questions
 
 FIXME: address these
+
+**Submap teardown cannot happen when the key fires.** `enable` and `disable`
+are manage-sequence-only and a submap key fires outside one, so restoring the
+config's bindings is always deferred to the next sequence — today through the
+mailbox, and in the loop-owned version through a pending-teardown slot drained
+at the next transmit. Worth stating because the arming side is the opposite: it
+has to be atomic with the press, so the two halves of a submap live in
+different sequences by construction.
+
+**Nothing tests submaps.** `headless-prompt.sh` covers prompts, not this, and
+the failure mode is a session in which every binding is disabled. A test that
+arms a submap, presses a key and asserts the globals come back belongs
+alongside the change rather than after it.
 
 **A submap can still arm late.** Loop-owned input routing removes the data race,
 but not the delay: if the worker is behind an action that overran its wait, the
