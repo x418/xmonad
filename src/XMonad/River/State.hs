@@ -23,16 +23,51 @@
 --
 -----------------------------------------------------------------------------
 
-module XMonad.River.State (RiverState(..)) where
+module XMonad.River.State (RiverState(..), InputCapture(..)) where
 
 import Data.IORef (IORef)
 import qualified Data.Map as M
 
 import XMonad.River.Mailbox (Mailbox)
-import XMonad.River.Types (Position, Rectangle, RiverOutput, RiverSeat, RiverWindow, Window)
+import XMonad.River.Types (KeyMask, KeySym, Position, Rectangle, RiverOutput, RiverSeat, RiverWindow, Window)
 import XMonad.River.Wire (ObjectId)
 
 -- | Everything the window manager knows about its connection to river.
+-- | An interaction that has taken the keyboard for a while.
+--
+-- A submap and a hold-to-cycle -- @M-Tab@ -- are the same thing at this level:
+-- both disable every one of the window manager's bindings, install a set of
+-- their own, and end.  They differ only in what ends them, which is what
+-- 'icOneShot' and 'icMods' say.  One type rather than two because they are
+-- also /mutually exclusive/: each disables the whole binding set, so two open
+-- at once would have one teardown re-enabling bindings the other still thinks
+-- it has disabled.  Sharing a slot makes that exclusion structural rather than
+-- something to remember.
+--
+-- Held as data rather than as actions to run, because arming and tearing down
+-- are the event loop's work while the actions are the config's: the loop
+-- reports which key fired by index, and this turns that index back into
+-- something to run.  See @DESIGN.md@ on input routing being loop state.
+data InputCapture m = InputCapture
+    { icKeys       :: ![(KeyMask, KeySym)]
+      -- ^ What to listen for.  Position is identity: the loop knows only
+      -- indices into this list.
+    , icOnKey      :: !(Bool -> Int -> m ())
+      -- ^ Run when one of them fires.  'True' for a press, 'False' for a
+      -- release; the 'Int' indexes 'icKeys'.
+    , icOnEnd      :: !(m ())
+      -- ^ Run when the interaction ends -- an unbound key, the watched
+      -- modifier being released, or the deadline.
+    , icMods       :: !KeyMask
+      -- ^ Modifiers whose release ends this, or zero to watch none.
+    , icOneShot    :: !Bool
+      -- ^ Whether the first key that fires also ends it.  True for a submap,
+      -- false for a hold-to-cycle, where keys fire until the modifier goes up.
+    , icGeneration :: !Int
+      -- ^ Distinguishes this from a later one, so that a deadline belonging to
+      -- an earlier interaction cannot close the current one.
+    }
+
 data RiverState m = RiverState
     { riverManager  :: !ObjectId               -- ^ the @river_window_manager_v1@ global
     , riverBindings :: !ObjectId               -- ^ the @river_xkb_bindings_v1@ global
@@ -75,7 +110,7 @@ data RiverState m = RiverState
       -- river reports a window's size but never where it is, because the
       -- window manager is the thing that decided.  See
       -- 'XMonad.River.windowRect'.
-    , riverExtraKeys :: !(IORef (M.Map ObjectId (m ())))
+    , riverExtraKeys :: !(IORef [(m (), m ())])
       -- ^ Bindings installed at runtime, over and above the config's.
       --
       -- X11 called this grabbing a key: a window manager could ask the server
@@ -93,10 +128,12 @@ data RiverState m = RiverState
       -- instead, which is what "raise it and have it stay raised" has to
       -- mean when something else owns the order.  Windows that are no longer
       -- placed are dropped as they go.
-    , riverSubmap :: !(IORef (Maybe (m ())))
-      -- ^ What to do if a key no submap is waiting for is pressed: tear the
-      -- submap down and run its default action.  'Nothing' when no submap is
-      -- open.
+    , riverCapture :: !(IORef (Maybe (InputCapture m)))
+      -- ^ The interaction currently holding the keyboard, or 'Nothing'.
+      -- Written by 'XMonad.River.submapNextKey' and
+      -- 'XMonad.River.whileModifiersHeld'; taken -- atomically, so exactly one
+      -- of several racing claimants wins -- by whichever of a key, an unbound
+      -- key, a modifier release or the deadline gets there first.
     , riverDragOrigin :: !(IORef (Position, Position))
       -- ^ Where the pointer was when the current interactive operation began.
       -- river reports a drag as a delta from its start; 'mouseDrag' promises

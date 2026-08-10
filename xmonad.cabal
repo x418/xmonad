@@ -100,10 +100,12 @@ library
                    XMonad.River.Buffer
                    XMonad.River.Client
                    XMonad.River.Connection
+                   XMonad.River.Control
                    XMonad.River.Keyboard
                    XMonad.River.Keysym
                    XMonad.River.Keysym.Table
                    XMonad.River.Mailbox
+                   XMonad.River.Plan
                    XMonad.River.Runtime
                    XMonad.River.Socket
                    XMonad.River.State

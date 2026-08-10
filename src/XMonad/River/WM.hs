@@ -18,6 +18,15 @@
 -- its results are stashed, and positions are applied during the following
 -- render sequence.
 --
+-- Deciding and transmitting are separate. Everything in the 'X' monad computes
+-- a "XMonad.River.Plan" and touches the connection not at all; 'transmitManage'
+-- and 'transmitRender' take that value and send it, filtered against the
+-- windows river still has. That split is what the thread split in @DESIGN.md@
+-- is built on -- the thing that decides and the thing that owns the connection
+-- are on their way to being different threads -- and it is worth keeping even
+-- before then: a plan can be re-sent, so a sequence the window manager has
+-- nothing new for is answered by restating the last one.
+--
 -- Bindings fire outside any sequence. Their actions are queued and run at the
 -- start of the next manage sequence, which river is asked to schedule with
 -- @manage_dirty@. This is the same deferral river's own reference window
@@ -28,7 +37,7 @@ module XMonad.River.WM
   , queueAction
   ) where
 
-import Control.Monad (forM, forM_, unless, void, when)
+import Control.Monad (forM, forM_, forever, unless, void, when)
 import Control.Monad.Reader (asks)
 import Control.Monad.State (gets, modify)
 import Data.Bits ((.&.), (.|.))
@@ -38,19 +47,21 @@ import Data.Maybe (fromMaybe, isNothing)
 import Data.Monoid (All(..), appEndo)
 import Data.Int (Int32)
 import Data.Word (Word32)
+import Control.Concurrent (Chan, MVar, forkIO, killThread, newChan, newEmptyMVar, putMVar, readChan, takeMVar, threadDelay, tryPutMVar, writeChan)
 import Control.Exception (SomeException, catch, handle)
 import System.Environment (getArgs, getExecutablePath, lookupEnv)
 import System.Directory (doesFileExist)
 import System.Exit (exitFailure, exitSuccess)
-import System.Posix.Process (executeFile, getProcessID)
-import System.Posix.Signals (Handler (Catch), installHandler, sigUSR1)
+import System.Posix.Process (executeFile)
 import System.IO (hPutStrLn, stderr)
+import System.Timeout (timeout)
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
 import XMonad.Core
 import XMonad.Operations (StateFile (..), broadcastMessage, focus, readStateFile, scaleRationalRect, writeStateToFile)
-import XMonad.River.Runtime (RestartRequested(..), forgetBorderOverride, takeModifierWatcher, lookupBorderOverride, pidFilePath, publishGeometry, publishSizeHints, sendRestart, setMainThread, warnUnimplemented)
+import XMonad.River.Runtime (emitOp, setModifierWatcher, takeNowOps, takeOps, RestartRequested(..), forgetBorderOverride, takeModifierWatcher, lookupBorderOverride, publishGeometry, publishSizeHints, sendRestart, setMainThread, warnUnimplemented)
+import qualified XMonad.River.Control as Ctl
 import XMonad.River.Client (closeAllClients)
 import XMonad.River.Connection
 import XMonad.River.Keyboard (riverModifiers)
@@ -61,7 +72,8 @@ import XMonad.River.Protocol.LayerShell
 import XMonad.River.Protocol.XkbBindings
 import XMonad.River.Wire (ObjectId, isNullObject)
 import XMonad.River.Types
-import XMonad.River.State (RiverState(..))
+import XMonad.River.Plan
+import XMonad.River.State (InputCapture(..), RiverState(..))
 import qualified XMonad.StackSet as W
 
 --------------------------------------------------------------------------------
@@ -77,16 +89,45 @@ data Runtime = Runtime
     -- ^ The same 'IORef' as 'riverKeyBindings' in the 'XConf'.  A submap
     -- disables every one of these while it is open, so it needs to reach them
     -- from the 'X' monad; the callbacks here reach them from 'IO'.
-  , rtSubmap      :: !(IORef (Maybe (X ())))
-    -- ^ Likewise 'riverSubmap': set from 'X' when a submap opens, read from
-    -- the @ate_unbound_key@ callback.
+  , rtSubmap      :: !(IORef (Maybe (InputCapture X)))
+    -- ^ The same 'IORef' as 'riverCapture'.  Written by the config; taken by
+    -- whichever of a key, an unbound key, a modifier release or the deadline
+    -- gets there first.
+  , rtGrabbed     :: !(IORef [ObjectId])
+    -- ^ The standing bindings 'XMonad.River.grabKeys' asked for.  Loop state
+    -- for the same reason 'rtArmed' is.
+  , rtExtraKeys   :: !(IORef [(X (), X ())])
+    -- ^ The same 'IORef' as 'riverExtraKeys': what each of those runs, indexed
+    -- the way the loop bound them.
+  , rtArmed       :: !(IORef [ObjectId])
+    -- ^ The temporary bindings an open submap installed, so that tearing it
+    -- down can destroy them.  Loop state: arming and disarming are protocol
+    -- work, and only the loop may do protocol work.
+  , rtDisarm      :: !(IORef Bool)
+    -- ^ Set when a submap has ended and its bindings are still installed.
+    -- Acted on at the start of the next manage sequence, because @enable@ and
+    -- @disable@ are legal nowhere else -- and a submap always ends outside
+    -- one, on a key press.
   , rtXkbVersion  :: !Word32
     -- ^ Negotiated @river_xkb_bindings_v1@ version.  @get_seat@ and
     -- @ensure_next_key_eaten@ arrived in 2.
   , rtPointerBind :: !(IORef (M.Map ObjectId (Window -> X ())))
-  , rtPlacements  :: !(IORef [(Window, Rectangle)])
-    -- ^ Layout output from the last manage sequence, applied during render.
-  , rtVisible     :: !(IORef (S.Set Window))
+  , rtPlan        :: !(IORef Plan)
+    -- ^ What the last manage sequence decided.  Computed in the 'X' monad and
+    -- transmitted from 'IO', which is the separation @DESIGN.md@ is built on:
+    -- the thing that decides and the thing that holds the connection are on
+    -- their way to being different threads.
+  , rtWindows     :: !(IORef (M.Map Window RiverWindow))
+    -- ^ The same 'IORef' as 'riverWindows'.  Transmitting a plan has to filter
+    -- it against the windows river still has, and does so from 'IO'.
+  , rtSeats       :: !(IORef (M.Map ObjectId RiverSeat))
+    -- ^ Likewise 'riverSeats', for the focus half of a plan.
+  , rtOutputs     :: !(IORef (M.Map ObjectId RiverOutput))
+    -- ^ Likewise 'riverOutputs'.
+  , rtBindingsGlobal :: !ObjectId
+    -- ^ The @river_xkb_bindings_v1@ global.  Held here so that installing a
+    -- seat's listeners needs no 'XConf', which is what lets that happen on the
+    -- event loop rather than in the 'X' monad.
   , rtBoundSeats  :: !(IORef (S.Set ObjectId))
   , rtHovered     :: !(IORef (Maybe Window))
   , rtManager     :: !ObjectId
@@ -179,15 +220,22 @@ run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs 
   submapRef   <- newIORef Nothing
   placeRef    <- newIORef []
   restackRef  <- newIORef []
-  extraKeysRef <- newIORef M.empty
+  extraKeysRef <- newIORef []
   rt <- Runtime
           <$> newIORef []
           <*> pure bindingsRef
           <*> pure submapRef
+          <*> newIORef []
+          <*> pure extraKeysRef
+          <*> newIORef []
+          <*> newIORef False
           <*> pure bindingsVer
           <*> newIORef M.empty
-          <*> pure placeRef
-          <*> newIORef S.empty
+          <*> newIORef emptyPlan
+          <*> pure windowsRef
+          <*> pure seatsRef
+          <*> pure outputsRef
+          <*> pure bindings
           <*> newIORef S.empty
           <*> newIORef Nothing
           <*> pure manager
@@ -241,7 +289,7 @@ run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs 
             , riverPlacements = placeRef
             , riverExtraKeys = extraKeysRef
             , riverRestack = restackRef
-            , riverSubmap = submapRef
+            , riverCapture = submapRef
             , riverDragOrigin = dragOrigin
             }
         , normalBorder = parseColor (normalBorderColor userConfig)
@@ -270,20 +318,51 @@ run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs 
         writeIORef stateRef st'
         pure a
 
+  -- The worker thread.  It owns 'XState' and runs every scrap of user code --
+  -- binding actions, manage hooks, layouts, window adoption -- serialized, in
+  -- the order things were asked for, which is the order upstream runs them in.
+  -- The event loop below owns the connection and runs none of it, so a config
+  -- action that blocks stops window management and leaves the compositor
+  -- answered.  See @DESIGN.md@.
+  work <- newChan
+  tick <- newEmptyMVar
+  let submit :: X () -> IO ()
+      submit = writeChan work
+  workerTid <- forkIO $ forever $ do
+    act <- readChan work
+    -- Per action, so that one that throws costs its own effect and not the
+    -- window manager.  A worker that died under a live loop would leave
+    -- something that still answers river and responds to nothing, which looks
+    -- alive -- worse than a crash.
+    runX' act `catch` \e -> hPutStrLn stderr
+      ("xmonad-river: worker: " ++ show (e :: SomeException))
+    -- Non-blocking: the loop may not be waiting, and a worker that stalled
+    -- because nobody collected a tick would be the bug this exists to avoid.
+    void (tryPutMVar tick ())
+
   riverWindowManagerV1Listen conn manager $
-    onManagerEvent conn manager restartRef rt runX'
+    onManagerEvent conn manager restartRef rt submit tick
 
   riverWindowManagerV1ManageDirty conn manager
 
   setMainThread
-  -- Two ways in for a restart request that does not come from a keybinding.
-  -- The signal is what @xmonad --restart@ sends, and is also the only handle a
-  -- script -- or a test -- has on a running window manager; the pid file is
-  -- how the sender finds this process, since river offers nothing between the
-  -- two.  Both are set up after 'setMainThread', because that is what the
-  -- handler needs to reach the event loop.
-  _ <- installHandler sigUSR1 (Catch sendRestart) Nothing
-  writeFile (pidFilePath (dataDir dirs)) . show =<< getProcessID
+  -- The way in for a restart request that does not come from a keybinding.
+  -- This is what @xmonad --restart@ sends, and is the only handle a script --
+  -- or a test -- has on a running window manager, since river offers nothing
+  -- between one window manager process and another.  Set up after
+  -- 'setMainThread', because that is what reaching the event loop needs.
+  ctlPath <- Ctl.controlSocketPath
+  case ctlPath of
+    Left err -> hPutStrLn stderr
+      ("xmonad-river: no control socket (" ++ err ++ "); \
+       \`xmonad --restart` will not work")
+    Right path -> do
+      served <- Ctl.serveControl path $ \case
+        Ctl.Restart -> Ctl.awaitRestart sendRestart
+      case served of
+        Left err -> hPutStrLn stderr
+          ("xmonad-river: could not listen on " ++ path ++ ": " ++ err)
+        Right _  -> pure ()
   -- The startup hook is deliberately *not* run here. river holds a watchdog
   -- over the manage sequence, and this config's startup hook spawns upwards of
   -- a dozen processes; doing that before the event loop starts means river
@@ -298,6 +377,23 @@ run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs 
   -- is requested, because river permits window management state to change
   -- nowhere else.
   let loop = do
+        -- Anything that asked for a manage sequence since the last pass.
+        -- 'XMonad.Operations.requestManageSequence' and
+        -- 'XMonad.River.manageDirty' only set a flag, because they run
+        -- wherever an X action does and the connection is the loop's.
+        wantsSeq <- atomicModifyIORef' dirtyRef (\d -> (False, d))
+        when wantsSeq $ riverWindowManagerV1ManageDirty conn manager
+        -- Requests that need no sequence and must not wait for one: ending the
+        -- session, or asking river to release this window manager.  Waiting
+        -- for a sequence would mean waiting for something nothing will ask for.
+        nowOps <- takeNowOps
+        seatsNow <- readIORef (rtSeats rt)
+        forM_ nowOps $ \case
+          OpExitSession -> riverWindowManagerV1ExitSession conn manager
+          OpStop -> riverWindowManagerV1Stop conn manager
+          OpSetXcursorTheme s name size -> when (M.member s seatsNow) $
+            riverSeatV1SetXcursorTheme conn s name size
+          _ -> pure ()
         -- Flush before waiting, or a request queued but not yet written --
         -- the manage_dirty just above, on the very first pass -- never
         -- reaches the compositor, and the wait blocks for a reply to
@@ -317,6 +413,7 @@ run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs 
   -- A restart request arrives as an async exception thrown into this thread,
   -- which interrupts the blocking read. Ask river to release us, then keep
   -- dispatching: the 'finished' event does the exec.
+  let restartGraceMicros = 2 * 1000 * 1000
   loop `catch` \RestartRequested -> do
     mExe <- restartTarget
     case mExe of
@@ -325,9 +422,12 @@ run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs 
       -- a session with an out-of-date window manager beats a session with
       -- none.
       Nothing -> do
-        hPutStrLn stderr
-          "xmonad-river: refusing to restart, the executable is gone; \
-          \still running the old one"
+        let msg = "the executable is gone; still running the old one"
+        -- Whoever asked hears the refusal.  Before the control socket this
+        -- reached only the session log, so `xmonad --restart` looked like it
+        -- had worked and the old window manager simply stayed.
+        Ctl.answerRestart (Ctl.Refused msg)
+        hPutStrLn stderr ("xmonad-river: refusing to restart, " ++ msg)
         loop
       Just exe -> do
         args <- getArgs
@@ -335,8 +435,26 @@ run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs 
         -- river to stop.  This path exists because 'sendRestart' is callable
         -- from any thread and so cannot run 'X' code itself; it must not
         -- therefore be a restart that quietly loses state.
-        runX' (broadcastMessage ReleaseResources >> writeStateToFile)
+        -- The same two things 'XMonad.Operations.restart' does, but on the
+        -- worker, because that is what owns 'XState' now.  Bounded: if the
+        -- action being escaped is the one that is stuck, waiting for it would
+        -- make the escape hatch as stuck as the thing it is escaping.
+        done <- newEmptyMVar
+        submit (broadcastMessage ReleaseResources >> writeStateToFile
+                  >> io (putMVar done ()))
+        yielded <- timeout restartGraceMicros (takeMVar done)
+        when (isNothing yielded) $ do
+          hPutStrLn stderr
+            "xmonad-river: the worker did not yield; restarting from the last \
+            \committed state"
+          -- Killed rather than merely interrupted, so that nothing races the
+          -- loop for 'XState' while it writes the file below.
+          killThread workerTid
+          runX' writeStateToFile
         writeIORef restartRef (Just (exe, args))
+        -- Answered before the stop rather than after, because after it there
+        -- is an exec and no thread left to answer with.
+        Ctl.answerRestart Ctl.Ok
         riverWindowManagerV1Stop conn manager
         loop
 
@@ -368,9 +486,9 @@ restartTarget = do
 
 onManagerEvent
   :: Connection -> ObjectId -> IORef (Maybe (FilePath, [String])) -> Runtime
-  -> (forall a. X a -> IO a)
+  -> (X () -> IO ()) -> MVar ()
   -> RiverWindowManagerV1Event -> IO ()
-onManagerEvent conn manager restartRef rt runX' = \case
+onManagerEvent conn manager restartRef rt submit tick = \case
   RiverWindowManagerV1Unavailable -> do
     hPutStrLn stderr "xmonad-river: another window manager is already running"
     exitFailure
@@ -386,22 +504,71 @@ onManagerEvent conn manager restartRef rt runX' = \case
     -- idle dash processes, one inside the next.
     Just (prog, as) -> executeFile prog True as Nothing
   RiverWindowManagerV1ManageStart -> do
-    runX' (manageSequence rt)
+    before <- planSerial <$> readIORef (rtPlan rt)
+    submit (manageSequence rt)
+    -- Bounded.  An action that finishes in time has its result in this
+    -- sequence, exactly as when the loop ran it itself; one that overruns
+    -- leaves the sequence to be answered with the plan already in hand, which
+    -- is valid and cheap.  What is never allowed is waiting for user code.
+    landed <- awaitPlan rt tick before
+    -- Only when the sequence actually ran: 'reapClosed' has to have seen the
+    -- entries this deletes, or a closed window is dropped from the map while
+    -- the WindowSet still holds it.
+    when landed (reapObjects rt conn)
+    transmitManage rt conn
     riverWindowManagerV1ManageFinish conn manager
     -- Deliver manage_finish before running anything slow. Requests are only
     -- buffered until the event loop flushes, and the startup hook spawns
     -- enough processes to trip river's watchdog in the meantime.
     flush conn
-    runX' (runStartupHook rt)
+    submit (runStartupHook rt)
   RiverWindowManagerV1RenderStart -> do
-    runX' (renderSequence rt)
+    transmitRender rt conn
     riverWindowManagerV1RenderFinish conn manager
-  RiverWindowManagerV1Window win -> runX' (addWindow win)
-  RiverWindowManagerV1Output out -> runX' (addOutput rt out)
-  RiverWindowManagerV1Seat seat  -> runX' (addSeat rt seat)
-  RiverWindowManagerV1SessionLocked   -> void (runX' (broadcastEvent SessionLocked))
-  RiverWindowManagerV1SessionUnlocked -> void (runX' (broadcastEvent SessionUnlocked))
+  -- The bookkeeping happens on the loop; only the hook a config might have
+  -- installed is user code, and that is all that goes to the worker.
+  RiverWindowManagerV1Window win -> addWindow rt conn win
+  RiverWindowManagerV1Output out -> do
+    addOutput rt conn out
+    submit (void (broadcastEvent (OutputAdded out)))
+  RiverWindowManagerV1Seat seat  -> do
+    addSeat rt conn seat
+    submit (void (broadcastEvent (SeatAdded seat)))
+  RiverWindowManagerV1SessionLocked   -> submit (void (broadcastEvent SessionLocked))
+  RiverWindowManagerV1SessionUnlocked -> submit (void (broadcastEvent SessionUnlocked))
   _ -> pure ()
+
+-- | Wait, briefly, for the worker to publish a plan newer than the one in
+-- hand.
+--
+-- 'True' if it did.  The bound is what makes the split safe: the loop must
+-- answer river whatever the worker is doing, and river holds every input event
+-- for the seat until it does.  A plan that says it must land in its own
+-- sequence -- arming a submap, which has to be atomic with the key press that
+-- opened it -- is worth waiting longer for, but not indefinitely.
+awaitPlan :: Runtime -> MVar () -> Int -> IO Bool
+awaitPlan rt tick before = go planGraceMicros
+  where
+    go budget
+      | budget <= 0 = pure False
+      | otherwise = do
+          now <- readIORef (rtPlan rt)
+          if planSerial now > before
+            then pure True
+            else do
+              let step = min budget planPollMicros
+              _ <- timeout step (takeMVar tick)
+              go (budget - step)
+
+-- | How long the loop will wait for a plan before answering with the one it
+-- has.  Long enough that anything not doing I/O lands in its own sequence.
+planGraceMicros :: Int
+planGraceMicros = 8 * 1000
+
+-- | How long a single wait for a tick lasts, so that a tick arriving for some
+-- other action does not spin.
+planPollMicros :: Int
+planPollMicros = 2 * 1000
 
 broadcastEvent :: Event -> X All
 broadcastEvent ev = do
@@ -411,12 +578,17 @@ broadcastEvent ev = do
 --------------------------------------------------------------------------------
 -- Object tracking
 
-addWindow :: ObjectId -> X ()
-addWindow win = do
-  conn <- asks display
-  node <- io (riverWindowV1GetNode conn win)
-  ref <- asks (riverWindows . riverState)
-  io $ modifyIORef' ref $ M.insert win RiverWindow
+-- | Take note of a window river has just told us about.
+--
+-- Runs on the event loop, in 'IO', and touches no 'XState': everything it does
+-- is a protocol request or a write to a map the loop owns.  Keeping it out of
+-- the 'X' monad is what allows the loop to keep answering river while user code
+-- runs elsewhere -- see @DESIGN.md@.
+addWindow :: Runtime -> Connection -> ObjectId -> IO ()
+addWindow rt conn win = do
+  node <- riverWindowV1GetNode conn win
+  let ref = rtWindows rt
+  modifyIORef' ref $ M.insert win RiverWindow
     { rwObject = win, rwNode = node
     , rwAppId = Nothing, rwTitle = Nothing, rwPid = Nothing
     , rwIdentifier = Nothing, rwParent = Nothing
@@ -424,7 +596,7 @@ addWindow win = do
     , rwSizeHints = noSizeHints
     , rwNew = True, rwClosed = False, rwFullscreen = False, rwHidden = False
     }
-  io $ riverWindowV1Listen conn win $ \case
+  riverWindowV1Listen conn win $ \case
     RiverWindowV1Closed        -> adjust ref win $ \w -> w { rwClosed = True }
     RiverWindowV1AppId a       -> adjust ref win $ \w -> w { rwAppId = a }
     RiverWindowV1Title t       -> adjust ref win $ \w -> w { rwTitle = t }
@@ -445,6 +617,8 @@ addWindow win = do
         } }
     -- Both are followed by a manage_start, so a manage hook asking
     -- 'XMonad.Hooks.ManageHelpers.isFullscreen' sees the up-to-date answer.
+    -- Both are followed by a manage_start, so a manage hook asking
+    -- 'XMonad.Hooks.ManageHelpers.isFullscreen' sees the up-to-date answer.
     RiverWindowV1FullscreenRequested _ ->
       adjust ref win $ \w -> w { rwFullscreen = True }
     RiverWindowV1ExitFullscreenRequested ->
@@ -455,12 +629,13 @@ addWindow win = do
 adjust :: IORef (M.Map ObjectId a) -> ObjectId -> (a -> a) -> IO ()
 adjust ref k f = modifyIORef' ref (M.adjust f k)
 
-addOutput :: Runtime -> ObjectId -> X ()
-addOutput rt out = do
-  conn <- asks display
-  ref <- asks (riverOutputs . riverState)
+-- | Likewise for an output.  The event a config might hook is /not/ broadcast
+-- here: that is user code, and its caller runs it separately.
+addOutput :: Runtime -> Connection -> ObjectId -> IO ()
+addOutput rt conn out = do
+  let ref = rtOutputs rt
 
-  mLayer <- forM (rtLayerShell rt) $ \shell -> io $ do
+  mLayer <- forM (rtLayerShell rt) $ \shell -> do
     lo <- riverLayerShellV1GetOutput conn shell out
     riverLayerShellOutputV1Listen conn lo $ \case
       RiverLayerShellOutputV1NonExclusiveArea x y width height ->
@@ -469,24 +644,23 @@ addOutput rt out = do
       _ -> pure ()
     pure lo
 
-  io $ modifyIORef' ref $ M.insert out RiverOutput
+  modifyIORef' ref $ M.insert out RiverOutput
     { roObject = out, roPosition = (0, 0), roSize = (0, 0), roRemoved = False
     , roLayerObject = mLayer, roLayerArea = Nothing }
-  void (broadcastEvent (OutputAdded out))
 
-  io $ riverOutputV1Listen conn out $ \case
+  riverOutputV1Listen conn out $ \case
     RiverOutputV1Removed -> adjust ref out $ \o -> o { roRemoved = True }
     RiverOutputV1Position x y -> adjust ref out $ \o -> o { roPosition = (x, y) }
     RiverOutputV1Dimensions width height ->
       adjust ref out $ \o -> o { roSize = (width, height) }
     _ -> pure ()
 
-addSeat :: Runtime -> ObjectId -> X ()
-addSeat rt seat = do
-  conn <- asks display
-  ref <- asks (riverSeats . riverState)
+-- | Likewise for a seat.  As with 'addOutput', the broadcast is the caller's.
+addSeat :: Runtime -> Connection -> ObjectId -> IO ()
+addSeat rt conn seat = do
+  let ref = rtSeats rt
 
-  mLayer <- forM (rtLayerShell rt) $ \shell -> io $ do
+  mLayer <- forM (rtLayerShell rt) $ \shell -> do
     ls <- riverLayerShellV1GetSeat conn shell seat
     riverLayerShellSeatV1Listen conn ls $ \ev -> do
       let set f = adjust ref seat $ \s -> s { rsLayerFocus = f }
@@ -500,8 +674,8 @@ addSeat rt seat = do
   -- The object a submap requests @ensure_next_key_eaten@ on.  Created once per
   -- seat, because doing it twice is a protocol error, and only when river
   -- offers version 2 or better -- the request does not exist before that.
-  bindingsGlobal <- asks (riverBindings . riverState)
-  mXkbSeat <- if rtXkbVersion rt < 2 then pure Nothing else io $ do
+  let bindingsGlobal = rtBindingsGlobal rt
+  mXkbSeat <- if rtXkbVersion rt < 2 then pure Nothing else do
     xs <- riverXkbBindingsV1GetSeat conn bindingsGlobal seat
     riverXkbBindingsSeatV1Listen conn xs $ \case
       -- A key the open submap did not ask for.  Under X11 this arrived on the
@@ -512,8 +686,10 @@ addSeat rt seat = do
       -- could not notice an unknown key would stay armed and leave the session
       -- with no working shortcuts.
       RiverXkbBindingsSeatV1AteUnboundKey -> do
-        pending <- atomicModifyIORef' (rtSubmap rt) (\s -> (Nothing, s))
-        forM_ pending (queueAction rt)
+        taken <- atomicModifyIORef' (rtSubmap rt) (\s -> (Nothing, s))
+        forM_ taken $ \cap -> do
+          writeIORef (rtDisarm rt) True
+          queueAction rt (icOnEnd cap)
       -- What ends an Alt-Tab.  Only sent for modifiers something asked to
       -- watch, so this is silent unless 'XMonad.River.whileModifiersHeld' has
       -- an interaction open.
@@ -522,13 +698,12 @@ addSeat rt seat = do
       _ -> pure ()
     pure (Just xs)
 
-  io $ modifyIORef' ref $ M.insert seat RiverSeat
+  modifyIORef' ref $ M.insert seat RiverSeat
     { rsObject = seat, rsRemoved = False
     , rsLayerObject = mLayer, rsLayerFocus = LayerFocusNone
     , rsPointer = (0, 0), rsXkbSeat = mXkbSeat }
-  void (broadcastEvent (SeatAdded seat))
 
-  io $ riverSeatV1Listen conn seat $ \case
+  riverSeatV1Listen conn seat $ \case
     RiverSeatV1Removed -> adjust ref seat $ \s -> s { rsRemoved = True }
     -- @pointer_enter@ is river's equivalent of X11's @EnterNotify@, and is
     -- what makes 'focusFollowsMouse' work.  X11 checked @ev_mode ==
@@ -642,40 +817,60 @@ windowsInStateFile path = handle (\(_ :: SomeException) -> pure 0) $ do
     _         -> pure 0
 
 -- | Drop windows river has told us are gone, and destroy the protocol objects.
+-- | Drop what river has closed from the 'WindowSet', and tell the config.
+--
+-- Only the parts that need 'XState' or run user code.  Destroying the protocol
+-- objects is 'reapObjects', which the event loop does immediately afterwards --
+-- the two halves have to stay in that order, because this one still needs to
+-- see the entries that one deletes.
 reapClosed :: X ()
 reapClosed = do
-  conn <- asks display
   ref <- asks (riverWindows . riverState)
   ws <- io (readIORef ref)
-  let closed = [ w | w <- M.elems ws, rwClosed w ]
-  forM_ closed $ \w -> do
+  forM_ [ w | w <- M.elems ws, rwClosed w ] $ \w ->
     modify $ \st -> st { windowset = W.delete (rwObject w) (windowset st) }
-    io $ do
-      forgetBorderOverride (rwObject w)
-      riverNodeV1Destroy conn (rwNode w)
-      riverWindowV1Destroy conn (rwObject w)
-      modifyIORef' ref (M.delete (rwObject w))
 
-  outRef <- asks (riverOutputs . riverState)
-  outs <- io (readIORef outRef)
+  outs <- io . readIORef =<< asks (riverOutputs . riverState)
+  forM_ [ o | o <- M.elems outs, roRemoved o ] $ \o ->
+    void (broadcastEvent (OutputRemoved (roObject o)))
+
+  seats <- io . readIORef =<< asks (riverSeats . riverState)
+  forM_ [ s | s <- M.elems seats, rsRemoved s ] $ \s ->
+    void (broadcastEvent (SeatRemoved (rsObject s)))
+
+-- | Destroy the protocol objects for everything river has closed.
+--
+-- Runs on the event loop: object lifetime is the connection's business, and
+-- the maps are the loop's.  Deliberately after 'reapClosed', and deliberately
+-- before a plan is transmitted -- a plan naming a window destroyed here would
+-- be a protocol error, and filtering it out is exactly what transmitting
+-- against these maps does.
+reapObjects :: Runtime -> Connection -> IO ()
+reapObjects rt conn = do
+  let ref = rtWindows rt
+  ws <- readIORef ref
+  forM_ [ w | w <- M.elems ws, rwClosed w ] $ \w -> do
+    forgetBorderOverride (rwObject w)
+    riverNodeV1Destroy conn (rwNode w)
+    riverWindowV1Destroy conn (rwObject w)
+    modifyIORef' ref (M.delete (rwObject w))
+
+  let outRef = rtOutputs rt
+  outs <- readIORef outRef
   -- The layer shell objects are inert once removed is sent, but destroying
   -- them is still what completes destruction of the output.
   forM_ [ o | o <- M.elems outs, roRemoved o ] $ \o -> do
-    void (broadcastEvent (OutputRemoved (roObject o)))
-    io $ do
-      forM_ (roLayerObject o) (riverLayerShellOutputV1Destroy conn)
-      riverOutputV1Destroy conn (roObject o)
-      modifyIORef' outRef (M.delete (roObject o))
+    forM_ (roLayerObject o) (riverLayerShellOutputV1Destroy conn)
+    riverOutputV1Destroy conn (roObject o)
+    modifyIORef' outRef (M.delete (roObject o))
 
-  seatRef <- asks (riverSeats . riverState)
-  seats <- io (readIORef seatRef)
+  let seatRef = rtSeats rt
+  seats <- readIORef seatRef
   forM_ [ s | s <- M.elems seats, rsRemoved s ] $ \s -> do
-    void (broadcastEvent (SeatRemoved (rsObject s)))
-    io $ do
-      forM_ (rsLayerObject s) (riverLayerShellSeatV1Destroy conn)
-      forM_ (rsXkbSeat s) (riverXkbBindingsSeatV1Destroy conn)
-      riverSeatV1Destroy conn (rsObject s)
-      modifyIORef' seatRef (M.delete (rsObject s))
+    forM_ (rsLayerObject s) (riverLayerShellSeatV1Destroy conn)
+    forM_ (rsXkbSeat s) (riverXkbBindingsSeatV1Destroy conn)
+    riverSeatV1Destroy conn (rsObject s)
+    modifyIORef' seatRef (M.delete (rsObject s))
 
 -- | Nominate an output for layer surfaces that do not pick one themselves.
 --
@@ -701,12 +896,12 @@ nominateLayerOutput rt = forM_ (rtLayerShell rt) $ \_ -> do
         []    -> case sortOn roPosition live of
           (o:_) -> Just o
           []    -> Nothing
-  forM_ chosen $ \o -> forM_ (roLayerObject o) $ \lo -> do
-    prev <- io (readIORef (rtLayerDefault rt))
-    unless (prev == Just (roObject o)) $ do
-      conn <- asks display
-      io (riverLayerShellOutputV1SetDefault conn lo)
-      io (writeIORef (rtLayerDefault rt) (Just (roObject o)))
+  -- Recorded rather than sent.  Which output should host layer surfaces is a
+  -- decision, and 'transmitManage' is what turns decisions into requests; it
+  -- also holds the "only when the choice actually changes" comparison, since
+  -- that is about what has been sent rather than about what was chosen.
+  io $ modifyIORef' (rtPlan rt) $ \p ->
+    p { planLayerDefault = (\o -> (roObject o, roLayerObject o)) <$> chosen }
 
 -- | Reconcile the 'WindowSet'\'s screens with river's outputs.
 --
@@ -775,7 +970,6 @@ adoptNewWindows = do
   ref <- asks (riverWindows . riverState)
   ws <- io (readIORef ref)
   let fresh = [ w | w <- M.elems ws, rwNew w, not (rwClosed w) ]
-  conn <- asks display
   forM_ fresh $ \w -> do
     io $ adjust ref (rwObject w) $ \x -> x { rwNew = False }
     -- Ask for server-side decoration before the manage hook runs, so a config
@@ -792,7 +986,7 @@ adoptNewWindows = do
     -- from 'borderWidth' and nothing else.  A client that only supports CSD
     -- ignores the request, which river documents and which is why this is not
     -- conditional on the decoration_hint.
-    io (riverWindowV1UseSsd conn (rwObject w))
+    emitOp (OpUseDecorations (rwObject w) True)
     -- Everything above is setup this connection owes river for any window it
     -- has not spoken to before, including one carried over from the previous
     -- window manager: those requests were made on a connection that no longer
@@ -931,6 +1125,8 @@ bindPanic rt seat = do
       globals <- readIORef (rtBindings rt)
       forM_ (M.keys globals) (riverXkbBindingV1Enable conn)
       writeIORef (rtSubmap rt) Nothing
+      writeIORef (rtArmed rt) []
+      writeIORef (rtDisarm rt) False
       hPutStrLn stderr $ "xmonad-river: panic: closed " <> show n
         <> " prompt(s) and re-enabled " <> show (M.size globals) <> " binding(s)"
       riverWindowManagerV1ManageDirty conn (rtManager rt)
@@ -998,8 +1194,41 @@ applyLayout rt = do
     -- round and then restacks.
     pure (rs ++ flt)
 
-  io $ writeIORef (rtPlacements rt) placements
-  io $ writeIORef (rtVisible rt) (S.fromList (map fst placements))
+  -- Borders are resolved here rather than while transmitting, because the
+  -- override lookup and the focused/normal choice are decisions and belong
+  -- with the rest of them.  river forgets rendering state between frames, so
+  -- the answer is restated on every render sequence from this map.
+  bw0 <- asks (borderWidth . config)
+  focusedCol <- asks focusedBorder
+  normalCol <- asks normalBorder
+  let mFocus = W.peek ws
+  borders <- fmap M.fromList $ forM placements $ \(win, _) -> do
+    (mWidth, mColor) <- io (lookupBorderOverride win)
+    let width = fromMaybe bw0 mWidth
+        rgba = case mColor of
+          Just c  -> c
+          Nothing -> pixelColor (if Just win == mFocus then focusedCol else normalCol)
+    pure (win, (width, rgba))
+
+  raised <- io . readIORef =<< asks (riverRestack . riverState)
+  let placed = S.fromList (map fst placements)
+      stillUp = filter (`S.member` placed) raised
+  io . flip writeIORef stillUp =<< asks (riverRestack . riverState)
+
+  -- The same placements, where the @IO@-shaped queries in "XMonad.River" can
+  -- reach them: 'windowRect' and 'windowUnderPointer' answer from here.  Kept
+  -- alongside the plan rather than derived from it because 'RiverState' is
+  -- what an 'X' action has in hand, and the plan is not.
+  io . flip writeIORef placements =<< asks (riverPlacements . riverState)
+
+  io $ modifyIORef' (rtPlan rt) $ \p -> p
+    { planSerial     = planSerial p + 1
+    , planPlacements = placements
+    , planBorders    = borders
+    , planVisible    = placed
+    , planRaised     = stillUp
+    , planFocus      = maybe ClearFocus FocusWindow mFocus
+    }
 
   -- Publish what the layout decided, so that the IO-shaped queries in
   -- "XMonad.Core" -- getWindowAttributes, getGeometry -- have something to
@@ -1025,28 +1254,101 @@ applyLayout rt = do
   io $ publishGeometry (M.mapWithKey attrs allKnown)
   io $ publishSizeHints (M.map rwSizeHints allKnown)
 
-  conn <- asks display
-  winRef <- asks (riverWindows . riverState)
-  known <- io (readIORef winRef)
+-- | Send the window management half of a plan.
+--
+-- Everything here is resolved against the windows river currently has, not the
+-- ones the plan was computed against: the two can differ, and naming a window
+-- river has destroyed is a protocol error that disconnects the window manager
+-- rather than a request that is ignored.
+transmitManage :: Runtime -> Connection -> IO ()
+transmitManage rt conn = do
+  plan <- readIORef (rtPlan rt)
+  known <- readIORef (rtWindows rt)
+  seats <- readIORef (rtSeats rt)
+
+  -- What user code asked for since the last sequence.  Drained rather than
+  -- kept: every one of these is an effect river performs once, so re-sending
+  -- would not be a no-op.  Filtered against the live objects for the same
+  -- reason the plan is -- a window closed between the request and now would
+  -- otherwise be a protocol error rather than a request that does nothing.
+  -- Restoring the config's bindings after a submap ended.  First, so that a
+  -- submap opened by the action the last one ran arms on top of a clean set
+  -- rather than fighting this.
+  disarm <- readIORef (rtDisarm rt)
+  when disarm $ do
+    temps <- atomicModifyIORef' (rtArmed rt) (\ts -> ([], ts))
+    forM_ temps $ \b -> do
+      riverXkbBindingV1Disable conn b
+      riverXkbBindingV1Destroy conn b
+    globals <- readIORef (rtBindings rt)
+    forM_ (M.keys globals) (riverXkbBindingV1Enable conn)
+    writeIORef (rtDisarm rt) False
+
+  -- The layer-surface default, when the choice has moved since it was last
+  -- sent.  river remembers this one, so restating it every sequence would be
+  -- traffic for nothing.
+  forM_ (planLayerDefault plan) $ \(out, mLayerObj) -> do
+    prev <- readIORef (rtLayerDefault rt)
+    forM_ mLayerObj $ \lo -> unless (prev == Just out) $ do
+      riverLayerShellOutputV1SetDefault conn lo
+      writeIORef (rtLayerDefault rt) (Just out)
+
+  ops <- takeOps
+  forM_ ops $ \case
+    OpClose w -> when (M.member w known) $ riverWindowV1Close conn w
+    OpWarpPointer s x y -> when (M.member s seats) $ riverSeatV1PointerWarp conn s x y
+    OpPointerOpStart s -> when (M.member s seats) $ riverSeatV1OpStartPointer conn s
+    OpUseDecorations w ssd -> when (M.member w known) $
+      (if ssd then riverWindowV1UseSsd else riverWindowV1UseCsd) conn w
+    OpSetPosition w x y -> forM_ (M.lookup w known) $ \rw ->
+      riverNodeV1SetPosition conn (rwNode rw) x y
+    OpProposeDimensions w dw dh -> when (M.member w known) $
+      riverWindowV1ProposeDimensions conn w (fromIntegral dw) (fromIntegral dh)
+    OpCaptureInput ks mods oneShot gen -> armCapture rt conn seats ks mods oneShot gen
+    OpUngrabKeys -> do
+      old <- atomicModifyIORef' (rtGrabbed rt) (\bs -> ([], bs))
+      forM_ old $ \b -> do
+        riverXkbBindingV1Disable conn b
+        riverXkbBindingV1Destroy conn b
+    OpGrabKeys ks -> do
+      bs <- fmap concat $ forM (M.elems seats) $ \seat ->
+        forM (zip [0 :: Int ..] ks) $ \(i, (mask, keysym)) -> do
+          b <- riverXkbBindingsV1GetXkbBinding conn (rtBindingsGlobal rt)
+                 (rsObject seat) keysym (riverModifiers mask)
+          -- Indexed rather than keyed on the binding object, so that what runs
+          -- stays with the config and the loop holds only the objects.
+          let fire pick = do
+                acts <- readIORef (rtExtraKeys rt)
+                forM_ (take 1 (drop i acts)) (queueAction rt . pick)
+          riverXkbBindingV1Listen conn b $ \case
+            RiverXkbBindingV1Pressed  -> fire fst
+            RiverXkbBindingV1Released -> fire snd
+            _ -> pure ()
+          riverXkbBindingV1Enable conn b
+          pure b
+      writeIORef (rtGrabbed rt) bs
+    -- Drained by the loop rather than here; see 'takeNowOps'.
+    OpExitSession -> pure ()
+    OpStop -> pure ()
+    OpSetXcursorTheme{} -> pure ()
 
   -- Dimensions are window management state, so they go here rather than in
   -- the render sequence.
-  forM_ placements $ \(win, r) -> when (M.member win known) $
-    io $ riverWindowV1ProposeDimensions conn win
-           (fromIntegral (rect_width r)) (fromIntegral (rect_height r))
+  forM_ (planPlacements plan) $ \(win, r) -> when (M.member win known) $
+    riverWindowV1ProposeDimensions conn win
+      (fromIntegral (rect_width r)) (fromIntegral (rect_height r))
 
   -- Keyboard focus, likewise. A seat whose keyboard has gone to a layer
   -- surface is left alone: river discards focus requests outright while focus
   -- is exclusive, and in the non-exclusive case setting focus in this same
   -- manage sequence would silently steal the keyboard back — which is the
   -- difference between a fuzzel prompt you can type into and one you cannot.
-  seats <- io . readIORef =<< asks (riverSeats . riverState)
   forM_ (M.elems seats) $ \s ->
     unless (layerHasFocus (rsLayerFocus s)) $
-      case W.peek ws of
-        Just win | M.member win known ->
-          io (riverSeatV1FocusWindow conn (rsObject s) win)
-        _ -> io (riverSeatV1ClearFocus conn (rsObject s))
+      case planFocus plan of
+        FocusWindow win | M.member win known ->
+          riverSeatV1FocusWindow conn (rsObject s) win
+        _ -> riverSeatV1ClearFocus conn (rsObject s)
 
 updateLayout :: WorkspaceId -> Layout Window -> WindowSet -> WindowSet
 updateLayout i l = W.mapWorkspace $ \wsp ->
@@ -1055,64 +1357,137 @@ updateLayout i l = W.mapWorkspace $ \wsp ->
 --------------------------------------------------------------------------------
 -- The render sequence
 
-renderSequence :: Runtime -> X ()
-renderSequence rt = do
-  conn <- asks display
-  placements <- io (readIORef (rtPlacements rt))
-  visible <- io (readIORef (rtVisible rt))
-  winRef <- asks (riverWindows . riverState)
-  known <- io (readIORef winRef)
-  bw <- asks (borderWidth . config)
-  focusedCol <- asks focusedBorder
-  normalCol <- asks normalBorder
-  mFocus <- W.peek <$> gets windowset
+-- | Take the keyboard for a submap or a hold-to-cycle, and disable the
+-- config's own bindings while it is held.
+--
+-- Inside the manage sequence that carries the key press which asked for it,
+-- which is the whole reason this is the loop's work rather than the config's:
+-- river holds every input event for the seat until the sequence finishes, so
+-- arming here is atomic with the press.  Arming one sequence later would leave
+-- an interval in which the globals are live and this is not, and the second
+-- key of a chord would run the wrong thing.
+--
+-- Every one of the window manager's own bindings is disabled meanwhile.  river
+-- leaves it to compositor policy which of several bindings matching one
+-- physical key receives the press, so leaving the globals live alongside these
+-- would make a prefix key that is also a captured key -- @M-m m@, say -- do
+-- something undefined.
+armCapture
+  :: Runtime -> Connection -> M.Map ObjectId RiverSeat
+  -> [(KeyMask, KeySym)] -> KeyMask -> Bool -> Int -> IO ()
+armCapture rt conn seats ks mods oneShot gen = do
+  globals <- readIORef (rtBindings rt)
+  forM_ (M.keys globals) (riverXkbBindingV1Disable conn)
 
-  forM_ placements $ \(win, r) -> forM_ (M.lookup win known) $ \w -> do
-    io $ riverNodeV1SetPosition conn (rwNode w) (rect_x r) (rect_y r)
-    -- Borders are rendering state, so river keeps no memory of them: every
-    -- render sequence states them again from scratch.  That is why a
-    -- per-window override has to be stored rather than issued directly -- see
-    -- 'XMonad.Core.setWindowBorderWidth'.
-    (mWidth, mColor) <- io (lookupBorderOverride win)
-    let width = fromMaybe bw mWidth
-        -- Widened here rather than stored widened: the colours a config and
-        -- contrib deal in are Pixels, as they were under X11, and the RGBA
-        -- quadruple is the wire format rather than the vocabulary.
-        (red, green, blue, alpha) = case mColor of
-          Just c  -> c
-          Nothing -> pixelColor (if Just win == mFocus then focusedCol else normalCol)
+  -- Taking the slot is what makes a key, an unbound key, a modifier release
+  -- and the deadline exclusive: whoever gets a 'Just' owns the teardown.
+  let claim = atomicModifyIORef' (rtSubmap rt) $ \case
+        Just cap | icGeneration cap == gen -> (Nothing, Just cap)
+        other -> (other, Nothing)
+
+  temps <- fmap concat $ forM (M.elems seats) $ \seat ->
+    forM (zip [0 :: Int ..] ks) $ \(i, (mask, keysym)) -> do
+      b <- riverXkbBindingsV1GetXkbBinding conn (rtBindingsGlobal rt)
+             (rsObject seat) keysym (riverModifiers mask)
+      riverXkbBindingV1Listen conn b $ \case
+        RiverXkbBindingV1Pressed
+          -- A submap ends on its first key, so the slot is taken here.
+          | oneShot -> claim >>= \taken -> forM_ taken $ \cap -> do
+              writeIORef (rtDisarm rt) True
+              queueAction rt (icOnKey cap True i)
+          -- A hold-to-cycle keeps going, so the slot is only read.
+          | otherwise -> do
+              held <- readIORef (rtSubmap rt)
+              forM_ held $ \cap -> queueAction rt (icOnKey cap True i)
+        RiverXkbBindingV1Released | not oneShot -> do
+          held <- readIORef (rtSubmap rt)
+          forM_ held $ \cap -> queueAction rt (icOnKey cap False i)
+        _ -> pure ()
+      riverXkbBindingV1Enable conn b
+      pure b
+  writeIORef (rtArmed rt) temps
+
+  -- What ends a hold-to-cycle: the modifier going up.  The event carries both
+  -- the old and the new mask precisely so that a release can be told from a
+  -- press.
+  when (mods /= 0) $ do
+    setModifierWatcher $ Just $ \old new ->
+      when (old .&. mods /= 0 && new .&. mods /= old .&. mods) $ do
+        taken <- claim
+        forM_ taken $ \cap -> do
+          writeIORef (rtDisarm rt) True
+          queueAction rt (icOnEnd cap)
+    forM_ (M.elems seats) $ \s ->
+      forM_ (rsXkbSeat s) $ \x -> riverXkbBindingsSeatV1ModifiersWatch conn x mods
+
+  -- Ask to be told about a key this did not want, so it can be abandoned.
+  -- Without it -- on version 1, where the request does not exist -- an unknown
+  -- key does nothing and the capture stays open with the config's bindings
+  -- disabled, which is a session with no shortcuts.
+  when oneShot $ forM_ (M.elems seats) $ \s ->
+    forM_ (rsXkbSeat s) (riverXkbBindingsSeatV1EnsureNextKeyEaten conn)
+
+  -- A deadline, because the alternative to one is a session with no
+  -- keybindings at all.  If nothing else ever ends this -- the compositor is
+  -- too old for the events that would, or it was opened by accident and
+  -- abandoned -- the disabling would be permanent.  The generation check in
+  -- 'claim' is what stops this closing a later capture.
+  void $ forkIO $ do
+    threadDelay captureDeadlineMicros
+    taken <- claim
+    forM_ taken $ \cap -> do
+      hPutStrLn stderr
+        "xmonad-river: keyboard capture abandoned after 60s; restoring bindings"
+      writeIORef (rtDisarm rt) True
+      queueAction rt (icOnEnd cap)
+
+-- | How long an interaction may hold the keyboard before it gives up.
+--
+-- Long enough that no deliberate use reaches it and short enough that the
+-- mistake is a nuisance rather than the end of the session.
+captureDeadlineMicros :: Int
+captureDeadlineMicros = 60 * 1000 * 1000
+
+-- | Send the rendering half of a plan.
+--
+-- Rendering state is restated in full every frame: river keeps no memory of
+-- it, so a request skipped here is not "unchanged" but "reverted".  Filtered
+-- against the live window map for the reason 'transmitManage' is.
+transmitRender :: Runtime -> Connection -> IO ()
+transmitRender rt conn = do
+  plan <- readIORef (rtPlan rt)
+  let winRef = rtWindows rt
+  known <- readIORef winRef
+
+  forM_ (planPlacements plan) $ \(win, r) -> forM_ (M.lookup win known) $ \w -> do
+    riverNodeV1SetPosition conn (rwNode w) (rect_x r) (rect_y r)
     -- Unconditional, where this used to skip a zero width entirely: an
     -- override *to* zero is how NoBorders removes a border, and skipping the
     -- request would leave the previous one standing.  river reads width 0 as
     -- "no borders", so the two cases need no distinguishing here.
-    io $ riverWindowV1SetBorders conn win allEdges (fromIntegral width)
-           red green blue alpha
+    let (width, (red, green, blue, alpha)) =
+          M.findWithDefault (0, (0, 0, 0, 0)) win (planBorders plan)
+    riverWindowV1SetBorders conn win allEdges (fromIntegral width)
+      red green blue alpha
     when (rwHidden w) $ do
-      io (riverWindowV1Show conn win)
-      io $ adjust winRef win $ \x -> x { rwHidden = False }
+      riverWindowV1Show conn win
+      adjust winRef win $ \x -> x { rwHidden = False }
 
   -- Anything not placed by the layout belongs to a workspace that is not on
   -- screen. river has no concept of workspaces, so this is what implements
   -- them.
   forM_ (M.elems known) $ \w ->
-    unless (S.member (rwObject w) visible || rwHidden w) $ do
-      io (riverWindowV1Hide conn (rwObject w))
-      io $ adjust winRef (rwObject w) $ \x -> x { rwHidden = True }
+    unless (S.member (rwObject w) (planVisible plan) || rwHidden w) $ do
+      riverWindowV1Hide conn (rwObject w)
+      adjust winRef (rwObject w) $ \x -> x { rwHidden = True }
 
-  -- Stacking order: the layout list is in the desired bottom-to-top order.
-  forM_ placements $ \(win, _) -> forM_ (M.lookup win known) $ \w ->
-    io (riverNodeV1PlaceTop conn (rwNode w))
-
-  -- Then anything asked to sit above that, re-applied every frame because this
-  -- loop would otherwise have just undone it.  Filtered to what the layout
-  -- placed, so a raised window that has since gone away or moved to another
-  -- workspace stops being raised rather than lingering as a stale request.
-  raised <- io . readIORef =<< asks (riverRestack . riverState)
-  let placed = S.fromList (map fst placements)
-      stillUp = filter (`S.member` placed) raised
-  io . flip writeIORef stillUp =<< asks (riverRestack . riverState)
-  forM_ stillUp $ \win -> forM_ (M.lookup win known) $ \w ->
-    io (riverNodeV1PlaceTop conn (rwNode w))
+  -- Stacking order: the layout list is in the desired bottom-to-top order,
+  -- then anything asked to sit above it, re-applied every frame because this
+  -- loop would otherwise have just undone it.
+  forM_ (planPlacements plan) $ \(win, _) ->
+    forM_ (M.lookup win known) $ \w -> riverNodeV1PlaceTop conn (rwNode w)
+  forM_ (planRaised plan) $ \win ->
+    forM_ (M.lookup win known) $ \w -> riverNodeV1PlaceTop conn (rwNode w)
 
 -- | A dimension bound river reports as zero or less was not stated.
 sizeBound :: Int32 -> Int32 -> Maybe (Dimension, Dimension)

@@ -10,7 +10,6 @@ module XMonad.River.Runtime
   ( RestartRequested(..)
   , sendRestart
   , setMainThread
-  , pidFilePath
   , warnUnimplemented
   , publishGeometry
   , lookupGeometry
@@ -29,6 +28,10 @@ module XMonad.River.Runtime
   , currentSubmapGeneration
   , setModifierWatcher
   , takeModifierWatcher
+  , emitOp
+  , takeOps
+  , emitNow
+  , takeNowOps
   ) where
 
 import Control.Concurrent (ThreadId, myThreadId)
@@ -36,7 +39,6 @@ import Control.Monad (unless)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.IORef
 import Data.Word (Word32)
-import System.FilePath ((</>))
 import System.IO (hPutStrLn, stderr)
 import System.IO.Unsafe (unsafePerformIO)
 import qualified Control.Exception as E
@@ -46,6 +48,7 @@ import qualified Data.Set as S
 import XMonad.River.Types (BorderColor, Dimension, Pixel, pixelColor, Position, Window,
                            WindowAttributes(..), SizeHints, noSizeHints)
 import XMonad.River.Connection (Display)
+import XMonad.River.Plan (Op)
 import XMonad.River.Wire (ObjectId, nullObject)
 
 {-# NOINLINE geometryRef #-}
@@ -194,22 +197,6 @@ sendRestart = readIORef mainThreadRef >>= \case
   Nothing -> hPutStrLn stderr
     "xmonad-river: sendRestart called before the event loop started"
 
--- | Where the running window manager records its process id, given the data
--- directory.
---
--- This exists because @xmonad --restart@ has to reach a window manager it is
--- not part of, and under river there is nothing between the two processes to
--- carry the request.  X11 had one for free: the second process put a client
--- message on the root window and the server delivered it.  river mediates the
--- @stop@/@finished@ handover but offers no channel for anything else, so the
--- rendezvous has to be on the filesystem, and @SIGUSR1@ carries the request.
---
--- Deliberately not in "XMonad.Core" next to 'XMonad.Core.stateFileName'.  That
--- module's exports are required to be a subset of the X11 build's, and X11 has
--- no such file because it never needed one.
-pidFilePath :: FilePath -> FilePath
-pidFilePath dir = dir </> "xmonad-river.pid"
-
 -- | Complain, once per process, that something is doing less than it says.
 --
 -- The rule in this backend is that anything which cannot be faithfully ported
@@ -290,3 +277,50 @@ getGeometry dpy win = do
     wa <- getWindowAttributes dpy win
     pure ( nullObject
          , wa_x wa, wa_y wa, wa_width wa, wa_height wa, wa_border_width wa, 0 )
+
+--------------------------------------------------------------------------------
+-- One-shot requests from user code
+
+-- | Requests that user code asked for and the event loop has not yet sent.
+--
+-- A process global for the reason 'publishGeometry' is one: the callers are
+-- ordinary @X@ actions -- 'XMonad.Operations.kill', 'XMonad.Operations.warpPointer'
+-- -- which have an 'XMonad.Core.XConf' but no route to the event loop, and
+-- there is exactly one window manager per process.
+--
+-- Queued rather than sent, because river accepts most of these only during a
+-- manage sequence and user code does not run inside one.  Unlike the plan,
+-- which is restated in full every sequence, these are effects that must happen
+-- exactly once -- sending @close@ twice kills a second window -- so they are
+-- drained as they are transmitted rather than kept.
+{-# NOINLINE opsRef #-}
+opsRef :: IORef [Op]
+opsRef = unsafePerformIO (newIORef [])
+
+-- | Ask for a request to go out with the next sequence.  Newest first; 'takeOps'
+-- pays the one reversal.
+emitOp :: MonadIO m => Op -> m ()
+emitOp op = liftIO (atomicModifyIORef' opsRef (\ops -> (op : ops, ())))
+
+-- | Take everything queued, in the order it was asked for, leaving none.
+takeOps :: IO [Op]
+takeOps = atomicModifyIORef' opsRef (\ops -> ([], reverse ops))
+
+-- | Requests that need no manage sequence, and must not wait for one.
+--
+-- Separate from 'opsRef' because those are drained while a sequence is being
+-- transmitted, and these have to happen whether or not one is coming: ending
+-- the session, or asking river to release this window manager, would otherwise
+-- wait on a sequence that nothing is going to request.  The event loop drains
+-- these on every pass.
+{-# NOINLINE nowOpsRef #-}
+nowOpsRef :: IORef [Op]
+nowOpsRef = unsafePerformIO (newIORef [])
+
+-- | Ask for a request to go out on the event loop's next pass.
+emitNow :: MonadIO m => Op -> m ()
+emitNow op = liftIO (atomicModifyIORef' nowOpsRef (\ops -> (op : ops, ())))
+
+-- | Take everything queued, oldest first, leaving none.
+takeNowOps :: IO [Op]
+takeNowOps = atomicModifyIORef' nowOpsRef (\ops -> ([], reverse ops))

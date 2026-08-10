@@ -74,7 +74,8 @@ module XMonad.Operations (
     ) where
 
 import XMonad.Core
-import XMonad.River.Runtime (setBorderColor)
+import XMonad.River.Plan (Op(..))
+import XMonad.River.Runtime (emitNow, emitOp, setBorderColor)
 import XMonad.River.State (RiverState(..))
 import XMonad.River.Types
 import XMonad.River.Protocol.WindowManagement
@@ -122,9 +123,10 @@ unmanage = windows . W.delete
 
 killWindow :: Window -> X ()
 killWindow w = do
-    conn <- asks display
     known <- io . readIORef =<< asks (riverWindows . riverState)
-    when (M.member w known) $ io (riverWindowV1Close conn w)
+    -- Queued rather than sent: @close@ is legal only during a manage sequence,
+    -- and this runs from a keybinding, which is outside one.
+    when (M.member w known) $ emitOp (OpClose w)
 
 -- | Kill the currently focused client.
 
@@ -156,11 +158,14 @@ windows f = do
 -- | Ask river to start a manage sequence, because state it cannot observe has
 -- changed.
 
+-- Recorded rather than sent.  The event loop owns the connection, and this
+-- runs wherever an X action does -- which after the thread split is not the
+-- loop.  The loop sends @manage_dirty@ for whatever is flagged before it waits
+-- again, so the request costs one pass through the loop and no round trip.
 requestManageSequence :: X ()
 requestManageSequence = do
-    conn <- asks display
-    manager <- asks (riverManager . riverState)
-    io (riverWindowManagerV1ManageDirty conn manager)
+    ref <- asks (riverDirty . riverState)
+    io (writeIORef ref True)
 
 -- | Re-run the layout.  Under river this is a request for another manage
 -- sequence; the layout runs there.
@@ -533,13 +538,14 @@ readStateFile xmc = do
 
 restart :: String -> Bool -> X ()
 restart cmd resume = do
-    conn <- asks display
-    manager <- asks (riverManager . riverState)
     ref <- asks (riverRestart . riverState)
     broadcastMessage ReleaseResources
     when resume writeStateToFile
     io (writeIORef ref (Just (cmd, [])))
-    io (riverWindowManagerV1Stop conn manager)
+    -- Queued for the event loop, which owns the connection.  Ordering holds:
+    -- this action finishes before the loop's next pass, so the state file is
+    -- written before river is asked to let go.
+    emitNow OpStop
 
 
 
@@ -619,14 +625,13 @@ mouseDrag f done = do
     case drag of
         Just _ -> return () -- already dragging
         Nothing -> do
-            conn <- asks display
             seats <- io . readIORef =<< asks (riverSeats . riverState)
             case M.elems seats of
                 [] -> return ()
                 (s:_) -> do
                     origin <- asks (riverDragOrigin . riverState)
                     io (writeIORef origin (rsPointer s))
-                    io (riverSeatV1OpStartPointer conn (rsObject s))
+                    emitOp (OpPointerOpStart (rsObject s))
                     modify $ \st -> st { dragging = Just (f, cleanup) }
   where
     cleanup = do
@@ -637,9 +642,8 @@ mouseDrag f done = do
 
 warpPointer :: Position -> Position -> X ()
 warpPointer x y = do
-    conn <- asks display
     seats <- io . readIORef =<< asks (riverSeats . riverState)
-    forM_ (M.keys seats) $ \seat -> io (riverSeatV1PointerWarp conn seat x y)
+    forM_ (M.keys seats) $ \seat -> emitOp (OpWarpPointer seat x y)
 
 -- | Accumulate mouse motion events.
 --
@@ -662,11 +666,8 @@ mouseMoveWindow w = whenX (isClient w) $ do
         (ox, oy) <- io . readIORef =<< asks (riverDragOrigin . riverState)
         mouseDrag
             (\ex ey -> do
-                node <- io . readIORef =<< asks (riverWindows . riverState)
-                conn <- asks display
-                forM_ (M.lookup w node) $ \rw ->
-                    io $ riverNodeV1SetPosition conn (rwNode rw)
-                           (rect_x sr + (ex - ox)) (rect_y sr + (ey - oy))
+                emitOp (OpSetPosition w (rect_x sr + (ex - ox))
+                                         (rect_y sr + (ey - oy)))
                 float w)
             (float w)
 
@@ -681,12 +682,11 @@ mouseResizeWindow w = whenX (isClient w) $ do
         (ox, oy) <- io . readIORef =<< asks (riverDragOrigin . riverState)
         mouseDrag
             (\ex ey -> do
-                conn <- asks display
                 let (width, height) = applySizeHintsContents hints
                         ( fromIntegral w0 + (ex - ox)
                         , fromIntegral h0 + (ey - oy) )
-                io $ riverWindowV1ProposeDimensions conn w
-                       (fromIntegral width) (fromIntegral height)
+                emitOp (OpProposeDimensions w (fromIntegral width)
+                                              (fromIntegral height))
                 float w)
             (float w)
 

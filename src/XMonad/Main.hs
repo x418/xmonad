@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 
 ----------------------------------------------------------------------------
@@ -36,20 +37,17 @@ module XMonad.Main (xmonad, launch, sendRestart) where
 
 import System.Locale.SetLocale
 import Control.Monad (unless)
-import Data.Char (isSpace)
 import System.Environment (getArgs, getProgName, withArgs)
 import System.Exit (exitFailure)
 import System.IO
-import System.IO.Error (isDoesNotExistError)
 import System.Info
-import System.Posix.Signals (sigUSR1, signalProcess)
-import qualified Control.Exception as E
 
 import Paths_xmonad (version)
 import Data.Version (showVersion)
 
 import XMonad.Core
-import XMonad.River.Runtime (pidFilePath, sendRestart)
+import XMonad.River.Runtime (sendRestart)
+import qualified XMonad.River.Control as Ctl
 import XMonad.River.WM (riverMain)
 
 ------------------------------------------------------------------------
@@ -88,30 +86,22 @@ xmonad conf = do
 --
 -- X11 got the rendezvous for free by putting a client message on the root
 -- window.  river has no equivalent channel between two window manager
--- processes, so the running one leaves its pid in 'pidFilePath' and this sends
--- it @SIGUSR1@.
+-- processes, so the running one listens on a unix socket and this connects to
+-- it.  See "XMonad.River.Control".
 --
--- A stale pid file -- from a window manager that was killed rather than asked
--- to stop -- is reported rather than silently ignored, because the thing the
--- caller wanted did not happen.
+-- Every way this can fail is reported and exits non-zero, because the caller
+-- asked for something and is entitled to know it did not happen.  That
+-- includes the window manager answering /and refusing/ -- which the signal
+-- this replaced could not express at all.
 requestRestart :: Directories -> IO ()
-requestRestart dirs = do
-    let path = pidFilePath (dataDir dirs)
-    raw <- try (readFile path)
-    case raw >>= \s -> maybe (Left (userError "unparseable")) Right (readMaybe s) of
-      Left _ -> die $ "xmonad-river: no running window manager found (" <> path <> ")"
-      Right pid -> do
-        ok <- try (signalProcess sigUSR1 (fromIntegral (pid :: Integer)))
-        case ok of
-          Right () -> pure ()
-          Left e | isDoesNotExistError e ->
-                     die $ "xmonad-river: no process " <> show pid
-                         <> "; the pid file at " <> path <> " is stale"
-                 | otherwise -> die $ "xmonad-river: " <> show e
+requestRestart _dirs = Ctl.controlSocketPath >>= \case
+    Left err   -> die ("xmonad-river: " <> err)
+    Right path -> Ctl.sendRequest path Ctl.Restart >>= \case
+      Left err            -> die $ "xmonad-river: no running window manager at "
+                                <> path <> " (" <> err <> ")"
+      Right Ctl.Ok        -> pure ()
+      Right (Ctl.Refused msg) -> die ("xmonad-river: restart refused: " <> msg)
   where
-    try :: IO a -> IO (Either IOError a)
-    try = E.try
-    readMaybe s = case reads s of [(n, r)] | all isSpace r -> Just n; _ -> Nothing
     die msg = hPutStrLn stderr msg >> exitFailure
 
 usage :: IO ()
