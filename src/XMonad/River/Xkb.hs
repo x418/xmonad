@@ -26,6 +26,7 @@ module XMonad.River.Xkb
   , keycodeToKeysym
   , keycodeToUtf8
   , updateModifiers
+  , modifierActive
   ) where
 
 import Control.Monad (when)
@@ -66,6 +67,8 @@ foreign import ccall safe "xkb_state_key_get_utf8"
 foreign import ccall safe "xkb_state_update_mask"
   c_update_mask :: Ptr XkbStateT -> Word32 -> Word32 -> Word32
                 -> Word32 -> Word32 -> Word32 -> IO CInt
+foreign import ccall safe "xkb_state_mod_name_is_active"
+  c_mod_name_is_active :: Ptr XkbStateT -> CString -> CInt -> IO CInt
 
 -- | Parse the keymap the compositor sent.
 --
@@ -121,3 +124,27 @@ updateModifiers :: XkbState -> Word32 -> Word32 -> Word32 -> Word32 -> IO ()
 updateModifiers x depressed latched locked group = do
   r <- c_update_mask (xkbState x) depressed latched locked 0 0 group
   when (r == 0) (pure ())
+
+-- | Whether a named modifier is currently held.
+--
+-- By name, not by bit position: a modifier's index is a property of the keymap
+-- being used, so the bit that means @Mod4@ under one layout can mean something
+-- else under another.  The names are xkb's canonical ones -- @\"Shift\"@,
+-- @\"Control\"@, @\"Mod1\"@ through @\"Mod5\"@, @\"Lock\"@ -- and are what the
+-- @XKB_MOD_NAME_*@ macros expand to.
+--
+-- 'False' for a name the keymap does not define, which is the same answer as
+-- "defined but not held" and is the right one for both: a caller asking
+-- whether @Mod3@ is down on a keymap without a @Mod3@ wants @no@, not an
+-- error.  libxkbcommon distinguishes them by returning -1, which is folded in
+-- here.
+--
+-- The state consulted is the /effective/ one -- depressed, latched and locked
+-- combined -- because that is what decides which keysym the key produced, and
+-- a binding is matched against the same thing a person sees on screen.
+modifierActive :: XkbState -> String -> IO Bool
+modifierActive x name = withCString name $ \cs -> do
+  -- 8 is XKB_STATE_MODS_EFFECTIVE.
+  r <- c_mod_name_is_active (xkbState x) cs 8
+  pure (r > 0)
+
