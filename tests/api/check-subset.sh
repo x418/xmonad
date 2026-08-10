@@ -11,7 +11,7 @@
 #                        stack build && GHC="stack exec -- ghc" tests/api/dump-api.sh tests/api/river
 #
 #   tests/api/upstream/  upstream xmonad, recorded from a real checkout
-#                        tests/api/record-upstream-api.sh ../xmonad
+#                        tests/api/dump-api.sh tests/api/upstream ../xmonad
 #
 # Upstream is a recording rather than a build because this package no longer
 # carries upstream's sources -- there is one source tree and it is the river

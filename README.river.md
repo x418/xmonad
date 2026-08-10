@@ -107,11 +107,12 @@ that error learns something true. A no-op that typechecks teaches them nothing
 until the behaviour is missing at runtime, by which point the backend is the
 last place they will look.
 
-The consequence is that river's API is a strict subset in both directions. 26
+The consequence is that river's API is a strict subset in both directions. 20
 names the X11 build exports are gone, each justified by name in
-[`tests/api/unportable.txt`](tests/api/unportable.txt); the 1458 names `XMonad`
-re-exports from `Graphics.X11` are not re-exported at all; and river's eight
-modules add **nothing**. Everything river offers that xmonad does not lives in
+[`tests/api/unportable.txt`](tests/api/unportable.txt); the 1335 names `XMonad`
+re-exports from `Graphics.X11` and `Graphics.X11.Xlib.Extras` are not
+re-exported at all; and the eight modules xmonad has always exported add
+**nothing** here. Everything river offers that xmonad does not lives in
 `XMonad.River`, so a config importing `XMonad` sees exactly the names the X11
 build offers minus the unportable ones, and never more. Importing
 `XMonad.River` is a config saying explicitly that it is a river config.
@@ -167,8 +168,9 @@ Each connection is owned by exactly one thread. `Connection` buffers requests
 in `IORef`s and is not thread-safe, so `XMonad.River.Client` forks a thread that
 owns its connection outright and never hands it out: a caller can only redraw or
 close, both posted to a mailbox. That is enforced by the module's interface
-rather than by a comment, because GAPS.md §3 exists precisely because the rule
-was broken once.
+rather than by a comment, because the prototype this repo was rewritten from
+handed a connection out and corrupted the request stream — a rule stated in
+prose is a rule that gets broken.
 
 Drawing is *not* on this list. Prompts and decorations are rendered in-process
 with cairo and pango, into a `wl_shm` buffer the compositor reads directly —
@@ -214,5 +216,16 @@ handover would not depend on that.
 `xmonad --restart` needed a rendezvous of its own, for the same reason. Under
 X11 the second process put a client message on the root window and the server
 delivered it; river mediates the window manager handover but offers no channel
-between two window manager processes. The running one writes its pid to
-`xmonad-river.pid` in the data directory, and `--restart` sends it `SIGUSR1`.
+between two window manager processes. The running one listens on a unix socket
+at `$XDG_RUNTIME_DIR/xmonad-river-$WAYLAND_DISPLAY.sock` — named for the display
+so that two rivers on one machine get one window manager each — and `--restart`
+connects to it. See `XMonad.River.Control`.
+
+A socket rather than a pid file and a signal, for two reasons. A pid file has
+the flaw every pid file has: after pid reuse the signal reaches an unrelated
+process, and `SIGUSR1`'s default disposition is to kill what it hits, whereas
+connecting to a socket nobody is listening on fails cleanly and means what it
+says. And a socket carries a *reply* — a window manager that refuses to
+restart, because the executable it would come back as is gone or because its
+worker had to be aborted, says so to the terminal that asked, with an exit
+status, instead of only to the session log where nobody is looking.

@@ -8,9 +8,12 @@ this repo was rewritten from, plus what fixes it. None of it is discoverable
 from the code, and most of it fails *silently* — which is why it is written
 down rather than left to be rediscovered.
 
-**Nothing in this repo has been run against a live river.** The recipes here
-are carried over from the prototype, which has. Treat them as informed rather
-than verified.
+**None of this has been run in a real session.** What this repo has been run
+against is a *headless* river — no display, no seat, no GPU — under
+`tests/headless-river.sh`, `tests/headless-prompt.sh` and
+`tests/headless-restart.sh`, and none of those needs a session file, a display
+manager or systemd. So the recipes here are carried over from the prototype,
+which did run in a real session. Treat them as informed rather than verified.
 
 ## Build and install
 
@@ -117,11 +120,16 @@ and `systemctl --user start river-session.target` from the session script.
   stderr, and therefore to the journal.
 - **`gnomeRegister`** — XSMP is X11-only. Use
   `systemctl --user start graphical-session.target` via the target above.
-- **Anything drawing its own windows through Xlib** — prompts, decorations,
-  tab bars. See `SURVEY.md` in `../xmonad-river-contrib`: `XMonad.Util.Font`
-  gates 146 of the 171 xmonad-contrib modules that do not yet compile, because
-  text rendering under Wayland cannot go through `FontStruct` and `GC`. The
-  prototype shelled out to `fuzzel` for prompts instead.
+- **Anything drawing its own windows through Xlib directly.** Prompts,
+  decorations and tab bars are *not* in this category any more: they draw
+  in-process with cairo and pango into a `wl_shm` buffer, and contrib's
+  existing drawing code reaches that through `XMonad.Util.River.Compat`, which
+  reproduces Xlib's drawing *model* rather than shelling out to `fuzzel` as the
+  prototype did. What still fails is a module that calls Xlib itself — a `GC`,
+  a `FontStruct`, an `openDisplay`. See `SURVEY.md` in
+  `../xmonad-river-contrib` for which ones, and note that a module that does
+  not compile is commented out of that package's cabal file, so it is
+  unavailable rather than merely broken.
 - **Layer surfaces, if the compositor does not offer `river_layer_shell_v1`.**
   This backend binds it when present; without it river closes every layer
   surface on sight, and the symptom is silent — prompts, notifications,
@@ -134,6 +142,20 @@ and `systemctl --user start river-session.target` from the session script.
 client, so the recompile-and-restart loop survives. `xmonad --restart` from a
 terminal does the same thing.
 
-What does **not** survive is the window set: river object ids are
-per-connection and recycled, so a restarted window manager cannot know which
-window was on which workspace. See the closing section of `README.river.md`.
+The window set survives with it. river object ids are per-connection and
+recycled, so an id written by one window manager means nothing to its
+successor — but `river_window_v1.identifier` belongs to the window rather than
+to the connection, so the state file is keyed on that instead, and windows come
+back on the workspaces you put them on. See the closing section of
+`README.river.md`.
+
+`xmonad --restart` reaches the running window manager over a unix socket in
+`$XDG_RUNTIME_DIR`, so it works from any terminal in the session and reports
+what happened. Every way it can fail — no window manager listening, a refusal,
+no reply — is printed and exits non-zero.
+
+### Symptom: `--restart` says there is no running window manager
+
+Either there is none, or `XDG_RUNTIME_DIR` and `WAYLAND_DISPLAY` in that
+terminal do not name the session the window manager is running in. The socket
+path is derived from both.

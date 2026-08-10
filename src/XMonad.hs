@@ -16,7 +16,7 @@
 --
 -- The one difference is the important one: it does __not__ re-export
 -- @Graphics.X11@ or @Graphics.X11.Xlib.Extras@.  The X11 build re-exports
--- 1458 names from those two modules -- keysyms, masks, geometry types, and
+-- 1335 names from those two modules -- keysyms, masks, geometry types, and
 -- several hundred Xlib calls.  Reproducing that surface over Wayland would
 -- mean several hundred functions that typecheck and do nothing, and a config
 -- that compiles is then a config that looks correct while silently failing.
@@ -25,7 +25,7 @@
 -- faithfully ported is not exported, so a config or contrib module reaching
 -- for it fails at the call site, at compile time, naming the file and line.
 -- What that costs is recorded name by name in tests\/api\/unportable.txt, and
--- tests\/api\/check-api.sh fails if the set drifts without justification.
+-- tests\/api\/check-subset.sh fails if the set drifts without justification.
 --
 --------------------------------------------------------------------
 
