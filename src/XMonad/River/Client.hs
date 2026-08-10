@@ -102,6 +102,7 @@ import XMonad.River.Mailbox (Mailbox)
 import qualified XMonad.River.Mailbox as MB
 import XMonad.River.Protocol.Core
 import XMonad.River.Protocol.LayerShellClient
+import XMonad.River.Types (KeyMask, shiftMask, controlMask, mod1Mask, mod3Mask, mod4Mask, mod5Mask)
 import XMonad.River.Wire (ObjectId, nullObject)
 import qualified Data.Map.Strict as M
 import System.IO.Unsafe (unsafePerformIO)
@@ -136,13 +137,22 @@ data ClientSpec = ClientSpec
     -- -- it is shown by the prompt, not typed into.
   , csDraw   :: Buffer -> IO ()
     -- ^ Fill the buffer.  Runs on the client thread; see the module header.
-  , csOnKey  :: Word32 -> String -> IO ()
-    -- ^ A key was pressed: its keysym, and the text it produces.
+  , csOnKey  :: KeyMask -> Word32 -> String -> IO ()
+    -- ^ A key was pressed: the modifiers held, its keysym, and the text it
+    -- produces.
     --
-    -- The two are separate questions.  A keysym identifies the key -- which is
-    -- what a binding like @Escape@ or @Return@ matches on -- while the text is
-    -- what belongs in a field, and is empty for a dead key part-way through a
-    -- compose sequence.
+    -- The keysym and the text are separate questions.  A keysym identifies the
+    -- key -- which is what a binding like @Escape@ or @Return@ matches on --
+    -- while the text is what belongs in a field, and is empty for a dead key
+    -- part-way through a compose sequence.
+    --
+    -- The mask is separate from both, and is why this takes three arguments
+    -- rather than two.  Shift is already accounted for in the other two -- it
+    -- is what turns @a@ into @A@ -- but a keymap entry written as
+    -- @(shiftMask, xK_Tab)@ matches on the modifier rather than on the
+    -- resulting keysym, and with no mask to match against every such entry
+    -- silently never fired.  "XMonad.Prompt" shipped its default
+    -- @prevCompletionKey@ that way.
   , csOnClose :: IO ()
     -- ^ The compositor took the window away, or 'chClose' was called.
   }
@@ -378,8 +388,34 @@ listenKeyboard spec cl kb = do
         Just st -> do
           sym <- keycodeToKeysym st code
           txt <- keycodeToUtf8 st code
-          guarded "key handler" (csOnKey spec sym txt)
+          mask <- activeKeyMask st
+          guarded "key handler" (csOnKey spec mask sym txt)
     _ -> pure ()
+
+-- | The modifiers currently held, as an xmonad 'KeyMask'.
+--
+-- Asked by name rather than read off the @wl_keyboard.modifiers@ bitfield,
+-- because that bitfield is in the keymap's own indices: which bit means @Mod4@
+-- is decided by the keymap, so the same number means different things under
+-- different layouts.  libxkbcommon is what knows the mapping, and
+-- 'modifierActive' is how to ask it.
+--
+-- 'lockMask' and 'mod2Mask' are deliberately not asked for.  They are caps
+-- lock and num lock, xmonad's 'XMonad.Operations.cleanMask' exists to strip
+-- them, and it is the identity on this backend precisely because nothing
+-- should be setting them; including them here would put back the bits that
+-- function was written to remove.
+activeKeyMask :: XkbState -> IO KeyMask
+activeKeyMask st = foldr (.|.) 0 <$> mapM active named
+  where
+    named = [ ("Shift",   shiftMask)
+            , ("Control", controlMask)
+            , ("Mod1",    mod1Mask)
+            , ("Mod3",    mod3Mask)
+            , ("Mod4",    mod4Mask)
+            , ("Mod5",    mod5Mask) ]
+    active (name, bit) = (\held -> if held then bit else 0)
+                         <$> modifierActive st name
 
 -- | How long a client has to become usable before it is assumed broken.
 --

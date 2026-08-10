@@ -292,7 +292,7 @@ probe closed = ClientSpec
   , csMargin   = (0, 0, 0, 0)
   , csKeyboard = True
   , csDraw     = \_ -> pure ()
-  , csOnKey    = \_ _ -> pure ()
+  , csOnKey    = \_ _ _ -> pure ()
   , csOnClose  = void (tryPutMVar closed ())
   }
 
