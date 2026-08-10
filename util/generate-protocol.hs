@@ -48,6 +48,8 @@ sources =
     , river "protocol/river-layer-shell-v1.xml" )
   , ( "wlr-layer-shell-unstable-v1.xml"
     , river "protocol/upstream/wlr-layer-shell-unstable-v1.xml" )
+  , ( "virtual-keyboard-unstable-v1.xml"
+    , river "protocol/upstream/virtual-keyboard-unstable-v1.xml" )
   ]
   where
     wayland p =
@@ -81,6 +83,10 @@ targets =
               -- XMonad.River.Client.
               , "wl_seat", "wl_keyboard", "wl_output" ])
   , ("wlr-layer-shell-unstable-v1.xml", "XMonad.River.Protocol.LayerShellClient", Nothing)
+  -- Only the tests use this: a headless seat has no keyboard, so a spec that
+  -- wants to press a key has to give the seat one.  Generated here rather than
+  -- hand-written for the same reason as everything else in Protocol/.
+  , ("virtual-keyboard-unstable-v1.xml", "XMonad.River.Protocol.VirtualKeyboard", Nothing)
   ]
 
 --------------------------------------------------------------------------------

@@ -27,6 +27,7 @@ module XMonad.River.Xkb
   , keycodeToUtf8
   , updateModifiers
   , modifierActive
+  , defaultKeymapText
   ) where
 
 import Control.Monad (when)
@@ -56,6 +57,10 @@ foreign import ccall safe "xkb_keymap_new_from_string"
   c_keymap_new :: Ptr XkbContext -> CString -> CInt -> CInt -> IO (Ptr XkbKeymap)
 foreign import ccall safe "xkb_keymap_unref"
   c_keymap_unref :: Ptr XkbKeymap -> IO ()
+foreign import ccall safe "xkb_keymap_new_from_names"
+  c_keymap_new_from_names :: Ptr XkbContext -> Ptr () -> CInt -> IO (Ptr XkbKeymap)
+foreign import ccall safe "xkb_keymap_get_as_string"
+  c_keymap_get_as_string :: Ptr XkbKeymap -> CInt -> IO CString
 foreign import ccall safe "xkb_state_new"
   c_state_new :: Ptr XkbKeymap -> IO (Ptr XkbStateT)
 foreign import ccall safe "xkb_state_unref"
@@ -148,3 +153,28 @@ modifierActive x name = withCString name $ \cs -> do
   r <- c_mod_name_is_active (xkbState x) cs 8
   pure (r > 0)
 
+-- | The compositor's default keymap, as text.
+--
+-- Passing a null @xkb_rule_names@ asks libxkbcommon for whatever the
+-- environment says the default layout is, which is what every other client
+-- would get.  Exists for the tests: a headless seat has no keyboard, so a spec
+-- that wants to press a key has to give the seat one through
+-- @virtual-keyboard-unstable-v1@, and a virtual keyboard has to supply the
+-- keymap itself.  Writing one by hand would be a second, worse source of truth
+-- for what @a@ or @Super@ means.
+--
+-- 'Nothing' if libxkbcommon cannot produce one, which would mean no xkb data
+-- is installed.
+defaultKeymapText :: IO (Maybe String)
+defaultKeymapText = do
+  ctx <- c_context_new 0
+  if ctx == nullPtr then pure Nothing else do
+    km <- c_keymap_new_from_names ctx nullPtr 0
+    if km == nullPtr
+      then c_context_unref ctx >> pure Nothing
+      else do
+        cs <- c_keymap_get_as_string km 1  -- XKB_KEYMAP_FORMAT_TEXT_V1
+        out <- if cs == nullPtr then pure Nothing else Just <$> peekCString cs
+        c_keymap_unref km
+        c_context_unref ctx
+        pure out

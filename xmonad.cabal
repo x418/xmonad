@@ -113,6 +113,7 @@ library
                    XMonad.River.Protocol.Core
                    XMonad.River.Protocol.LayerShell
                    XMonad.River.Protocol.LayerShellClient
+                   XMonad.River.Protocol.VirtualKeyboard
                    XMonad.River.Protocol.WindowManagement
                    XMonad.River.Protocol.XkbBindings
                    XMonad.River.Types
