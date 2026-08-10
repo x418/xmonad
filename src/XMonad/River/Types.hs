@@ -204,6 +204,47 @@ data Event
     -- itself when a timer thread reports in.  X11 did the same thing by
     -- sending a client message to the root window, which needed an interned
     -- atom and a round trip through the server; here it is a constructor.
+  | WindowFullscreenChanged { ev_window :: !Window, ev_fullscreen :: !Bool }
+    -- ^ @river_window_v1.fullscreen_requested@ or @exit_fullscreen_requested@:
+    -- a client asked to become fullscreen, or to stop being.
+    --
+    -- It is a request, not a fact.  River leaves the decision to the window
+    -- manager: the flag behind
+    -- 'XMonad.Hooks.ManageHelpers.isFullscreen' is updated before this is
+    -- sent, so a hook can read the state it is being told about, but nothing
+    -- has resized anything.  Acting on it is what
+    -- "XMonad.Layout.Fullscreen" is for.
+    --
+    -- Named for what happened rather than for the two protocol events,
+    -- because a handler almost always wants both and the flag is the
+    -- difference between them.  X11 delivered the same thing as a
+    -- @_NET_WM_STATE@ client message carrying add\/remove\/toggle, and the
+    -- toggle case is why upstream's handler has to read the current state
+    -- before it can act; here the answer is in the event.
+  | SurfaceClicked { ev_window :: !Window, ev_x :: !Position, ev_y :: !Position }
+    -- ^ @river_seat_v1.shell_surface_interaction@: a surface the window
+    -- manager drew was pressed, rather than merely hovered over.
+    --
+    -- This is the port of X11's @ButtonPress@ on a decoration window, and it
+    -- is a separate constructor because a decoration is not a
+    -- @river_window_v1@ -- it is a @river_shell_surface_v1@ this process
+    -- created, so river reports a click on it separately from a click on a
+    -- client's window.  The id here is that shell surface, which is what
+    -- @XMonad.Util.XUtils.createNewWindow@ returned and therefore the same
+    -- 'Window' a decoration is known by in "XMonad.Layout.Decoration".
+    --
+    -- The position is river's global coordinate space, matching X11's
+    -- @ev_x_root@ \/ @ev_y_root@ rather than its window-relative @ev_x@ \/
+    -- @ev_y@; a caller wanting the offset within the decoration subtracts the
+    -- rectangle it put there.  It is the pointer position as of this manage
+    -- sequence, which is the position at the moment of the press: river sends
+    -- @shell_surface_interaction@ and any @pointer_position@ change before the
+    -- @manage_start@ that delivers them, so the two cannot be out of step.
+    --
+    -- No button number, and no press\/release distinction.  River reports that
+    -- an interaction happened and deliberately not what caused it -- it may
+    -- have been touch or a tablet tool -- so a hook that switched on
+    -- @button1@ has nothing to switch on.
   deriving (Eq, Show)
 
 --------------------------------------------------------------------------------

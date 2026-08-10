@@ -617,12 +617,18 @@ addWindow rt conn win = do
         } }
     -- Both are followed by a manage_start, so a manage hook asking
     -- 'XMonad.Hooks.ManageHelpers.isFullscreen' sees the up-to-date answer.
-    -- Both are followed by a manage_start, so a manage hook asking
-    -- 'XMonad.Hooks.ManageHelpers.isFullscreen' sees the up-to-date answer.
-    RiverWindowV1FullscreenRequested _ ->
+    --
+    -- The flag is set before the event is queued, and that order is the point:
+    -- a handler reading 'isFullscreen' for the window it was just told about
+    -- must not see the old answer.  A manage hook covers a window that is
+    -- fullscreen when it first appears; this covers one that changes later,
+    -- which is every video player and every browser.
+    RiverWindowV1FullscreenRequested _ -> do
       adjust ref win $ \w -> w { rwFullscreen = True }
-    RiverWindowV1ExitFullscreenRequested ->
+      queueAction rt $ void $ broadcastEvent (WindowFullscreenChanged win True)
+    RiverWindowV1ExitFullscreenRequested -> do
       adjust ref win $ \w -> w { rwFullscreen = False }
+      queueAction rt $ void $ broadcastEvent (WindowFullscreenChanged win False)
     RiverWindowV1PointerMoveRequested _ -> pure ()
     _ -> pure ()
 
@@ -725,6 +731,20 @@ addSeat rt conn seat = do
     RiverSeatV1PointerLeave -> writeIORef (rtHovered rt) Nothing
     RiverSeatV1PointerPosition x y ->
       adjust ref seat $ \s -> s { rsPointer = (x, y) }
+    -- A surface this window manager drew was pressed.  X11 delivered that as a
+    -- ButtonPress on the decoration window and river will not: a decoration is
+    -- a river_shell_surface_v1, not a river_window_v1, so it gets an event of
+    -- its own.  The id it carries is the one XMonad.Util.XUtils.createNewWindow
+    -- handed out, so a hook can match on it directly.
+    --
+    -- The position is read here rather than carried by the event, because
+    -- pointer_position for this sequence has already arrived: every event in
+    -- this listener precedes the manage_start that ends the sequence, so
+    -- rsPointer is where the pointer was at the moment of the press.
+    RiverSeatV1ShellSurfaceInteraction surf -> do
+      seats <- readIORef ref
+      let (px, py) = maybe (0, 0) rsPointer (M.lookup seat seats)
+      queueAction rt $ void $ broadcastEvent (SurfaceClicked surf px py)
     -- An interactive operation reports the total offset since it began.
     -- XMonad.Operations.mouseDrag stashed where the pointer was at the time,
     -- so the absolute position its caller expects is origin + delta.
