@@ -153,7 +153,7 @@ import XMonad.River.Protocol.XkbBindings
 import XMonad.River.Plan (Op(..))
 import XMonad.River.Runtime (emitNow, emitOp, RestartRequested(..), currentSubmapGeneration, nextSubmapGeneration, setMainThread, setModifierWatcher, warnUnimplemented)
 import XMonad.River.Types
-import XMonad.River.State (InputCapture(..), RiverState(..))
+import XMonad.River.State (InputCapture(..), RiverState(..), updatePlacement)
 
 -- | Run an action on the event loop, from any thread.
 --
@@ -242,6 +242,15 @@ windowRect w = do
 -- callback, both of which river runs inside a sequence.
 --
 -- Size hints are applied, as the X11 callers all did by hand.
+--
+-- The recorded geometry is updated too, and that is not bookkeeping.  Under
+-- X11 this call changed what the server would report, immediately, and callers
+-- rely on reading it straight back: 'XMonad.Actions.FlexibleManipulate' moves
+-- the window and then calls 'XMonad.Operations.float', which asks where the
+-- window is in order to record it.  Nothing here reaches a server, so the
+-- record has to be kept by hand -- and without it 'XMonad.Operations.float'
+-- answers with the position from the last layout run and puts the window
+-- straight back, once per motion event.  See 'updatePlacement'.
 moveResizeWindow :: Window -> Rectangle -> X ()
 moveResizeWindow w r = do
     known <- io . readIORef =<< asks (riverWindows . riverState)
@@ -250,6 +259,8 @@ moveResizeWindow w r = do
                 (rect_width r, rect_height r)
         emitOp (OpSetPosition w (rect_x r) (rect_y r))
         emitOp (OpProposeDimensions w width height)
+        ref <- asks (riverPlacements . riverState)
+        updatePlacement ref w r { rect_width = width, rect_height = height }
 
 -- | Where the pointer is, in river's global coordinate space.
 --

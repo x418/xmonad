@@ -23,9 +23,10 @@
 --
 -----------------------------------------------------------------------------
 
-module XMonad.River.State (RiverState(..), InputCapture(..)) where
+module XMonad.River.State (RiverState(..), InputCapture(..), updatePlacement) where
 
-import Data.IORef (IORef)
+import Control.Monad.IO.Class (MonadIO, liftIO)
+import Data.IORef (IORef, modifyIORef')
 import qualified Data.Map as M
 
 import XMonad.River.Mailbox (Mailbox)
@@ -149,3 +150,26 @@ data RiverState m = RiverState
       -- where an action that needs the answer waits for it.  See
       -- 'XMonad.River.afterLayout'.
     }
+
+-- | Correct the recorded geometry of a window that something has just moved or
+-- resized outside a layout run.
+--
+-- X11 had no equivalent because it needed none: @moveResizeWindow@ changed
+-- what the server would report, and a caller reading the geometry straight
+-- back got the new one.  'riverPlacements' is this backend's stand-in for that
+-- report, so anything that moves a window has to say so here or the next
+-- reader -- 'XMonad.Operations.floatLocation', in particular, which is how a
+-- drag records where it got to -- answers with the position from the last
+-- layout run and undoes the move.
+--
+-- A window with no placement is left alone rather than added.  It has no
+-- geometry for this to correct, and inventing one would tell
+-- 'XMonad.River.windowUnderPointer' that a window the layout never placed is
+-- under the pointer.
+--
+-- Lives here, rather than beside either of its callers, because both
+-- "XMonad.Operations" and "XMonad.River" need it and the latter imports the
+-- former.
+updatePlacement :: MonadIO m => IORef [(Window, Rectangle)] -> Window -> Rectangle -> m ()
+updatePlacement ref w r = liftIO $ modifyIORef' ref $
+    map (\e -> if fst e == w then (w, r) else e)

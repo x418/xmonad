@@ -76,7 +76,7 @@ module XMonad.Operations (
 import XMonad.Core
 import XMonad.River.Plan (Op(..))
 import XMonad.River.Runtime (emitNow, emitOp, setBorderColor)
-import XMonad.River.State (RiverState(..))
+import XMonad.River.State (RiverState(..), updatePlacement)
 import XMonad.River.Types
 import XMonad.River.Protocol.WindowManagement
 import qualified XMonad.StackSet as W
@@ -564,22 +564,73 @@ type D = (Dimension, Dimension)
 -- transient is @river_window_v1.parent@, which is @xdg_toplevel.set_parent@ --
 -- the faithful translation of X11's @WM_TRANSIENT_FOR@.
 
+-- | Where a window should go when it becomes floating.
+--
+-- Upstream asks the server: @getWindowAttributes@ says where the window is,
+-- and the float leaves it there.  There is no server here, so the answer comes
+-- from 'riverPlacements' -- what the last layout run decided, and what both
+-- 'XMonad.River.windowRect' and the published @getWindowAttributes@ report.
+-- That is this port's stand-in for server geometry, and reading it back is
+-- what makes floating a window keep it where it is instead of moving it.
+--
+-- Answering without consulting it is not a small inaccuracy.  The rectangle
+-- returned here is the /only/ durable record of a float's geometry:
+-- 'XMonad.River.WM.applyLayout' recomputes every placement from
+-- 'XMonad.StackSet.floating' on each manage sequence, and the render sequence
+-- restates node positions from that.  So a 'floatLocation' that disregards
+-- where a window is does not merely misplace it once -- it makes every mouse
+-- drag undo itself, because each motion step calls 'float' and has its work
+-- thrown away.
+--
+-- A window with no placement has no position to keep, which is the case a
+-- @doFloat@ manage hook hits: a window being managed for the first time has
+-- been through no layout run.  It is centred on the current screen at the size
+-- river reports, which is what upstream does when it likewise has nothing
+-- usable to go on.
 floatLocation :: Window -> X (ScreenId, W.RationalRect)
 floatLocation w = do
     ws <- gets windowset
-    known <- io . readIORef =<< asks (riverWindows . riverState)
-    let sc = W.current ws
-        sr = screenRect (W.screenDetail sc)
-        sw = max 1 (fromIntegral (rect_width sr))
-        sh = max 1 (fromIntegral (rect_height sr))
-    pure $ case M.lookup w known of
-        Nothing -> (W.screen sc, W.RationalRect 0 0 1 1)
-        Just rw ->
-            let (width, height) = rwDimensions rw
-                rwidth  = fromIntegral (max 1 width)  % sw
-                rheight = fromIntegral (max 1 height) % sh
-            in ( W.screen sc
-               , W.RationalRect (0.5 - rwidth / 2) (0.5 - rheight / 2) rwidth rheight )
+    placements <- io . readIORef =<< asks (riverPlacements . riverState)
+    case lookup w placements of
+        Just r -> do
+            -- The screen the window is on, not the focused one.  Upstream
+            -- takes the same care, and for the same reason: floating a window
+            -- that lives on another screen must not haul it onto this one.
+            msc <- pointScreen (rect_x r) (rect_y r)
+            let sc = fromMaybe (W.current ws) msc
+            pure (W.screen sc, relativeRect (screenRect (W.screenDetail sc)) r)
+        Nothing -> do
+            known <- io . readIORef =<< asks (riverWindows . riverState)
+            let sc = W.current ws
+                sr = screenRect (W.screenDetail sc)
+                sw = max 1 (fromIntegral (rect_width sr))
+                sh = max 1 (fromIntegral (rect_height sr))
+            pure $ case M.lookup w known of
+                Nothing -> (W.screen sc, W.RationalRect 0 0 1 1)
+                Just rw ->
+                    let (width, height) = rwDimensions rw
+                        rwidth  = fromIntegral (max 1 width)  % sw
+                        rheight = fromIntegral (max 1 height) % sh
+                    in ( W.screen sc
+                       , W.RationalRect (0.5 - rwidth / 2) (0.5 - rheight / 2)
+                                        rwidth rheight )
+
+-- | A rectangle as a fraction of a screen, which is how the 'WindowSet'
+-- records a float.
+--
+-- 'scaleRationalRect' is the inverse, exactly: it floors an exact rational, so
+-- a rectangle that came out of a layout run survives the round trip unchanged.
+-- That matters more than it looks -- it is why floating an already-placed
+-- window is a no-op on screen rather than a one-pixel twitch per drag step.
+relativeRect :: Rectangle -> Rectangle -> W.RationalRect
+relativeRect sr r = W.RationalRect
+    (fromIntegral (rect_x r - rect_x sr) % sw)
+    (fromIntegral (rect_y r - rect_y sr) % sh)
+    (fromIntegral (rect_width r)  % sw)
+    (fromIntegral (rect_height r) % sh)
+  where
+    sw = max 1 (fromIntegral (rect_width sr))
+    sh = max 1 (fromIntegral (rect_height sr))
 
 -- | Make a tiled window floating, using its suggested rectangle
 
@@ -657,36 +708,72 @@ warpPointer x y = do
 -- position recorded when the operation started, so the callback still receives
 -- root coordinates.
 
+-- | Where the pointer was when the drag began.
+--
+-- Read from inside the motion callback and nowhere else.  'mouseDrag' is what
+-- writes this, so a caller reading it beforehand -- as both drags below once
+-- did -- gets the previous drag's origin, or @(0, 0)@ on the first drag of the
+-- session.  The callback runs only on @op_delta@, which cannot arrive before
+-- the operation it belongs to has started, so by then the value is the right
+-- one.
+dragOrigin :: X (Position, Position)
+dragOrigin = io . readIORef =<< asks (riverDragOrigin . riverState)
+
+-- | Put a window where a drag has decided it goes, and keep the recorded
+-- geometry in step so that 'float' can read the result back.
+--
+-- The twin of 'XMonad.River.moveResizeWindow', which cannot be called from
+-- here because "XMonad.River" imports this module.  It differs in one respect:
+-- size hints are the caller's business, because both drags below have already
+-- had to apply them to work out the rectangle they want.
+dragWindowTo :: Window -> Rectangle -> X ()
+dragWindowTo w r = do
+    emitOp (OpSetPosition w (rect_x r) (rect_y r))
+    emitOp (OpProposeDimensions w (rect_width r) (rect_height r))
+    ref <- asks (riverPlacements . riverState)
+    updatePlacement ref w r
+
 mouseMoveWindow :: Window -> X ()
 mouseMoveWindow w = whenX (isClient w) $ do
-    known <- io . readIORef =<< asks (riverWindows . riverState)
-    ws <- gets windowset
-    let sr = screenRect (W.screenDetail (W.current ws))
-    forM_ (M.lookup w known) $ \_ -> do
-        (ox, oy) <- io . readIORef =<< asks (riverDragOrigin . riverState)
+    placements <- io . readIORef =<< asks (riverPlacements . riverState)
+    -- The window's own origin is the thing the pointer's movement is added to.
+    -- This used to add it to the /screen's/ origin, which meant a window
+    -- jumped to wherever in the screen the pointer had travelled from the
+    -- corner rather than following the pointer.
+    forM_ (lookup w placements) $ \r ->
         mouseDrag
             (\ex ey -> do
-                emitOp (OpSetPosition w (rect_x sr + (ex - ox))
-                                         (rect_y sr + (ey - oy)))
+                (ox, oy) <- dragOrigin
+                dragWindowTo w r { rect_x = rect_x r + (ex - ox)
+                                 , rect_y = rect_y r + (ey - oy) }
                 float w)
             (float w)
 
 -- | Resize the window under the cursor with the mouse while it is dragged.
-
+--
+-- The size follows the pointer's displacement from where the drag began, which
+-- is a deliberate difference from upstream: X11 warped the pointer to the
+-- window's bottom-right corner first and then treated the pointer as that
+-- corner.  River can warp -- 'warpPointer' does -- but a drag that begins by
+-- yanking the pointer somewhere else is worth avoiding when the alternative is
+-- this, and the two agree once the drag is under way.
+--
+-- Sizes are clamped by 'applySizeHintsContents', which takes @max 1@ before
+-- widening, so dragging back past the window's own origin bottoms out at one
+-- pixel rather than wrapping around.
 mouseResizeWindow :: Window -> X ()
 mouseResizeWindow w = whenX (isClient w) $ do
+    placements <- io . readIORef =<< asks (riverPlacements . riverState)
     known <- io . readIORef =<< asks (riverWindows . riverState)
-    forM_ (M.lookup w known) $ \rw0 -> do
-        let (w0, h0) = rwDimensions rw0
-            hints = rwSizeHints rw0
-        (ox, oy) <- io . readIORef =<< asks (riverDragOrigin . riverState)
+    forM_ ((,) <$> lookup w placements <*> M.lookup w known) $ \(r, rw) ->
         mouseDrag
             (\ex ey -> do
-                let (width, height) = applySizeHintsContents hints
-                        ( fromIntegral w0 + (ex - ox)
-                        , fromIntegral h0 + (ey - oy) )
-                emitOp (OpProposeDimensions w (fromIntegral width)
-                                              (fromIntegral height))
+                (ox, oy) <- dragOrigin
+                let (width, height) =
+                        applySizeHintsContents (rwSizeHints rw)
+                            ( fromIntegral (rect_width r)  + (ex - ox)
+                            , fromIntegral (rect_height r) + (ey - oy) )
+                dragWindowTo w r { rect_width = width, rect_height = height }
                 float w)
             (float w)
 
