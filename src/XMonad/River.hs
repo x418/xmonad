@@ -43,6 +43,14 @@ module XMonad.River (
     -- acting from a timer or a forked thread has to ask for one.
     manageDirty,
 
+    -- * Waiting for the layout
+    --
+    -- | X11's @windows@ placed every window before it returned, so a caller
+    -- could change the layout and immediately ask what it had done.  Here the
+    -- layout runs at the end of the manage sequence; this is how to be asked
+    -- afterwards.
+    afterLayout,
+
     -- * Window geometry
     --
     -- | X11 answered @XGetWindowAttributes@ for any window; river never
@@ -126,7 +134,7 @@ import Data.Maybe (fromMaybe, isJust)
 import Data.Word (Word32)
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Exception (SomeException, handle)
-import Control.Monad (forM, forM_, void, when)
+import Control.Monad (forM, forM_, unless, void, when)
 import Control.Monad.IO.Class (MonadIO)
 import Control.Monad.Reader (ask, asks)
 import qualified Data.ByteString.Char8 as BC
@@ -165,6 +173,40 @@ manageDirty :: X ()
 manageDirty = do
   ref <- asks (riverDirty . riverState)
   io (writeIORef ref True)
+
+-- | Run an action once the layout has been applied, rather than now.
+--
+-- For code that changes the 'XMonad.Core.WindowSet' and then needs to know
+-- where something ended up.  Under X11 that needed nothing: @windows@ moved
+-- and resized every window before it returned, so the server could be asked
+-- immediately and would answer about the new arrangement.  Here the layout is
+-- the last thing a manage sequence does, so a binding that calls @windows@ and
+-- then 'windowRect' -- or 'XMonad.Core.getWindowAttributes', or anything else
+-- resting on those -- reads geometry from before its own change.
+--
+-- The symptom is quiet and easy to misread, because it is /correct/ for every
+-- action that moves the focus without moving a window: @focusUp@ leaves both
+-- windows where they were, so last sequence's answer is still true.  It is
+-- only wrong when the window itself moves.  Swapping two windows and warping
+-- the pointer to the focused one -- @windows W.swapUp >> warpToWindow@ -- puts
+-- the pointer where that window used to be, which is where it already is, so
+-- nothing appears to happen at all.
+--
+-- Still in the same sequence, so there is no visible delay: the queue is
+-- drained at the end of 'XMonad.River.WM.applyLayout', after both
+-- 'windowRect' and @getWindowAttributes@ have been brought up to date, and
+-- before anything is transmitted.  An action queued from outside a manage
+-- sequence asks for one, since otherwise nothing would come to run it.
+--
+-- Changing the 'XMonad.Core.WindowSet' from here works but is a sequence late:
+-- the layout that would act on it has already run.  This is for reading the
+-- result of a change, not for making another one.
+afterLayout :: X () -> X ()
+afterLayout act = do
+  ref <- asks (riverAfterLayout . riverState)
+  io (modifyIORef' ref (act :))
+  inSeq <- io . readIORef =<< asks (inManageSeq . riverState)
+  unless inSeq manageDirty
 
 -- | End the Wayland session, taking the compositor with it.
 --

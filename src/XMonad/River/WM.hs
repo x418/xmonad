@@ -221,6 +221,7 @@ run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs 
   placeRef    <- newIORef []
   restackRef  <- newIORef []
   extraKeysRef <- newIORef []
+  afterLayoutRef <- newIORef []
   rt <- Runtime
           <$> newIORef []
           <*> pure bindingsRef
@@ -291,6 +292,7 @@ run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs 
             , riverRestack = restackRef
             , riverCapture = submapRef
             , riverDragOrigin = dragOrigin
+            , riverAfterLayout = afterLayoutRef
             }
         , normalBorder = parseColor (normalBorderColor userConfig)
         , focusedBorder = parseColor (focusedBorderColor userConfig)
@@ -1273,6 +1275,15 @@ applyLayout rt = do
           , wa_override_redirect = False }
   io $ publishGeometry (M.mapWithKey attrs allKnown)
   io $ publishSizeHints (M.map rwSizeHints allKnown)
+
+  -- Last, because the whole point of waiting is to see everything above:
+  -- 'riverPlacements' for 'XMonad.River.windowRect', and the published
+  -- geometry for 'getWindowAttributes'.  Drained once rather than to a fixed
+  -- point -- an action queued by one of these waits for the next layout, which
+  -- is the honest answer, since this layout is over.
+  ref <- asks (riverAfterLayout . riverState)
+  queued <- io (atomicModifyIORef' ref (\as -> ([], reverse as)))
+  mapM_ userCode queued
 
 -- | Send the window management half of a plan.
 --

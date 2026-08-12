@@ -138,4 +138,14 @@ data RiverState m = RiverState
       -- ^ Where the pointer was when the current interactive operation began.
       -- river reports a drag as a delta from its start; 'mouseDrag' promises
       -- its caller an absolute position, so the origin has to be remembered.
+    , riverAfterLayout :: !(IORef [m ()])
+      -- ^ Actions waiting for the layout to run, newest first.
+      --
+      -- X11 needed no such queue: @windows@ moved and resized the windows
+      -- before it returned, so a binding could change the 'WindowSet' and
+      -- immediately ask where something had ended up.  Here the layout runs at
+      -- the end of the manage sequence, /after/ every binding action, so the
+      -- same code reads the geometry from before its own change.  This is
+      -- where an action that needs the answer waits for it.  See
+      -- 'XMonad.River.afterLayout'.
     }
