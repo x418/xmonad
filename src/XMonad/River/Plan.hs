@@ -45,8 +45,13 @@ data Plan = Plan
   { planSerial     :: !Int
     -- ^ Monotonic.  Lets whoever published a plan tell when it has landed.
   , planPlacements :: ![(Window, Rectangle)]
-    -- ^ In bottom-to-top order, floats last, as the layout produced them.
-    -- The render sequence @place_top@s this list in order, so later is higher.
+    -- ^ Topmost first, floats before tiles, which is upstream's convention.
+    -- The render sequence reverses this before @place_top@ing it.
+  , planFloating   :: !(S.Set Window)
+    -- ^ Which of the placements are floating, so the rest can be told they
+    -- are tiled.  A window that is not told draws itself as though it were
+    -- floating: its own decorations, and drop shadows outside the size it
+    -- was given, which it then subtracts from its content.
   , planBorders    :: !(M.Map Window (Dimension, (Word32, Word32, Word32, Word32)))
     -- ^ Width and RGBA per placed window, already resolved against any
     -- per-window override.  Borders are rendering state, so river forgets them
@@ -80,6 +85,7 @@ emptyPlan = Plan
   { planSerial     = 0
   , planPlacements = []
   , planBorders    = M.empty
+  , planFloating   = S.empty
   , planVisible    = S.empty
   , planRaised     = []
   , planFocus      = ClearFocus

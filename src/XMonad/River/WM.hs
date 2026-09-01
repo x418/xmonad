@@ -1247,7 +1247,7 @@ applyLayout :: Runtime -> X ()
 applyLayout rt = do
   ws <- gets windowset
   let screens = W.current ws : W.visible ws
-  placements <- fmap concat $ forM screens $ \scr -> do
+  perScreen <- forM screens $ \scr -> do
     let wsp = W.workspace scr
         SD rect = W.screenDetail scr
         -- The floating layer, as upstream's 'windows' handles it.  Floats are
@@ -1269,7 +1269,10 @@ applyLayout rt = do
     -- Floats first, which is upstream's order: the window that should end up
     -- on top comes first, and the render sequence reverses the whole list
     -- before stacking it.  See 'transmitRender'.
-    pure (flt ++ rs)
+    pure (flt ++ rs, map fst flt)
+
+  let placements = concatMap fst perScreen
+      floating = S.fromList (concatMap snd perScreen)
 
   -- Borders are resolved here rather than while transmitting, because the
   -- override lookup and the focused/normal choice are decisions and belong
@@ -1332,6 +1335,7 @@ applyLayout rt = do
   io $ modifyIORef' (rtPlan rt) $ \p -> p
     { planSerial     = planSerial p + 1
     , planPlacements = placements
+    , planFloating   = floating
     , planBorders    = borders
     , planVisible    = placed
     , planRaised     = stillUp
@@ -1451,9 +1455,21 @@ transmitManage rt conn = do
 
   -- Dimensions are window management state, so they go here rather than in
   -- the render sequence.
-  forM_ (planPlacements plan) $ \(win, r) -> when (M.member win known) $
+  forM_ (planPlacements plan) $ \(win, r) -> when (M.member win known) $ do
     riverWindowV1ProposeDimensions conn win
       (fromIntegral (rect_width r)) (fromIntegral (rect_height r))
+    -- And tell it whether it is tiled, which river assumes it is not unless
+    -- asked -- "If this request is never made, the window is informed that
+    -- it is not part of a tiled layout".
+    --
+    -- A window that believes it is floating styles itself for it: its own
+    -- decorations, rounded corners, and a drop shadow drawn *outside* the
+    -- size it was given, which it then subtracts from its content. That is
+    -- a menu bar nothing asked for and a right edge cut off, on a client
+    -- that draws one -- Electron apps with a custom title bar do, which is
+    -- why it shows on some and not on others.
+    riverWindowV1SetTiled conn win
+      (if S.member win (planFloating plan) then 0 else allEdges)
 
   -- Keyboard focus, likewise. A seat whose keyboard has gone to a layer
   -- surface is left alone: river discards focus requests outright while focus
