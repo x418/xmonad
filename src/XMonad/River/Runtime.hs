@@ -9,6 +9,7 @@
 module XMonad.River.Runtime
   ( RestartRequested(..)
   , sendRestart
+  , exitLoopWith
   , setMainThread
   , warnUnimplemented
   , publishGeometry
@@ -39,6 +40,7 @@ import Control.Monad (unless)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.IORef
 import Data.Word (Word32)
+import System.Exit (ExitCode)
 import System.IO (hPutStrLn, stderr)
 import System.IO.Unsafe (unsafePerformIO)
 import qualified Control.Exception as E
@@ -178,6 +180,18 @@ mainThreadRef = unsafePerformIO (newIORef Nothing)
 -- | Record the thread running the event loop, so 'sendRestart' can reach it.
 setMainThread :: IO ()
 setMainThread = writeIORef mainThreadRef . Just =<< myThreadId
+
+-- | Ask the window manager to end the session, from any thread.
+--
+-- 'System.Exit.exitWith' from the worker only unwinds the worker: its
+-- 'ExitCode' is caught by the handler that keeps one bad action from taking
+-- the window manager down with it, and the session carries on. The loop is
+-- the thread whose exit ends the process, and the one that can tell river
+-- first, so hand it there the same way 'sendRestart' does.
+exitLoopWith :: ExitCode -> IO ()
+exitLoopWith code = readIORef mainThreadRef >>= \case
+  Just tid -> E.throwTo tid code
+  Nothing -> E.throwIO code
 
 -- | Ask the window manager to restart itself, from any thread.
 --

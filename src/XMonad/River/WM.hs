@@ -48,10 +48,10 @@ import Data.Monoid (All(..), appEndo)
 import Data.Int (Int32)
 import Data.Word (Word32)
 import Control.Concurrent (Chan, MVar, forkIO, killThread, newChan, newEmptyMVar, putMVar, readChan, takeMVar, threadDelay, tryPutMVar, writeChan)
-import Control.Exception (SomeException, catch, handle)
+import Control.Exception (SomeException, catch, fromException, handle, throwIO)
 import System.Environment (getArgs, getExecutablePath, lookupEnv)
 import System.Directory (doesFileExist)
-import System.Exit (exitFailure, exitSuccess)
+import System.Exit (ExitCode, exitFailure, exitSuccess)
 import System.Posix.Process (executeFile)
 import System.IO (hPutStrLn, stderr)
 import System.Timeout (timeout)
@@ -60,7 +60,7 @@ import qualified Data.Set as S
 
 import XMonad.Core
 import XMonad.Operations (StateFile (..), broadcastMessage, focus, readStateFile, scaleRationalRect, writeStateToFile)
-import XMonad.River.Runtime (emitOp, setModifierWatcher, takeNowOps, takeOps, RestartRequested(..), forgetBorderOverride, takeModifierWatcher, lookupBorderOverride, publishGeometry, publishSizeHints, sendRestart, setMainThread, warnUnimplemented)
+import XMonad.River.Runtime (emitOp, exitLoopWith, setModifierWatcher, takeNowOps, takeOps, RestartRequested(..), forgetBorderOverride, takeModifierWatcher, lookupBorderOverride, publishGeometry, publishSizeHints, sendRestart, setMainThread, warnUnimplemented)
 import qualified XMonad.River.Control as Ctl
 import XMonad.River.Client (closeAllClients)
 import XMonad.River.Connection
@@ -345,8 +345,16 @@ run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs 
     -- window manager.  A worker that died under a live loop would leave
     -- something that still answers river and responds to nothing, which looks
     -- alive -- worse than a crash.
-    runX' act `catch` \e -> hPutStrLn stderr
-      ("xmonad-river: worker: " ++ show (e :: SomeException))
+    runX' act `catch` \e -> case fromException e of
+      -- A config asking to end the session -- @io exitSuccess@ is what an
+      -- exit prompt's logout entry does -- throws ExitCode, and ExitCode is
+      -- a SomeException like any other. Caught here it was reported to the
+      -- journal and the session carried on, so logging out did nothing at
+      -- all. Send it to the loop, which owns the connection and is the only
+      -- thread that can put the compositor down in order.
+      Just code -> exitLoopWith code
+      Nothing -> hPutStrLn stderr
+        ("xmonad-river: worker: " ++ show (e :: SomeException))
     -- Non-blocking: the loop may not be waiting, and a worker that stalled
     -- because nobody collected a tick would be the bug this exists to avoid.
     void (tryPutMVar tick ())
@@ -425,7 +433,17 @@ run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs 
   -- which interrupts the blocking read. Ask river to release us, then keep
   -- dispatching: the 'finished' event does the exec.
   let restartGraceMicros = 2 * 1000 * 1000
-  loop `catch` \RestartRequested -> do
+  -- A config ending the session -- an exit prompt's logout entry -- throws
+  -- ExitCode on the worker, which forwards it here because this is the thread
+  -- whose exit ends the process. Tell river before going: stopping is what
+  -- releases this window manager, and river exits with it. Exiting without it
+  -- leaves the compositor to notice a dead connection instead.
+  let onExit :: ExitCode -> IO ()
+      onExit code = do
+        riverWindowManagerV1Stop conn manager
+        flush conn
+        throwIO code
+  handle onExit $ loop `catch` \RestartRequested -> do
     mExe <- restartTarget
     case mExe of
       -- Nothing to come back as.  Say so and carry on rather than stopping:
