@@ -130,6 +130,14 @@ data Runtime = Runtime
     -- event loop rather than in the 'X' monad.
   , rtBoundSeats  :: !(IORef (S.Set ObjectId))
   , rtHovered     :: !(IORef (Maybe Window))
+  , rtLayoutMoved :: !(IORef Bool)
+    -- ^ Set when the last layout pass placed a window somewhere it was not
+    -- before, cleared by the next crossing.  X11 said this in the event
+    -- itself -- a crossing carried @ev_mode@, and xmonad refocused only on
+    -- @notifyNormal@, ignoring the ones a window's own movement synthesised.
+    -- river's @pointer_enter@ carries a window and nothing else, so what it
+    -- does not say has to be reconstructed: a crossing that arrives after a
+    -- layout moved something is that layout's doing, not the pointer's.
   , rtManager     :: !ObjectId
     -- ^ Needed by binding callbacks, which run outside the 'X' monad and must
     -- request a manage sequence with @manage_dirty@.
@@ -239,6 +247,7 @@ run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs 
           <*> pure bindings
           <*> newIORef S.empty
           <*> newIORef Nothing
+          <*> newIORef False
           <*> pure manager
           <*> pure conn
           <*> pure (focusFollowsMouse userConfig)
@@ -718,8 +727,28 @@ addSeat rt conn seat = do
     -- notifyNormal@ to ignore the crossings a grab synthesises; river sends
     -- this only for genuine pointer movement, so there is nothing to filter.
     RiverSeatV1PointerEnter win -> do
+      -- Only when the pointer is what did the crossing.
+      --
+      -- X11 could just ask: a CrossingEvent carried ev_mode, and xmonad
+      -- refocused only on notifyNormal, which is how Magnifier and
+      -- focusFollowsMouse coexist there.  Magnifier enlarges the focused
+      -- window, that displaces its neighbour under a pointer that has not
+      -- moved, and X11 reported the resulting crossing as synthetic.
+      --
+      -- river's pointer_enter carries a window and nothing else, so the same
+      -- distinction has to be reconstructed.  A crossing caused by the layout
+      -- can only arrive after a layout pass that moved something, and every
+      -- crossing is followed by its own manage sequence -- so a move recorded
+      -- by the last pass is what marks the next crossing as its consequence.
+      -- Cleared as it is read: it excuses exactly one crossing, and a pointer
+      -- genuinely moving during a relayout still gets its own.
+      --
+      -- Without this the two feed each other: focus, magnify, displace,
+      -- cross, refocus.  Nothing in the journal shows it, because every
+      -- sequence in the loop completes normally.
       writeIORef (rtHovered rt) (Just win)
-      when (rtFollowsMouse rt) $ queueAction rt $ do
+      byLayout <- atomicModifyIORef' (rtLayoutMoved rt) (\m -> (False, m))
+      when (rtFollowsMouse rt && not byLayout) $ queueAction rt $ do
         -- Both conditions are about the delay.  The action runs at the start
         -- of the next manage sequence rather than now, so the pointer may
         -- have moved on -- refocusing to where it used to be would fight the
@@ -1241,6 +1270,13 @@ applyLayout rt = do
   -- reach them: 'windowRect' and 'windowUnderPointer' answer from here.  Kept
   -- alongside the plan rather than derived from it because 'RiverState' is
   -- what an 'X' action has in hand, and the plan is not.
+  -- Whether this pass moved a window, for the crossing guard in the
+  -- pointer_enter handler above.  Compared against what the previous pass
+  -- decided, which is what is still in riverPlacements at this point.
+  do ref <- asks (riverPlacements . riverState)
+     old <- io (readIORef ref)
+     io $ writeIORef (rtLayoutMoved rt) (old /= placements)
+
   io . flip writeIORef placements =<< asks (riverPlacements . riverState)
 
   io $ modifyIORef' (rtPlan rt) $ \p -> p
