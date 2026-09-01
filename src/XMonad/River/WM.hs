@@ -1266,10 +1266,10 @@ applyLayout rt = do
     (rs, mLayout) <- userCodeDef ([], Nothing) (runLayout wsp { W.stack = tiled } rect)
     forM_ mLayout $ \l' -> modify $ \st ->
       st { windowset = updateLayout (W.tag wsp) l' (windowset st) }
-    -- Floats last, because the render sequence place_tops this list in order,
-    -- so later is higher.  Upstream expresses the same thing the other way
-    -- round and then restacks.
-    pure (rs ++ flt)
+    -- Floats first, which is upstream's order: the window that should end up
+    -- on top comes first, and the render sequence reverses the whole list
+    -- before stacking it.  See 'transmitRender'.
+    pure (flt ++ rs)
 
   -- Borders are resolved here rather than while transmitting, because the
   -- override lookup and the focused/normal choice are decisions and belong
@@ -1587,10 +1587,27 @@ transmitRender rt conn = do
       riverWindowV1Hide conn (rwObject w)
       adjust winRef (rwObject w) $ \x -> x { rwHidden = True }
 
-  -- Stacking order: the layout list is in the desired bottom-to-top order,
-  -- then anything asked to sit above it, re-applied every frame because this
-  -- loop would otherwise have just undone it.
-  forM_ (planPlacements plan) $ \(win, _) ->
+  -- Stacking order, bottom to top, re-applied every frame because this loop
+  -- would otherwise have just undone it.
+  --
+  -- The layout list runs the other way. Upstream's convention is that the
+  -- window which should end up on top comes first -- X11 handed the whole
+  -- list to XRestackWindows, which stacks top-first -- so place_topping in
+  -- list order put every window over the one before it, leaving the first
+  -- underneath them all.
+  --
+  -- Almost every layout tiles without overlap and cannot tell the difference.
+  -- Magnifier can: it returns the focused window first at a rectangle larger
+  -- than its slot, meaning "draw this over its neighbours", and got the
+  -- opposite. The window really was resized -- a terminal in it reflows its
+  -- grid -- and was then covered by the windows it had grown across, so the
+  -- layout looked like it did nothing at all.
+  --
+  -- Reversed here, where the ordering is used, rather than in the plan: the
+  -- placement list is also what answers windowRect and windowUnderPointer,
+  -- and the latter takes the first rectangle containing the pointer, which
+  -- is only the right answer while first still means topmost.
+  forM_ (reverse (planPlacements plan)) $ \(win, _) ->
     forM_ (M.lookup win known) $ \w -> riverNodeV1PlaceTop conn (rwNode w)
   forM_ (planRaised plan) $ \win ->
     forM_ (M.lookup win known) $ \w -> riverNodeV1PlaceTop conn (rwNode w)
