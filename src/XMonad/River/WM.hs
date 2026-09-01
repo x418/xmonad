@@ -977,12 +977,28 @@ syncScreens = do
                 _ -> Rectangle x y (fromIntegral width) (fromIntegral height)
         ]
   unless (null rects) $ do
-    before <- gets (map (screenRect . W.screenDetail) . screensOf . windowset)
-    modify $ \st -> st { windowset = rescreen rects (windowset st) }
-    -- Only when it actually changed.  A manage sequence runs for all sorts of
-    -- reasons and most of them leave the outputs alone; a config restarting
-    -- its status bars on every one of them would be unusable.
-    when (before /= rects) $ void (broadcastEvent ScreenLayoutChanged)
+    -- In screen-id order, which is the order the ids were handed out from a
+    -- rect list sorted exactly like this one.  screensOf puts current first,
+    -- and which screen is current changes on every W.view, so comparing in
+    -- that order would report a change whenever focus moved between outputs.
+    before <- gets (map (screenRect . W.screenDetail)
+                    . sortOn W.screen . screensOf . windowset)
+    -- Only when the outputs actually changed -- and that now guards the
+    -- rescreen itself, not just the broadcast.  rescreen, like the X11
+    -- rescreen it is modelled on, re-seats whichever workspace is current as
+    -- screen 0 on the first rectangle.  X11 only ever runs it on an
+    -- RRScreenChangeNotify; running it at the top of every manage sequence
+    -- undid every focus change onto another screen one sequence later,
+    -- pinning focus -- and everything that follows W.current: where new
+    -- windows open, where prompts appear, what doShift targets -- to the
+    -- leftmost output.
+    --
+    -- A manage sequence also runs for all sorts of reasons that leave the
+    -- outputs alone, and a config restarting its status bars on every one of
+    -- them would be unusable, so the broadcast stays behind the same guard.
+    when (before /= rects) $ do
+      modify $ \st -> st { windowset = rescreen rects (windowset st) }
+      void (broadcastEvent ScreenLayoutChanged)
 
 -- | The screens a 'WindowSet' currently has, current first.
 screensOf :: WindowSet -> [W.Screen WorkspaceId (Layout Window) Window ScreenId ScreenDetail]
@@ -1002,13 +1018,23 @@ rescreen rects ws = ws
       []     -> (Rectangle 0 0 0 0, [])
     -- Workspaces that were on now-absent screens fall back to hidden.
     oldVisible = W.visible ws
+    -- A screen with no workspace of its own takes one from the hidden pool,
+    -- and each such screen must take a *different* one: indexing into the
+    -- pool by how many screens have already drawn from it. Taking the head
+    -- every time -- and never removing it -- put the same workspace on a
+    -- screen and in the hidden list at once, so it appeared twice in the
+    -- workspace list, both copies claiming to be on screen. That is how a
+    -- second output produced a duplicate tag that no config asked for.
+    extras = drop (length oldVisible) restRects
     reseat i r = case drop (i - 1) oldVisible of
       (s:_) -> s { W.screen = fromIntegral i, W.screenDetail = SD r }
-      [] -> case newHidden of
+      [] -> case drop (i - 1 - length oldVisible) pool of
         (h:_) -> W.Screen h (fromIntegral i) (SD r)
         []    -> W.Screen (W.workspace (W.current ws)) (fromIntegral i) (SD r)
     surplus = drop (length restRects) oldVisible
-    newHidden = map W.workspace surplus ++ W.hidden ws
+    -- What the screens above may draw from, and what is left once they have.
+    pool = map W.workspace surplus ++ W.hidden ws
+    newHidden = drop (length extras) pool
 
 -- | Run the manage hook for windows river has just told us about, and insert
 -- them into the 'WindowSet'.
