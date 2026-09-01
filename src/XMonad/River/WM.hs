@@ -797,6 +797,7 @@ addSeat rt conn seat = do
 manageSequence :: Runtime -> X ()
 manageSequence rt = do
   asks (inManageSeq . riverState) >>= \r -> io (writeIORef r True)
+  before <- gets windowset
   restoreState rt
   reapClosed
   syncScreens
@@ -805,7 +806,36 @@ manageSequence rt = do
   adoptNewWindows
   runPending rt
   applyLayout rt
+  -- Tell the log hook, if this sequence changed the window list itself.
+  --
+  -- 'XMonad.Operations.windows' runs the hook, and everything a config does
+  -- goes through it -- but the two places a window appears and disappears do
+  -- not: 'adoptNewWindows' and 'reapClosed' modify the 'WindowSet' directly,
+  -- because they run inside the sequence that would otherwise be requested to
+  -- carry them.  So a window opening or closing on its own changed the state
+  -- and told nothing, and a status bar kept the title of a window that had
+  -- gone until the next keystroke happened to run 'windows' for some other
+  -- reason.
+  --
+  -- Compared rather than flagged: 'restoreState' and 'syncScreens' can each
+  -- rewrite the 'WindowSet' too, and a bar wants to hear about those as much
+  -- as about a close.
+  after <- gets windowset
+  unless (sameWindows before after) $
+    asks (logHook . config) >>= userCodeDef ()
   asks (inManageSeq . riverState) >>= \r -> io (writeIORef r False)
+
+-- | Whether two 'WindowSet's would produce the same status line: same windows,
+-- same workspaces, same focus.  Not an 'Eq' on the whole thing -- that would
+-- compare layouts, which hold arbitrary state a layout may rewrite on every
+-- pass, and the answer would always be "changed".
+sameWindows :: WindowSet -> WindowSet -> Bool
+sameWindows a b =
+     map wsOf (W.workspaces a) == map wsOf (W.workspaces b)
+  && W.currentTag a == W.currentTag b
+  && map (W.tag . W.workspace) (W.visible a) == map (W.tag . W.workspace) (W.visible b)
+  where
+    wsOf w = (W.tag w, W.integrate' (W.stack w), fmap W.focus (W.stack w))
 
 -- | Pick up where the previous window manager left off, if it left a state
 -- file.
