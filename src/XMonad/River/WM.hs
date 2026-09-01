@@ -1292,6 +1292,19 @@ applyLayout rt = do
       stillUp = filter (`S.member` placed) raised
   io . flip writeIORef stillUp =<< asks (riverRestack . riverState)
 
+  -- X11 kept 'mapped' current from the map and unmap events, through 'hide'
+  -- and 'reveal'; this backend has no such events and its 'windows' calls
+  -- neither, so nothing has ever inserted into it -- 'doIgnore' is the only
+  -- caller of 'reveal' left, and it only ever removes windows.  Contrib code
+  -- that asks which windows are on screen therefore sees an empty set and
+  -- silently does nothing: XMonad.Actions.EasyMotion draws its overlays for
+  -- the windows it finds there, finds none, and exits before drawing any.
+  --
+  -- What X11 meant by mapped is what this pass just placed: managed, on a
+  -- workspace that is on a screen.  That is 'placed', already computed above
+  -- for 'planVisible'.
+  modify $ \st -> st { mapped = placed }
+
   -- The same placements, where the @IO@-shaped queries in "XMonad.River" can
   -- reach them: 'windowRect' and 'windowUnderPointer' answer from here.  Kept
   -- alongside the plan rather than derived from it because 'RiverState' is
