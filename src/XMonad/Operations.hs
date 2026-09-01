@@ -150,7 +150,22 @@ kill = withFocused killWindow
 -- make sure one happens.
 windows :: (WindowSet -> WindowSet) -> X ()
 windows f = do
-    modify $ \st -> st { windowset = f (windowset st) }
+    old <- gets windowset
+    let ws = f old
+    modify $ \st -> st { windowset = ws }
+
+    -- Tell a workspace that has just left the screen, as upstream does.  A
+    -- layout that draws its own surfaces -- Tabbed, and everything else built
+    -- on "XMonad.Layout.Decoration" -- unmaps them on 'Hide', and nothing
+    -- else ever tells it to: the decorations are shell surfaces this process
+    -- owns, not river windows, so 'transmitRender' hiding the windows of a
+    -- workspace that is no longer visible does not touch them.  Without this
+    -- the tab bar of the workspace you left stays on screen over the one you
+    -- switched to, until some later relayout happens to redraw it.
+    let tagsOldVisible = map (W.tag . W.workspace) (W.current old : W.visible old)
+        gottenHidden = filter ((`elem` tagsOldVisible) . W.tag) (W.hidden ws)
+    mapM_ (sendMessageWithNoRefresh Hide) gottenHidden
+
     inSeq <- io . readIORef =<< asks (inManageSeq . riverState)
     unless inSeq requestManageSequence
     asks (logHook . config) >>= userCodeDef ()
