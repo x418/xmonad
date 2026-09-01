@@ -608,9 +608,31 @@ floatLocation w = do
             pure $ case M.lookup w known of
                 Nothing -> (W.screen sc, W.RationalRect 0 0 1 1)
                 Just rw ->
-                    let (width, height) = rwDimensions rw
-                        rwidth  = fromIntegral (max 1 width)  % sw
-                        rheight = fromIntegral (max 1 height) % sh
+                    -- A window river has not sized yet reports (0, 0), and a
+                    -- window being floated by a manage hook is exactly that:
+                    -- the hook runs when it is adopted, before any layout has
+                    -- proposed dimensions for it.  Clamping that to one pixel
+                    -- made doCenterFloat centre a 1x1 rectangle, and a client
+                    -- that will not be that small -- one with min size hints,
+                    -- like JetBrains' project selector -- drew itself at its
+                    -- own size from that centre point, hanging off the bottom
+                    -- right of the screen.
+                    --
+                    -- Fall back to what it says it wants: its minimum, or
+                    -- failing that half the screen, which is what a window
+                    -- with nothing to say gets from most tiling layouts
+                    -- anyway.
+                    -- All as 'Integer': rwDimensions is signed and the size
+                    -- hints are not, so the two do not meet in either of
+                    -- their own types.
+                    let hinted = case sh_min_size (rwSizeHints rw) of
+                          Just (mw, mh) -> (toInteger mw, toInteger mh)
+                          Nothing -> (sw `div` 2, sh `div` 2)
+                        (width, height) = case rwDimensions rw of
+                          (0, 0)   -> hinted
+                          (dw, dh) -> (toInteger dw, toInteger dh)
+                        rwidth  = max 1 width  % sw
+                        rheight = max 1 height % sh
                     in ( W.screen sc
                        , W.RationalRect (0.5 - rwidth / 2) (0.5 - rheight / 2)
                                         rwidth rheight )

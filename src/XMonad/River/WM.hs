@@ -59,7 +59,7 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
 import XMonad.Core
-import XMonad.Operations (StateFile (..), broadcastMessage, focus, readStateFile, scaleRationalRect, writeStateToFile)
+import XMonad.Operations (StateFile (..), broadcastMessage, floatLocation, focus, isFixedSizeOrTransient, readStateFile, scaleRationalRect, writeStateToFile)
 import XMonad.River.Runtime (emitOp, exitLoopWith, setModifierWatcher, takeNowOps, takeOps, RestartRequested(..), forgetBorderOverride, takeModifierWatcher, lookupBorderOverride, publishGeometry, publishSizeHints, sendRestart, setMainThread, warnUnimplemented)
 import qualified XMonad.River.Control as Ctl
 import XMonad.River.Client (closeAllClients)
@@ -1127,8 +1127,29 @@ adoptNewWindows = do
     unless (rwObject w `elem` managed) $ do
       mh <- asks (manageHook . config)
       g <- userCodeDef (mempty) (runQuery mh (rwObject w))
+      -- Float a window that cannot usefully be tiled before the manage hook
+      -- has its say, exactly as upstream's 'manage' does: one whose minimum
+      -- size is its maximum, or one that is a child of another window.  A
+      -- dialog, a splash, a project selector.
+      --
+      -- Left out until now, so such a window was tiled and drew itself at
+      -- whatever size it insisted on regardless of the slot -- and a config
+      -- had to name each one to get the behaviour X11 gives for free.
+      shouldFloat <- withDisplay $ \d -> isFixedSizeOrTransient d (rwObject w)
+      rr <- snd <$> floatLocation (rwObject w)
       ws' <- gets windowset
-      let placed = W.insertUp (rwObject w) ws'
+      -- And keep a float on the screen.  A rectangle that starts off the
+      -- edge, or runs past it, is re-centred rather than honoured: the size
+      -- a float is given comes from what river has said about the window,
+      -- which for one being adopted is nothing at all.
+      let adjust (W.RationalRect x y wid h)
+            | x + wid > 1 || y + h > 1 || x < 0 || y < 0 =
+                W.RationalRect (0.5 - wid / 2) (0.5 - h / 2) wid h
+          adjust r = r
+          inserted = W.insertUp (rwObject w) ws'
+          placed
+            | shouldFloat = W.float (rwObject w) (adjust rr) inserted
+            | otherwise = inserted
       modify $ \st -> st { windowset = appEndo g placed }
       void (broadcastEvent (WindowAdded (rwObject w)))
 
