@@ -1282,9 +1282,20 @@ applyLayout rt = do
   borders <- fmap M.fromList $ forM placements $ \(win, _) -> do
     (mWidth, mColor) <- io (lookupBorderOverride win)
     let width = fromMaybe bw0 mWidth
+        -- The focused window takes the focused colour, whatever an override
+        -- says.  X11 repainted it on every 'windows' -- normal for everything
+        -- else, focused for this one, unconditionally -- so a colour some
+        -- layout modifier had set was overwritten the moment focus arrived.
+        --
+        -- Here the colour is decided once, from a map that outlives the
+        -- decision, and an override set for an unrelated purpose therefore
+        -- wins forever.  XMonad.Layout.WindowNavigation colours whichever
+        -- windows are reachable from the focused one, and never repaints
+        -- them: a window it had once tinted kept that colour when it later
+        -- became focused, so the focus border was simply never seen.
         rgba = case mColor of
-          Just c  -> c
-          Nothing -> pixelColor (if Just win == mFocus then focusedCol else normalCol)
+          Just c | Just win /= mFocus -> c
+          _ -> pixelColor (if Just win == mFocus then focusedCol else normalCol)
     pure (win, (width, rgba))
 
   raised <- io . readIORef =<< asks (riverRestack . riverState)
