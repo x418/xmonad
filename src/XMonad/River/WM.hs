@@ -781,9 +781,20 @@ addSeat rt conn seat = do
         -- in progress owns the focus outright: X11 held a pointer grab for
         -- the duration, which suppressed crossing events entirely, and there
         -- is no grab here to do it.
+        --
+        -- And only into a window that is on a screen.  A window on a hidden
+        -- workspace is one this window manager has told river to hide, so
+        -- the pointer cannot genuinely enter it -- except in the gap a
+        -- restart leaves, when river shows every window until the successor's
+        -- first manage sequence hides them again.  A crossing into one of
+        -- those would 'focus' it, and focusing a window views the workspace
+        -- holding it: M-q with a stashed scratchpad under the pointer landed
+        -- on NSP.
         stillThere <- io ((== Just win) <$> readIORef (rtHovered rt))
         drag <- gets dragging
-        when (stillThere && isNothing drag) (focus win)
+        onScreen <- gets (elem win . concatMap (W.integrate' . W.stack . W.workspace)
+                            . (\s -> W.current s : W.visible s) . windowset)
+        when (stillThere && isNothing drag && onScreen) (focus win)
     RiverSeatV1PointerLeave -> writeIORef (rtHovered rt) Nothing
     RiverSeatV1PointerPosition x y ->
       adjust ref seat $ \s -> s { rsPointer = (x, y) }
