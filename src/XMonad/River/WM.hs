@@ -93,6 +93,10 @@ data Runtime = Runtime
     -- ^ The same 'IORef' as 'riverCapture'.  Written by the config; taken by
     -- whichever of a key, an unbound key, a modifier release or the deadline
     -- gets there first.
+  , rtOverlays    :: !(IORef [ObjectId])
+    -- ^ The same 'IORef' as 'riverOverlays': the nodes of the mapped surfaces
+    -- this window manager draws itself, which 'transmitRender' places above
+    -- every window.
   , rtGrabbed     :: !(IORef [ObjectId])
     -- ^ The standing bindings 'XMonad.River.grabKeys' asked for.  Loop state
     -- for the same reason 'rtArmed' is.
@@ -218,6 +222,7 @@ run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs 
   outputsRef <- newIORef M.empty
   seatsRef   <- newIORef M.empty
   dirtyRef   <- newIORef False
+  overlayRef <- newIORef []
   manageRef  <- newIORef False
   restartRef <- newIORef Nothing
   dragOrigin <- newIORef (0, 0)
@@ -234,6 +239,7 @@ run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs 
           <$> newIORef []
           <*> pure bindingsRef
           <*> pure submapRef
+          <*> pure overlayRef
           <*> newIORef []
           <*> pure extraKeysRef
           <*> newIORef []
@@ -299,6 +305,7 @@ run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs 
             , riverPlacements = placeRef
             , riverExtraKeys = extraKeysRef
             , riverRestack = restackRef
+            , riverOverlays = overlayRef
             , riverCapture = submapRef
             , riverDragOrigin = dragOrigin
             , riverAfterLayout = afterLayoutRef
@@ -1707,6 +1714,18 @@ transmitRender rt conn = do
     forM_ (M.lookup win known) $ \w -> riverNodeV1PlaceTop conn (rwNode w)
   forM_ (planRaised plan) $ \win ->
     forM_ (M.lookup win known) $ \w -> riverNodeV1PlaceTop conn (rwNode w)
+
+  -- The surfaces this window manager draws itself, above every window.
+  --
+  -- They are not in the plan: a decoration or an EasyMotion overlay is a
+  -- river_shell_surface_v1, not a river_window_v1, so the loops above -- which
+  -- look every id up in the window map -- cannot reach them.  Nothing else
+  -- places them either, so they keep whatever depth they were created at and
+  -- the placements above are then put on top of them, every frame.  A
+  -- decoration survives that because it sits in the gap the layout reserved
+  -- for it; anything drawn *over* a window does not.
+  overlays <- readIORef (rtOverlays rt)
+  mapM_ (riverNodeV1PlaceTop conn) overlays
 
 -- | A dimension bound river reports as zero or less was not stated.
 sizeBound :: Int32 -> Int32 -> Maybe (Dimension, Dimension)

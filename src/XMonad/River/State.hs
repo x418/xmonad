@@ -129,6 +129,19 @@ data RiverState m = RiverState
       -- instead, which is what "raise it and have it stay raised" has to
       -- mean when something else owns the order.  Windows that are no longer
       -- placed are dropped as they go.
+    , riverOverlays :: !(IORef [ObjectId])
+      -- ^ Nodes of the window-manager surfaces that are currently mapped,
+      -- bottom-to-top.
+      --
+      -- These are @river_shell_surface_v1@ nodes rather than windows --
+      -- decorations, and EasyMotion's chord overlays -- and the render
+      -- sequence would otherwise never place them at all: it stacks from the
+      -- layout, whose list holds only windows.  Since it restates that order
+      -- on every frame, a surface drawn over a window is buried by it a frame
+      -- later, which looks like the surface never being drawn.
+      --
+      -- Kept here rather than read from the drawable registry because that
+      -- registry lives in xmonad-contrib, which this package cannot import.
     , riverCapture :: !(IORef (Maybe (InputCapture m)))
       -- ^ The interaction currently holding the keyboard, or 'Nothing'.
       -- Written by 'XMonad.River.submapNextKey' and
