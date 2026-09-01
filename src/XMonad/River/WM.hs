@@ -1673,10 +1673,6 @@ captureDeadlineMicros = 60 * 1000 * 1000
 -- Rendering state is restated in full every frame: river keeps no memory of
 -- it, so a request skipped here is not "unchanged" but "reverted".  Filtered
 -- against the live window map for the reason 'transmitManage' is.
--- | Where a hidden window is put.  See the hide loop in 'transmitRender'.
-parked :: Position
-parked = -30000
-
 transmitRender :: Runtime -> Connection -> IO ()
 transmitRender rt conn = do
   plan <- readIORef (rtPlan rt)
@@ -1700,20 +1696,8 @@ transmitRender rt conn = do
   -- Anything not placed by the layout belongs to a workspace that is not on
   -- screen. river has no concept of workspaces, so this is what implements
   -- them.
-  --
-  -- Parked off-screen as well as hidden.  river forgets a hide the moment
-  -- the window manager that asked for it goes: Window.zig's handleDestroy
-  -- resets hidden to false, so that a crashed window manager cannot leave
-  -- windows unreachable -- but it keeps the position.  So between one window
-  -- manager and its successor every hidden window was shown where it last
-  -- stood: a flash of the stashed scratchpad on every M-q, and a
-  -- pointer_enter for it when the pointer happened to be there.  Parked,
-  -- the reveal shows nothing.  Kept within X11's int16, because an Xwayland
-  -- window is told this position too.  The placement loop above puts a
-  -- window back where it belongs before showing it again.
   forM_ (M.elems known) $ \w ->
     unless (S.member (rwObject w) (planVisible plan) || rwHidden w) $ do
-      riverNodeV1SetPosition conn (rwNode w) parked parked
       riverWindowV1Hide conn (rwObject w)
       adjust winRef (rwObject w) $ \x -> x { rwHidden = True }
 
