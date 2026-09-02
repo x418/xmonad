@@ -120,7 +120,11 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm u
     dragOrigin  <- newIORef (0, 0)
     afterLayout <- newIORef []
     geometry    <- newIORef M.empty
-    logDue      <- newIORef False
+    -- True from the start: the initial set has never been announced, and
+    -- X11's launch ran 'windows' once for that reason.  A bar that only
+    -- learns the workspaces from the log hook would otherwise show nothing
+    -- until the first window changed the set.
+    logDue      <- newIORef True
     borders     <- newIORef M.empty
     submapGen   <- newIORef 0
     ops         <- newIORef []
