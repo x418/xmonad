@@ -107,11 +107,12 @@ data Op
     -- manager so a successor may connect.
   | OpSetXcursorTheme !ObjectId !ByteString !Word32
     -- ^ The cursor theme and size, on one seat.
-  | OpGrabKeys ![(KeyMask, KeySym)]
+  | OpGrabKeys !Int ![(KeyMask, KeySym)]
     -- ^ Bind these for as long as the config wants them, reporting presses and
     -- releases by index.  Unlike 'OpCaptureInput' this disables nothing and
     -- ends only when 'OpUngrabKeys' says so -- it is "XMonad.River.grabKeys",
-    -- which is a standing capture rather than an interaction.
+    -- which is a standing capture rather than an interaction.  Tagged with
+    -- the generation of the action table the indices are into.
   | OpUngrabKeys
     -- ^ Release everything 'OpGrabKeys' bound.
   | OpCaptureInput ![(KeyMask, KeySym)] !KeyMask !Bool !Int

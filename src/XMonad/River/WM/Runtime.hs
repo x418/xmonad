@@ -12,6 +12,8 @@ module XMonad.River.WM.Runtime
   , Runtime(..)
   , queueAction
   , queueActions
+  , claimCapture
+  , liveSeats
   , adjust
   , broadcastEvent
   , screensOf
@@ -34,7 +36,7 @@ import XMonad.River.Connection (Connection, Global)
 import qualified XMonad.River.Mailbox as MB
 import XMonad.River.Plan (Plan)
 import XMonad.River.Protocol.WindowManagement
-import XMonad.River.State (RiverState(..))
+import XMonad.River.State (InputCapture(..), RiverState(..))
 import XMonad.River.Types
 import XMonad.River.Wire (ObjectId)
 import qualified XMonad.StackSet as W
@@ -85,6 +87,11 @@ data Runtime = Runtime
     -- ^ Bindings 'XMonad.River.grabKeys' asked for.
   , rtArmed          :: !(IORef [ObjectId])
     -- ^ Bindings an open capture installed.
+  , rtArmedGen       :: !(IORef Int)
+    -- ^ The generation of the capture those bindings belong to.  A teardown
+    -- the loop initiates -- an unbound key eaten, the deadline -- claims the
+    -- capture only if it is still this one, so that a capture armed since
+    -- cannot be closed by the end of its predecessor.
   , rtDisarm         :: !(IORef Bool)
     -- ^ A capture ended and its bindings are still installed; torn down in
     -- the next manage sequence, the only place @enable@ is legal.
@@ -96,6 +103,10 @@ data Runtime = Runtime
     -- ^ What to run when the watched modifiers change.  One slot:
     -- @modifiers_watch@ is one mask per seat.  Taken as it fires, so a
     -- release concluding an interaction is delivered once.
+  , rtModWatched     :: !(IORef Bool)
+    -- ^ A @modifiers_watch@ with a non-zero mask is in force and has to be
+    -- withdrawn when the capture ends, or river reports -- and starts a
+    -- manage sequence for -- every modifier change for the rest of the session.
   , rtGlobals        :: !(IORef (M.Map Word32 Global))
     -- ^ The registry, kept current, so an output's @wl_output@ can be bound
     -- by the name @river_output_v1.wl_output@ carries.
@@ -127,6 +138,18 @@ queueActions _ [] = pure ()
 queueActions rt acts = do
   modifyIORef' (rtPending rt) (reverse acts ++)
   riverWindowManagerV1ManageDirty (rtConn rt) (rtManager rt)
+
+-- | Take the open capture if it is the one of the given generation, leaving
+-- it otherwise.  Whoever takes it owns its teardown.  Loop thread only.
+claimCapture :: Runtime -> Int -> IO (Maybe (InputCapture X))
+claimCapture rt gen = atomicModifyIORef' (riverCapture (rtState rt)) $ \case
+  Just cap | icGeneration cap == gen -> (Nothing, Just cap)
+  other -> (other, Nothing)
+
+-- | The seats river has not removed.  A request to a removed seat is ignored
+-- by the server, but the object it created would be ours to leak.
+liveSeats :: M.Map ObjectId RiverSeat -> [RiverSeat]
+liveSeats = filter (not . rsRemoved) . M.elems
 
 adjust :: IORef (M.Map ObjectId a) -> ObjectId -> (a -> a) -> IO ()
 adjust ref k f = modifyIORef' ref (M.adjust f k)

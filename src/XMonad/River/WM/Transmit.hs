@@ -75,14 +75,16 @@ bindPanic rt seat = do
   riverXkbBindingV1Listen conn b $ \case
     RiverXkbBindingV1Pressed -> do
       n <- closeAllClients
-      globals <- readIORef (rtBindings rt)
-      forM_ (M.keys globals) (riverXkbBindingV1Enable conn)
+      -- The capture is dropped here; its bindings are destroyed and the
+      -- config's re-enabled by the disarm in 'transmitManage', as for every
+      -- other way a capture ends.  river sends this press in the batch that
+      -- precedes a @manage_start@, so that is this sequence.  Tearing down
+      -- here instead would leave the capture's own bindings alive and its
+      -- keys eaten from every client for the rest of the session.
       atomicWriteIORef (riverCapture (rtState rt)) Nothing
-      writeIORef (rtArmed rt) []
-      writeIORef (rtDisarm rt) False
+      writeIORef (rtDisarm rt) True
       hPutStrLn stderr $ "xmonad-river: panic: closed " <> show n
-        <> " prompt(s) and re-enabled " <> show (M.size globals) <> " binding(s)"
-      riverWindowManagerV1ManageDirty conn (rtManager rt)
+        <> " prompt(s); the config's bindings return with this sequence"
     _ -> pure ()
   riverXkbBindingV1Enable conn b
   where conn = rtConn rt
@@ -113,6 +115,15 @@ transmitManage rt plan = do
       riverXkbBindingV1Destroy conn b
     globals <- readIORef (rtBindings rt)
     forM_ (M.keys globals) (riverXkbBindingV1Enable conn)
+    -- The watch is withdrawn with the capture that asked for it.  Left in
+    -- force, river would report every modifier change -- and start a manage
+    -- sequence for each -- for the rest of the session, to a handler that
+    -- has already been taken.
+    watched <- atomicModifyIORef' (rtModWatched rt) (\w -> (False, w))
+    when watched $ do
+      writeIORef (rtModWatcher rt) Nothing
+      forM_ (liveSeats seats) $ \s -> forM_ (rsXkbSeat s) $ \x ->
+        riverXkbBindingsSeatV1ModifiersWatch conn x 0
     writeIORef (rtDisarm rt) False
 
   -- river remembers the layer-surface default; reissued only when it moves.
@@ -147,16 +158,20 @@ transmitManage rt plan = do
       forM_ old $ \b -> do
         riverXkbBindingV1Disable conn b
         riverXkbBindingV1Destroy conn b
-    OpGrabKeys ks -> do
-      bs <- fmap concat $ forM (M.elems seats) $ \seat ->
+    OpGrabKeys gen ks -> do
+      bs <- fmap concat $ forM (liveSeats seats) $ \seat ->
         forM (zip [0 :: Int ..] ks) $ \(i, (mask, keysym)) -> do
           b <- riverXkbBindingsV1GetXkbBinding conn (rtBindingsGlobal rt)
                  (rsObject seat) keysym (riverModifiers mask)
-          -- By index: the actions stay with the config, the loop holds only
-          -- the objects.
+          -- By index, into the table of the generation these were made for:
+          -- the actions stay with the config, the loop holds only the
+          -- objects.  The previous grab's bindings live until this sequence
+          -- destroys them and must not index a table they were not built
+          -- against.
           let fire pick = do
-                acts <- readIORef (riverExtraKeys rs)
-                forM_ (take 1 (drop i acts)) (queueAction rt . pick)
+                (tableGen, acts) <- readIORef (riverExtraKeys rs)
+                when (tableGen == gen) $
+                  forM_ (take 1 (drop i acts)) (queueAction rt . pick)
           riverXkbBindingV1Listen conn b $ \case
             RiverXkbBindingV1Pressed  -> fire fst
             RiverXkbBindingV1Released -> fire snd
@@ -211,14 +226,15 @@ armCapture
 armCapture rt seats ks mods oneShot gen = do
   globals <- readIORef (rtBindings rt)
   forM_ (M.keys globals) (riverXkbBindingV1Disable conn)
+  writeIORef (rtArmedGen rt) gen
 
   -- Whoever takes the slot owns the teardown: a key, an unbound key, a
-  -- modifier release or the deadline, exactly one of them.
-  let claim = atomicModifyIORef' (riverCapture rs) $ \case
-        Just cap | icGeneration cap == gen -> (Nothing, Just cap)
-        other -> (other, Nothing)
+  -- modifier release or the deadline, exactly one of them, and only for
+  -- this generation.
+  let claim = claimCapture rt gen
+      live = liveSeats seats
 
-  temps <- fmap concat $ forM (M.elems seats) $ \seat ->
+  temps <- fmap concat $ forM live $ \seat ->
     forM (zip [0 :: Int ..] ks) $ \(i, (mask, keysym)) -> do
       b <- riverXkbBindingsV1GetXkbBinding conn (rtBindingsGlobal rt)
              (rsObject seat) keysym (riverModifiers mask)
@@ -238,19 +254,23 @@ armCapture rt seats ks mods oneShot gen = do
       pure b
   writeIORef (rtArmed rt) temps
 
-  -- A hold-to-cycle ends when the modifier goes up.
-  when (mods /= 0) $ do
+  -- A hold-to-cycle ends when the modifier goes up.  @modifiers_watch@ is a
+  -- version-3 request; "XMonad.River.whileModifiersHeld" does not arm on an
+  -- older server, and this is the check that keeps it a protocol error only
+  -- there.
+  when (mods /= 0 && rtXkbVersion rt >= 3) $ do
     writeIORef (rtModWatcher rt) $ Just $ \old new ->
       when (old .&. mods /= 0 && new .&. mods /= old .&. mods) $ do
         taken <- claim
         forM_ taken $ \cap -> do
           writeIORef (rtDisarm rt) True
           queueAction rt (icOnEnd cap)
-    forM_ (M.elems seats) $ \s ->
+    writeIORef (rtModWatched rt) True
+    forM_ live $ \s ->
       forM_ (rsXkbSeat s) $ \x -> riverXkbBindingsSeatV1ModifiersWatch conn x mods
 
   -- Be told about a key this did not want, so the capture can be abandoned.
-  when oneShot $ forM_ (M.elems seats) $ \s ->
+  when oneShot $ forM_ live $ \s ->
     forM_ (rsXkbSeat s) (riverXkbBindingsSeatV1EnsureNextKeyEaten conn)
 
   -- A deadline, or an abandoned capture is a session with no bindings.  The

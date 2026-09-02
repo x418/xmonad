@@ -140,9 +140,11 @@ addSeat rt seat = do
     xs <- riverXkbBindingsV1GetSeat conn (rtBindingsGlobal rt) seat
     riverXkbBindingsSeatV1Listen conn xs $ \case
       -- A key the open capture did not ask for ends it.  Without this a
-      -- submap would stay armed with every binding disabled.
+      -- submap would stay armed with every binding disabled.  Only the
+      -- capture whose bindings are armed: the key may have been eaten for a
+      -- capture that has since ended, with another armed in its place.
       RiverXkbBindingsSeatV1AteUnboundKey -> do
-        taken <- atomicModifyIORef' (riverCapture rs) (\s -> (Nothing, s))
+        taken <- readIORef (rtArmedGen rt) >>= claimCapture rt
         forM_ taken $ \cap -> do
           writeIORef (rtDisarm rt) True
           queueAction rt (icOnEnd cap)

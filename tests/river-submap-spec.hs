@@ -57,16 +57,21 @@ note path msg = io $ do
 --
 -- Evdev rather than xkb keycodes: @zwp_virtual_keyboard_v1.key@ takes the
 -- former, which is the latter minus 8.
-keyM, keyA, keyB, keyZ :: Word32
+keyM, keyA, keyB, keyZ, keyEsc :: Word32
 keyM = 50
 keyA = 30
 keyB = 48
 keyZ = 44
+keyEsc = 1
 
 -- | @Mod4@, as libxkbcommon numbers it in the default keymap -- the same
 -- coincidence 'XMonad.River.Keyboard.riverModifiers' rests on.
 mod4Bit :: Word32
 mod4Bit = 64
+
+-- | @Shift|Control|Mod1@: the panic chord's modifiers.
+panicBits :: Word32
+panicBits = 1 + 4 + 8
 
 main :: IO ()
 main = do
@@ -90,7 +95,8 @@ main = do
 -- @M-m@ opens a submap in which @a@ runs something and anything else is
 -- unbound; @M-b@ is an ordinary global binding, and is the one that matters --
 -- if it still works after the submap has closed, the bindings a submap
--- disabled were restored.
+-- disabled were restored.  @M-z@ takes longer than the loop waits for a plan,
+-- so its effect lands a sequence late; nothing about it may be lost.
 testConfig :: FilePath -> XConfig (Choose Tall (Choose (Mirror Tall) Full))
 testConfig path = def
   { modMask = mod4Mask
@@ -99,6 +105,7 @@ testConfig path = def
         , submapNextKey (M.fromList [((0, xK_a), note path "inner-a")])
                         (note path "inner-unbound") )
       , ((mod4Mask, xK_b), note path "global-b")
+      , ((mod4Mask, xK_z), io (threadDelay (80 * 1000)) >> note path "slow-z")
       ]
   }
 
@@ -147,6 +154,26 @@ drive path = do
       chord conn kb mod4Bit keyM
       settle conn
       tap conn kb keyZ
+      settle conn
+      chord conn kb mod4Bit keyB
+      settle conn
+
+      -- The third exit, the panic chord.  It drops the capture without running
+      -- anything; the submap's key must then do nothing -- its binding was
+      -- destroyed, not merely orphaned -- and the globals must be back.
+      chord conn kb mod4Bit keyM
+      settle conn
+      chord conn kb panicBits keyEsc
+      settle conn
+      tap conn kb keyA
+      settle conn
+      chord conn kb mod4Bit keyB
+      settle conn
+
+      -- An action slower than the plan grace: the loop answers river with the
+      -- plan it has, and the late one follows in a sequence of its own.  The
+      -- global after it proves the loop is still answering.
+      chord conn kb mod4Bit keyZ
       settle conn
       chord conn kb mod4Bit keyB
       settle conn

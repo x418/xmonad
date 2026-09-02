@@ -273,20 +273,26 @@ grabKeys keymap = grabKeysUpDown (M.map (, pure ()) keymap)
 grabKeysUpDown :: M.Map (KeyMask, KeySym) (X (), X ()) -> X ()
 grabKeysUpDown keymap = do
     conf <- ask
-    ungrabKeys
+    emitOp OpUngrabKeys
     let entries = M.toList keymap
-    -- The actions, in the order the loop will index them.  Written before the
-    -- op, so the table is there by the time a binding can fire.
-    io $ atomicWriteIORef (riverExtraKeys (riverState conf)) (map snd entries)
-    emitOp (OpGrabKeys (map fst entries))
+    -- The actions, in the order the loop will index them, under a fresh
+    -- generation.  Written before the op, so the table is there by the time a
+    -- binding can fire; tagged, so the previous grab's bindings -- alive until
+    -- the sequence destroys them -- cannot index this table with their own
+    -- positions.
+    gen <- io (nextGeneration (riverSubmapGen (riverState conf)))
+    io $ atomicWriteIORef (riverExtraKeys (riverState conf)) (gen, map snd entries)
+    emitOp (OpGrabKeys gen (map fst entries))
     manageDirty
 
 -- | Release everything 'grabKeys' captured.
 ungrabKeys :: X ()
 ungrabKeys = do
     conf <- ask
-    io (atomicWriteIORef (riverExtraKeys (riverState conf)) [])
+    gen <- io (nextGeneration (riverSubmapGen (riverState conf)))
+    io (atomicWriteIORef (riverExtraKeys (riverState conf)) (gen, []))
     emitOp OpUngrabKeys
+    manageDirty
 
 -- | Keep a window above the ones the layout placed.  The render sequence
 -- restacks from the layout every frame, so this is a standing request; it
@@ -404,9 +410,11 @@ whileModifiersHeld mods captures onKey onDone = do
     -- @modifiers_watch@ arrived in version 3 of river_xkb_bindings_v1, and
     -- without it there is no way to learn that a modifier was released.  Doing
     -- nothing but the conclusion degrades Alt-Tab to "acts once", rather than
-    -- to a session whose bindings are disabled forever.
-    let xkbSeats = [ x | s <- M.elems seats, Just x <- [rsXkbSeat s] ]
-    if null xkbSeats
+    -- to a session whose bindings are disabled forever.  The seat object
+    -- alone is not enough to ask: it exists from version 2, and sending a
+    -- version-3 request to it would be a protocol error.
+    let xkbSeats = [ x | s <- M.elems seats, not (rsRemoved s), Just x <- [rsXkbSeat s] ]
+    if null xkbSeats || riverXkbVersion (riverState conf) < 3
       then do
         io $ hPutStrLn stderr
           "xmonad-river: river_xkb_bindings_v1 is too old for modifier \

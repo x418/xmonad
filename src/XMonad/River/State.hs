@@ -25,6 +25,7 @@ module XMonad.River.State
 import Control.Concurrent.STM (STM, TVar, atomically, check, modifyTVar', readTVar, stateTVar)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.IORef (IORef, atomicModifyIORef', modifyIORef', readIORef)
+import Data.Word (Word32)
 import qualified Data.Map as M
 
 import XMonad.River.Connection (Connection)
@@ -61,6 +62,10 @@ data InputCapture m = InputCapture
 data RiverState m = RiverState
     { riverManager  :: !ObjectId               -- ^ the @river_window_manager_v1@ global
     , riverBindings :: !ObjectId               -- ^ the @river_xkb_bindings_v1@ global
+    , riverXkbVersion :: !Word32
+      -- ^ The @river_xkb_bindings_v1@ version negotiated.  @modifiers_watch@
+      -- arrived in 3; sending it to an older object is a protocol error, so
+      -- whatever wants a modifier release has to check first.
     , riverCompositor :: !(Maybe ObjectId)
       -- ^ the @wl_compositor@ global, for surfaces the window manager draws
       -- itself.  'Nothing' on a compositor that does not advertise one, which
@@ -85,8 +90,12 @@ data RiverState m = RiverState
     , riverPlacements :: !(IORef [(Window, Rectangle)])
       -- ^ Where the last layout put each window: the only record of a
       -- window's position, since river never reports one.  Topmost first.
-    , riverExtraKeys :: !(IORef [(m (), m ())])
-      -- ^ Press and release actions for 'XMonad.River.grabKeys', by index.
+    , riverExtraKeys :: !(IORef (Int, [(m (), m ())]))
+      -- ^ Press and release actions for 'XMonad.River.grabKeys', by index,
+      -- tagged with the generation the bindings were created for.  The loop
+      -- fires a binding only if its generation is the table's: the bindings
+      -- of an earlier grab stay alive until a sequence destroys them, and
+      -- must not index a table they were not built against.
     , riverRestack :: !(IORef [Window])
       -- ^ Windows to keep above the layout's order, bottom-to-top.  Dropped
       -- as they stop being placed.
@@ -115,6 +124,11 @@ data RiverState m = RiverState
       -- at the origin, as X11 would have said.
     , riverSizeHints :: !(IORef (M.Map Window SizeHints))
       -- ^ Likewise for 'XMonad.Core.getWMNormalHints'.
+    , riverLogDue :: !(IORef Bool)
+      -- ^ 'XMonad.Operations.windows' ran since the last sequence's log hook.
+      -- X11 ran the log hook on every @windows@; here it runs once, at the end
+      -- of the sequence, if anything asked for it or the set changed on its
+      -- own.  Worker only.
     , riverBorders :: !(IORef (M.Map Window (Maybe Dimension, Maybe BorderColor)))
       -- ^ Per-window overrides of border width and colour.  Sticky until the
       -- window goes: river keeps no border state, so the render sequence

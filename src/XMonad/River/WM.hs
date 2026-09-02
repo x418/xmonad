@@ -37,7 +37,7 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import System.Directory (doesFileExist)
 import System.Environment (getArgs, getExecutablePath)
-import System.Exit (ExitCode, exitFailure, exitSuccess)
+import System.Exit (ExitCode(..), exitFailure, exitSuccess, exitWith)
 import System.IO (hPutStrLn, stderr)
 import System.Posix.Process (executeFile)
 import System.Timeout (timeout)
@@ -112,7 +112,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm u
     restartRef  <- newIORef Nothing
     mailbox     <- MB.newMailbox
     placeRef    <- newIORef []
-    extraKeys   <- newIORef []
+    extraKeys   <- newIORef (0, [])
     restackRef  <- newIORef []
     overlayRef  <- newIORef []
     overlayPos  <- newIORef M.empty
@@ -121,6 +121,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm u
     afterLayout <- newIORef []
     geometry    <- newIORef M.empty
     sizeHints   <- newIORef M.empty
+    logDue      <- newIORef False
     borders     <- newIORef M.empty
     submapGen   <- newIORef 0
     ops         <- newIORef []
@@ -128,6 +129,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm u
     pure RiverState
       { riverManager     = manager
       , riverBindings    = bindings
+      , riverXkbVersion  = bindingsVer
       , riverCompositor  = compositor
       , riverShm         = shm
       , riverWindows     = windowsRef
@@ -147,6 +149,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm u
       , riverAfterLayout = afterLayout
       , riverGeometry    = geometry
       , riverSizeHints   = sizeHints
+      , riverLogDue      = logDue
       , riverBorders     = borders
       , riverSubmapGen   = submapGen
       , riverOps         = ops
@@ -207,12 +210,13 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm u
   work <- newChan
   let submit :: X () -> IO ()
       submit = writeChan work
-  workerTid <- forkIO $ forever $ do
-    act <- readChan work
-    runX' act `catch` \e -> case fromException e of
-      Just code -> exitLoopWith code
-      Nothing -> hPutStrLn stderr
-        ("xmonad-river: worker: " ++ show (e :: SomeException))
+      worker = forever $ do
+        act <- readChan work
+        runX' act `catch` \e -> case fromException e of
+          Just code -> exitLoopWith code
+          Nothing -> hPutStrLn stderr
+            ("xmonad-river: worker: " ++ show (e :: SomeException))
+  workerRef <- newIORef =<< forkIO worker
 
   sh <- Shared <$> newTVarIO emptyPlan <*> newTVarIO 0
   rt <- do
@@ -226,11 +230,13 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm u
     bound      <- newIORef S.empty
     grabbed    <- newIORef []
     armed      <- newIORef []
+    armedGen   <- newIORef 0
     disarm     <- newIORef False
     hovered    <- newIORef Nothing
     layerDef   <- newIORef Nothing
     startup    <- newIORef False
     modWatcher <- newIORef Nothing
+    modWatched <- newIORef False
     globalsRef <- newIORef named
     lastManage <- newIORef M.empty
     lastRender <- newIORef M.empty
@@ -262,11 +268,13 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm u
       , rtBoundSeats = bound
       , rtGrabbed = grabbed
       , rtArmed = armed
+      , rtArmedGen = armedGen
       , rtDisarm = disarm
       , rtHovered = hovered
       , rtLayerDefault = layerDef
       , rtStartupSent = startup
       , rtModWatcher = modWatcher
+      , rtModWatched = modWatched
       , rtGlobals = globalsRef
       , rtLastManage = lastManage
       , rtLastRender = lastRender
@@ -341,38 +349,57 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm u
         riverWindowManagerV1Stop conn manager
         flush conn
         throwIO code
-  handle onExit $ loop `catch` \RestartRequested -> do
-    mExe <- restartTarget
-    case mExe of
-      -- Once river has released this window manager there is no way back, so
-      -- a session with an out-of-date window manager beats one with none.
-      Nothing -> do
-        let msg = "the executable is gone; still running the old one"
-        Ctl.answerRestart (Ctl.Refused msg)
-        hPutStrLn stderr ("xmonad-river: refusing to restart, " ++ msg)
-        loop
-      Just exe -> do
-        args <- getArgs
-        -- What 'XMonad.Operations.restart' does before asking river to stop,
-        -- on the worker because that owns 'XState'.  Bounded: if the stuck
-        -- action is the one being escaped, waiting for it would make the
-        -- escape hatch as stuck as the thing it is escaping.
-        done <- newEmptyMVar
-        submit (broadcastMessage ReleaseResources >> writeStateToFile
-                  >> io (putMVar done ()))
-        yielded <- timeout restartGraceMicros (takeMVar done)
-        when (isNothing yielded) $ do
-          hPutStrLn stderr
-            "xmonad-river: the worker did not yield; restarting from the last \
-            \committed state"
-          killThread workerTid
-          runX' writeStateToFile
-        atomicWriteIORef (riverRestart rs) (Just (exe, args))
-        -- Answered before the stop: after it there is an exec and no thread
-        -- left to answer with.
-        Ctl.answerRestart Ctl.Ok
-        riverWindowManagerV1Stop conn manager
-        loop
+  -- The connection is gone: river exited, or disconnected this window
+  -- manager for a protocol error.  There is nothing left to answer, so this
+  -- is an exit -- but a deliberate one, with the state file written for a
+  -- successor and a pending @--restart@ told rather than left to time out.
+  let onWayland :: WaylandError -> IO ()
+      onWayland e = do
+        hPutStrLn stderr ("xmonad-river: the connection to river is gone: " ++ show e)
+        Ctl.answerRestart (Ctl.Refused "the connection to river is gone")
+        runX' writeStateToFile `catch` \(_ :: SomeException) -> pure ()
+        exitWith (ExitFailure 1)
+  let onRestart = do
+        mExe <- restartTarget
+        case mExe of
+          -- Once river has released this window manager there is no way back,
+          -- so a session with an out-of-date window manager beats one with
+          -- none.
+          Nothing -> do
+            let msg = "the executable is gone; still running the old one"
+            Ctl.answerRestart (Ctl.Refused msg)
+            hPutStrLn stderr ("xmonad-river: refusing to restart, " ++ msg)
+          Just exe -> do
+            args <- getArgs
+            -- What 'XMonad.Operations.restart' does before asking river to
+            -- stop, on the worker because that owns 'XState'.  Bounded: if the
+            -- stuck action is the one being escaped, waiting for it would make
+            -- the escape hatch as stuck as the thing it is escaping.
+            done <- newEmptyMVar
+            submit (broadcastMessage ReleaseResources >> writeStateToFile
+                      >> io (putMVar done ()))
+            yielded <- timeout restartGraceMicros (takeMVar done)
+            when (isNothing yielded) $ do
+              hPutStrLn stderr
+                "xmonad-river: the worker did not yield; restarting from the \
+                \last committed state"
+              -- A fresh worker on the same queue, so that the sequences
+              -- between here and river's @finished@ are still answered with
+              -- a plan rather than by a loop with nobody behind it.
+              readIORef workerRef >>= killThread
+              writeIORef (inManageSeq rs) False
+              runX' writeStateToFile
+              forkIO worker >>= writeIORef workerRef
+            atomicWriteIORef (riverRestart rs) (Just (exe, args))
+            -- Answered before the stop: after it there is an exec and no
+            -- thread left to answer with.
+            Ctl.answerRestart Ctl.Ok
+            riverWindowManagerV1Stop conn manager
+      -- Every restart request is caught, not only the first: a refused one
+      -- leaves the loop running, and the next request must find the handler
+      -- still there.
+      supervise = (loop `catch` \RestartRequested -> onRestart) >> supervise
+  handle onExit (handle onWayland supervise)
 
 -- | What to exec on restart, or 'Nothing' if there is nothing to exec.
 --

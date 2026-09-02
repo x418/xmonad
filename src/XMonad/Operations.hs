@@ -77,6 +77,7 @@ import Data.Maybe
 import Data.Monoid          (Any(..))
 import Data.Ratio           ((%))
 import System.Directory     (removeFile)
+import System.Environment   (getArgs)
 import System.IO            (Handle, IOMode (ReadMode), hGetContents, withFile)
 import qualified Data.ByteString.Char8 as B8
 import qualified Data.Map as M
@@ -147,7 +148,9 @@ windows f = do
 
     inSeq <- io . readIORef =<< asks (inManageSeq . riverState)
     unless inSeq requestManageSequence
-    asks (logHook . config) >>= userCodeDef ()
+    -- The log hook runs once, at the end of the sequence, rather than here
+    -- and there both; see 'XMonad.River.WM.Sequence.manageSequence'.
+    io . flip writeIORef True =<< asks (riverLogDue . riverState)
 
 -- | Ask river for a manage sequence.  A flag the loop drains, because the
 -- loop owns the connection and this runs wherever an 'X' action does; the
@@ -423,7 +426,10 @@ restart cmd resume = do
     ref <- asks (riverRestart . riverState)
     broadcastMessage ReleaseResources
     when resume writeStateToFile
-    io (atomicWriteIORef ref (Just (cmd, [])))
+    -- With the arguments this process was started with, as @--restart@
+    -- keeps them: a config started with flags stays started with them.
+    args <- io getArgs
+    io (atomicWriteIORef ref (Just (cmd, args)))
     -- Queued for the event loop, which owns the connection.  Ordering holds:
     -- this action finishes before the loop's next pass, so the state file is
     -- written before river is asked to let go.

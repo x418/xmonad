@@ -22,9 +22,16 @@
 #     M-m   opens it again
 #     z     is not in it                        -> "inner-unbound", teardown
 #     M-b   again                               -> "global-b"
+#     M-m   opens it a third time
+#     C-M1-S-Esc  the panic chord               -> teardown, nothing logged
+#     a     the submap's key, now unbound       -> nothing: not a second "inner-a"
+#     M-b   again                               -> "global-b"
+#     M-z   an action slower than the plan grace -> "slow-z", a sequence late
+#     M-b   again                               -> "global-b"
 #
-# The two "global-b" lines are the whole point.  Either one missing means the
-# bindings a submap disabled were not restored.
+# The four "global-b" lines are the whole point.  Any one missing means the
+# bindings a submap disabled were not restored.  A second "inner-a" means the
+# panic left the submap's bindings alive, eating that key from every client.
 
 set -uo pipefail
 
@@ -62,8 +69,8 @@ cat > "$RT/init.sh" <<EOF
 XMONAD_SUBMAP_LOG="$ACTIONS" XMONAD_DATA_DIR="$DATA" \
     XMONAD_RIVER_NO_STARTUP_HOOK=1 "$SPEC" > "$SPECLOG" 2>&1 &
 # Long enough for the spec's own keyboard schedule to finish; it sleeps 4s
-# before it starts and about 1.2s between presses.
-sleep 20
+# before it starts and about 1.2s between each of its fourteen presses.
+sleep 26
 EOF
 chmod +x "$RT/init.sh"
 
@@ -104,13 +111,29 @@ grep -qx 'inner-unbound' "$ACTIONS" \
     && pass "an unknown key ends the submap" \
     || fail "an unknown key ends the submap"
 
-# The assertion this test exists for, twice: once after each way out.
+# The assertion this test exists for, once after each way out and once after
+# the slow action.
 globals=$(grep -cx 'global-b' "$ACTIONS")
-if [ "$globals" -ge 2 ]; then
-    pass "the config's bindings come back after a submap ($globals/2)"
+if [ "$globals" -ge 4 ]; then
+    pass "the config's bindings come back after a submap ($globals/4)"
 else
-    fail "the config's bindings come back after a submap ($globals/2)"
+    fail "the config's bindings come back after a submap ($globals/4)"
 fi
+
+# The panic chord destroyed the submap's bindings rather than orphaning them:
+# the same key afterwards ran nothing.
+inners=$(grep -cx 'inner-a' "$ACTIONS")
+if [ "$inners" -eq 1 ]; then
+    pass "the panic chord took the submap's key back ($inners inner-a)"
+else
+    fail "the panic chord took the submap's key back ($inners inner-a, want 1)"
+fi
+
+# An action that overran the plan grace still ran, and its sequence was
+# answered.
+grep -qx 'slow-z' "$ACTIONS" \
+    && pass "an action slower than the plan grace still runs" \
+    || fail "an action slower than the plan grace still runs"
 
 # Ordering, which the counts alone would not catch: a global-b before any
 # submap ran would mean the submap never armed and M-m did nothing.

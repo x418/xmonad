@@ -14,10 +14,10 @@ module XMonad.River.WM.Sequence
   ) where
 
 import Control.Concurrent.STM
-import Control.Exception (SomeException, handle)
+import Control.Exception (SomeException, finally, handle)
 import Control.Monad (forM, forM_, unless, void, when)
-import Control.Monad.Reader (asks)
-import Control.Monad.State (gets, modify)
+import Control.Monad.Reader (ask, asks)
+import Control.Monad.State (get, gets, modify, put)
 import Data.IORef
 import Data.List (sortOn)
 import Data.Maybe (fromMaybe)
@@ -41,11 +41,19 @@ import qualified XMonad.StackSet as W
 
 manageSequence :: Runtime -> Int -> [X ()] -> X ()
 manageSequence rt n acts = do
+  c <- ask
+  st <- get
   let inSeq = inManageSeq (rtState rt)
+      -- Whatever becomes of the body, the flag comes down and the loop is
+      -- told the sequence is over.  An asynchronous exception -- the worker
+      -- being killed -- would otherwise leave every later 'windows' believing
+      -- it is inside a sequence, and never asking for one.
+      finished = do
+        writeIORef inSeq False
+        atomically (modifyTVar' (shSeqDone (rtShared rt)) (max n))
   io (writeIORef inSeq True)
-  body `catchX` pure ()
-  io (writeIORef inSeq False)
-  io (atomically (modifyTVar' (shSeqDone (rtShared rt)) (max n)))
+  (_, st') <- io (runX c st (body `catchX` pure ()) `finally` finished)
+  put st'
   where
     body = do
       before <- gets windowset
@@ -56,10 +64,14 @@ manageSequence rt n acts = do
       adoptNewWindows rt
       mapM_ userCode acts
       applyLayout rt
-      -- 'windows' runs the log hook; a window opening or closing on its own,
-      -- a restore and a rescreen do not go through it.
+      -- The log hook, once: for every 'windows' the actions ran, which X11
+      -- ran it after each of, and for a set that changed on its own -- a
+      -- window opening or closing, a restore, a rescreen.
       after <- gets windowset
-      unless (sameWindows before after) $
+      let logDue = riverLogDue (rtState rt)
+      due <- io (readIORef logDue)
+      io (writeIORef logDue False)
+      when (due || not (sameWindows before after)) $
         asks (logHook . config) >>= userCodeDef ()
 
 -- | Whether two 'WindowSet's would produce the same status line.  Not 'Eq':
@@ -132,7 +144,11 @@ reapClosed rt = do
 
 -- | Nominate the output layer surfaces that name none go to: the one under
 -- the current screen, so a launcher opens where the work is.  Matched by
--- position, the only link between a 'W.Screen' and its output.
+-- position, the only link between a 'W.Screen' and its output: the output
+-- whose area contains the screen's origin.  Containment rather than
+-- equality, because the screen rectangle is the layer shell's usable area
+-- when there is one, and a bar on the left or top edge moves its origin off
+-- the output's.
 nominateLayerOutput :: Runtime -> X ()
 nominateLayerOutput rt = forM_ (rtLayerShell rt) $ \_ -> do
   outs <- io (readIORef (riverOutputs (rtState rt)))
@@ -140,7 +156,11 @@ nominateLayerOutput rt = forM_ (rtLayerShell rt) $ \_ -> do
   let SD current = W.screenDetail (W.current ws)
       live = filter (not . roRemoved) (M.elems outs)
       onScreen o = let (x, y) = roPosition o
-                   in x == rect_x current && y == rect_y current
+                       (w, h) = roSize o
+                       cx = rect_x current
+                       cy = rect_y current
+                   in x <= cx && cx < x + fromIntegral w
+                   && y <= cy && cy < y + fromIntegral h
       chosen = case filter onScreen live of
         (o:_) -> Just o
         []    -> case sortOn roPosition live of

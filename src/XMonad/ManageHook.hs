@@ -53,7 +53,7 @@ import qualified Data.Map as M
 import XMonad.Core
 import XMonad.River.State (RiverState(..))
 import XMonad.River.Types
-import XMonad.Operations (floatLocation, reveal)
+import XMonad.Operations (floatLocation, isFixedSizeOrTransient, reveal)
 import qualified XMonad.StackSet as W
 
 -- | Lift an 'X' action to a 'Query'.
@@ -122,11 +122,18 @@ resource = appName
 className :: Query String
 className = maybe "" (maybe "" BC.unpack . rwAppId) <$> askWindow
 
--- | Return whether the window will be a floating window or not
+-- | Return whether the window will be a floating window or not.
+--
+-- Asked from a manage hook, before the window is in the set, so the answer
+-- is the one upstream's @manage@ would act on: a fixed-size or transient
+-- window floats.  A window already floating answers with that.
 willFloat :: Query Bool
 willFloat = do
     w <- ask
-    liftX $ withWindowSet $ \ws -> pure (M.member w (W.floating ws))
+    liftX $ do
+        floating <- withWindowSet $ \ws -> pure (M.member w (W.floating ws))
+        if floating then pure True
+            else withDisplay $ \d -> isFixedSizeOrTransient d w
 
 -- | Modify the 'WindowSet' with a pure function.
 doF :: (s -> s) -> Query (Endo s)
