@@ -33,9 +33,11 @@ module XMonad.River.Runtime
   , takeOps
   , emitNow
   , takeNowOps
+  , nowOpsPending
   ) where
 
 import Control.Concurrent (ThreadId, myThreadId)
+import Control.Concurrent.STM
 import Control.Monad (unless)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.IORef
@@ -111,12 +113,12 @@ bordersRef = unsafePerformIO (newIORef M.empty)
 -- non-sticky override under river would last until the next render sequence,
 -- which is to say no time at all.
 setBorderWidth :: Window -> Dimension -> IO ()
-setBorderWidth w n = modifyIORef' bordersRef $
-  M.alter (\o -> Just (Just n, maybe Nothing snd o)) w
+setBorderWidth w n = atomicModifyIORef' bordersRef $ \m ->
+  (M.alter (\o -> Just (Just n, maybe Nothing snd o)) w m, ())
 
 setBorderColor :: Window -> BorderColor -> IO ()
-setBorderColor w c = modifyIORef' bordersRef $
-  M.alter (\o -> Just (maybe Nothing fst o, Just c)) w
+setBorderColor w c = atomicModifyIORef' bordersRef $ \m ->
+  (M.alter (\o -> Just (maybe Nothing fst o, Just c)) w m, ())
 
 -- | What has been overridden for one window.  Total: no override is
 -- @(Nothing, Nothing)@.
@@ -129,7 +131,7 @@ lookupBorderOverride w = M.findWithDefault (Nothing, Nothing) w <$> readIORef bo
 -- left behind would reappear on an unrelated window as a border nobody asked
 -- for.
 forgetBorderOverride :: Window -> IO ()
-forgetBorderOverride w = modifyIORef' bordersRef (M.delete w)
+forgetBorderOverride w = atomicModifyIORef' bordersRef (\m -> (M.delete w m, ()))
 
 {-# NOINLINE submapGenRef #-}
 submapGenRef :: IORef Int
@@ -328,13 +330,18 @@ takeOps = atomicModifyIORef' opsRef (\ops -> ([], reverse ops))
 -- wait on a sequence that nothing is going to request.  The event loop drains
 -- these on every pass.
 {-# NOINLINE nowOpsRef #-}
-nowOpsRef :: IORef [Op]
-nowOpsRef = unsafePerformIO (newIORef [])
+nowOpsRef :: TVar [Op]
+nowOpsRef = unsafePerformIO (newTVarIO [])
 
--- | Ask for a request to go out on the event loop's next pass.
+-- | Ask for a request to go out on the event loop's next pass.  A 'TVar' so
+-- that the loop, which waits on it, wakes up.
 emitNow :: MonadIO m => Op -> m ()
-emitNow op = liftIO (atomicModifyIORef' nowOpsRef (\ops -> (op : ops, ())))
+emitNow op = liftIO (atomically (modifyTVar' nowOpsRef (op :)))
 
 -- | Take everything queued, oldest first, leaving none.
 takeNowOps :: IO [Op]
-takeNowOps = atomicModifyIORef' nowOpsRef (\ops -> ([], reverse ops))
+takeNowOps = atomically (stateTVar nowOpsRef (\ops -> (reverse ops, [])))
+
+-- | Retries until something is queued; for the loop's wait.
+nowOpsPending :: STM ()
+nowOpsPending = readTVar nowOpsRef >>= check . not . null

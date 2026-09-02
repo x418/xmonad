@@ -129,7 +129,8 @@ module XMonad.River (
 
 import Data.Bits ((.&.))
 import System.IO (hPutStrLn, stderr)
-import Data.IORef (atomicModifyIORef', modifyIORef', readIORef, writeIORef)
+import Control.Concurrent.STM (atomically, writeTVar)
+import Data.IORef (atomicWriteIORef, modifyIORef', readIORef)
 import Data.Maybe (fromMaybe, isJust)
 import Data.Word (Word32)
 import Control.Concurrent (forkIO, threadDelay)
@@ -172,7 +173,7 @@ postAction c = MB.post (riverMailbox (riverState c))
 manageDirty :: X ()
 manageDirty = do
   ref <- asks (riverDirty . riverState)
-  io (writeIORef ref True)
+  io (atomically (writeTVar ref True))
 
 -- | Run an action once the layout has been applied, rather than now.
 --
@@ -348,7 +349,7 @@ grabKeysUpDown keymap = do
     let entries = M.toList keymap
     -- The actions, in the order the loop will index them.  Written before the
     -- op, so the table is there by the time a binding can fire.
-    io $ writeIORef (riverExtraKeys (riverState conf)) (map snd entries)
+    io $ atomicWriteIORef (riverExtraKeys (riverState conf)) (map snd entries)
     emitOp (OpGrabKeys (map fst entries))
     manageDirty
 
@@ -356,7 +357,7 @@ grabKeysUpDown keymap = do
 ungrabKeys :: X ()
 ungrabKeys = do
     conf <- ask
-    io (writeIORef (riverExtraKeys (riverState conf)) [])
+    io (atomicWriteIORef (riverExtraKeys (riverState conf)) [])
     emitOp OpUngrabKeys
 
 -- | Keep a window above the ones the layout placed.
@@ -380,7 +381,7 @@ restackWindows ws = do
     ref <- asks (riverRestack . riverState)
     -- Stored bottom-to-top, because that is the order the render sequence
     -- walks; the argument is topmost-first, as X11's was.
-    io (writeIORef ref (reverse ws))
+    io (atomicWriteIORef ref (reverse ws))
     manageDirty
 
 -- | The window this one is a dialog for, if any.
@@ -526,7 +527,7 @@ whileModifiersHeld mods captures onKey onDone = do
           \watching; a hold-to-cycle action will act once and stop"
         onDone
       else do
-        io $ writeIORef (riverCapture (riverState conf)) $ Just InputCapture
+        io $ atomicWriteIORef (riverCapture (riverState conf)) $ Just InputCapture
             { icKeys       = captures
             , icOnKey      = \pressed i -> case drop i captures of
                 ((_, sym):_) -> onKey pressed sym
@@ -576,7 +577,7 @@ submapNextKey subKeys onUnbound = do
     -- Written before the op is emitted, so the slot is populated by the time
     -- the event loop can possibly report a key: arming happens when the op is
     -- drained, which is later than this and on another path.
-    io $ writeIORef (riverCapture (riverState conf)) $ Just InputCapture
+    io $ atomicWriteIORef (riverCapture (riverState conf)) $ Just InputCapture
         { icKeys       = keys'
         , icOnKey      = \_ i -> case drop i acts of
             (a:_) -> a

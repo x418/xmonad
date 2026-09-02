@@ -351,7 +351,6 @@ data RiverWindow = RiverWindow
   , rwSizeHints  :: !SizeHints
     -- ^ From @river_window_v1.dimensions_hint@.  A zero or negative bound
     -- means the window did not state one, and becomes 'Nothing'.
-  , rwNew        :: !Bool
   , rwClosed     :: !Bool
   , rwFullscreen :: !Bool
     -- ^ The window has asked to be fullscreen and has not asked to stop.

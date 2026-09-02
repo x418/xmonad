@@ -82,7 +82,8 @@ import XMonad.River.Protocol.WindowManagement
 import qualified XMonad.StackSet as W
 
 import Control.Arrow        (second)
-import Data.IORef (readIORef, writeIORef)
+import Control.Concurrent.STM (atomically, writeTVar)
+import Data.IORef (atomicWriteIORef, readIORef, writeIORef)
 import Data.List            (find, nub, sortOn)
 import Data.Maybe
 import Data.Monoid          (Any(..))
@@ -180,7 +181,7 @@ windows f = do
 requestManageSequence :: X ()
 requestManageSequence = do
     ref <- asks (riverDirty . riverState)
-    io (writeIORef ref True)
+    io (atomically (writeTVar ref True))
 
 -- | Re-run the layout.  Under river this is a request for another manage
 -- sequence; the layout runs there.
@@ -556,7 +557,7 @@ restart cmd resume = do
     ref <- asks (riverRestart . riverState)
     broadcastMessage ReleaseResources
     when resume writeStateToFile
-    io (writeIORef ref (Just (cmd, [])))
+    io (atomicWriteIORef ref (Just (cmd, [])))
     -- Queued for the event loop, which owns the connection.  Ordering holds:
     -- this action finishes before the loop's next pass, so the state file is
     -- written before river is asked to let go.
@@ -714,7 +715,7 @@ mouseDrag f done = do
         Just _ -> return () -- already dragging
         Nothing -> do
             seats <- io . readIORef =<< asks (riverSeats . riverState)
-            case M.elems seats of
+            case filter (not . rsRemoved) (M.elems seats) of
                 [] -> return ()
                 (s:_) -> do
                     origin <- asks (riverDragOrigin . riverState)

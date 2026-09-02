@@ -72,11 +72,6 @@ data Plan = Plan
     -- @river_layer_shell_output_v1@.  Held as the choice rather than as a
     -- request because the request is only reissued when the choice changes,
     -- and what has been sent is the transmitting side's business.
-  , planMustLand   :: !Bool
-    -- ^ Whether this plan is only correct if it reaches the compositor in the
-    -- sequence that provoked it.  Arming a submap is the case: it has to be
-    -- atomic with the key press that opened it, or the config's own bindings
-    -- are still live when the next key arrives.
   }
 
 -- | The plan of a window manager that has decided nothing yet.
@@ -90,7 +85,6 @@ emptyPlan = Plan
   , planRaised     = []
   , planFocus      = ClearFocus
   , planLayerDefault = Nothing
-  , planMustLand   = False
   }
 
 -- | Effects that happen once and are then forgotten.
@@ -105,6 +99,8 @@ data Op
     -- ^ @river_seat_v1.pointer_warp@ on a named seat.
   | OpPointerOpStart !ObjectId
     -- ^ @river_seat_v1.op_start_pointer@, which begins an interactive drag.
+  | OpPointerOpEnd !ObjectId
+    -- ^ @river_seat_v1.op_end@.  Manage-sequence only, like the start.
   | OpUseDecorations !Window !Bool
     -- ^ @use_ssd@ when 'True', @use_csd@ when 'False'.
   | OpSetPosition !Window !Position !Position

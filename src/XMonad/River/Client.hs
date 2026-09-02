@@ -631,11 +631,10 @@ loop spec cl inbox = go
         -- nothing comes back to wake us and the prompt hangs unpainted.
         flush (clConn cl)
         sockFd <- connectionFd (clConn cl)
-        r <- MB.waitEither sockFd (MB.mailboxFd inbox)
+        r <- MB.waitSocketOr sockFd (MB.awaitMail inbox)
         case r of
           Left () -> dispatch (clConn cl)
           Right () -> do
-            MB.clearWakeups inbox
             reqs <- MB.drain inbox
             forM_ reqs $ \case
               Redraw -> redraw spec cl

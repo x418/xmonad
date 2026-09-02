@@ -24,7 +24,6 @@ module XMonad.River.Surface
   , newSurface
   , destroySurface
   , withSurfaceBuffer
-  , moveSurface
   , hideSurface
   ) where
 
@@ -34,7 +33,6 @@ import XMonad.River.Buffer
 import XMonad.River.Connection (Connection)
 import XMonad.River.Protocol.Core
 import XMonad.River.Protocol.WindowManagement
-import XMonad.River.Types (Position)
 import XMonad.River.Wire (ObjectId, nullObject)
 
 -- | A window-manager-owned surface and its current backing store.
@@ -61,10 +59,6 @@ newSurface conn compositor manager = do
   node <- riverShellSurfaceV1GetNode conn shell
   ref <- newIORef Nothing
   pure Surface { surfWl = wl, surfShell = shell, surfNode = node, surfBuffer = ref }
-
--- | Position the surface, in the compositor's global coordinate space.
-moveSurface :: Connection -> Surface -> Position -> Position -> IO ()
-moveSurface conn s x y = riverNodeV1SetPosition conn (surfNode s) x y
 
 -- | Draw into the surface at the given size, then present it.
 --

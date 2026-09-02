@@ -25,6 +25,7 @@
 
 module XMonad.River.State (RiverState(..), InputCapture(..), updatePlacement) where
 
+import Control.Concurrent.STM (TVar)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.IORef (IORef, modifyIORef')
 import qualified Data.Map as M
@@ -82,9 +83,10 @@ data RiverState m = RiverState
     , riverWindows  :: !(IORef (M.Map ObjectId RiverWindow))
     , riverOutputs  :: !(IORef (M.Map ObjectId RiverOutput))
     , riverSeats    :: !(IORef (M.Map ObjectId RiverSeat))
-    , riverDirty    :: !(IORef Bool)
+    , riverDirty    :: !(TVar Bool)
       -- ^ set when state changed outside a manage sequence, so that one must
-      -- be requested with @manage_dirty@
+      -- be requested with @manage_dirty@.  A 'TVar' because the event loop
+      -- waits on it: a write here wakes the loop.
     , inManageSeq   :: !(IORef Bool)
       -- ^ guards requests river only permits during a manage sequence
     , riverRestart  :: !(IORef (Maybe (FilePath, [String])))
@@ -98,13 +100,6 @@ data RiverState m = RiverState
       -- background thread post a client message to the root window; there is
       -- no such relay here, so the channel is ours.  See
       -- "XMonad.River.Mailbox".
-    , riverKeyBindings :: !(IORef (M.Map ObjectId (m ())))
-      -- ^ The @river_xkb_binding_v1@ object created for each of the config's
-      -- key bindings, and what it runs.  Shared with the event loop rather
-      -- than private to it because a submap has to disable the whole set for
-      -- as long as it is open: river leaves it to compositor policy which of
-      -- several bindings matching one physical key gets the press, so two
-      -- live bindings for the same key is undefined rather than layered.
     , riverPlacements :: !(IORef [(Window, Rectangle)])
       -- ^ Where the last layout run put each window, in river's global
       -- coordinate space.  This is the only record of a window's position:
@@ -131,17 +126,14 @@ data RiverState m = RiverState
       -- placed are dropped as they go.
     , riverOverlays :: !(IORef [ObjectId])
       -- ^ Nodes of the window-manager surfaces that are currently mapped,
-      -- bottom-to-top.
-      --
-      -- These are @river_shell_surface_v1@ nodes rather than windows --
-      -- decorations, and EasyMotion's chord overlays -- and the render
-      -- sequence would otherwise never place them at all: it stacks from the
-      -- layout, whose list holds only windows.  Since it restates that order
-      -- on every frame, a surface drawn over a window is buried by it a frame
-      -- later, which looks like the surface never being drawn.
-      --
-      -- Kept here rather than read from the drawable registry because that
-      -- registry lives in xmonad-contrib, which this package cannot import.
+      -- bottom-to-top.  These are @river_shell_surface_v1@ nodes --
+      -- decorations, EasyMotion's chord overlays -- and the render sequence
+      -- stacks them above the windows.  Written by xmonad-contrib, whose
+      -- drawable registry this package cannot import.
+    , riverOverlayPos :: !(IORef (M.Map ObjectId (Position, Position)))
+      -- ^ Where each of those nodes goes.  @river_node_v1.set_position@ is
+      -- rendering state and legal only inside a sequence, so the surface's
+      -- owner records the position here and the render sequence applies it.
     , riverCapture :: !(IORef (Maybe (InputCapture m)))
       -- ^ The interaction currently holding the keyboard, or 'Nothing'.
       -- Written by 'XMonad.River.submapNextKey' and

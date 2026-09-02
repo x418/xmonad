@@ -10,6 +10,10 @@
 -- dispatched to per-object listeners. It differs in that listeners are plain
 -- Haskell closures stored in an 'IntMap' rather than vtables, and that a
 -- decode failure is an exception rather than an abort.
+--
+-- Threads: requests may be queued and listeners set from any thread -- the
+-- window manager's worker creates surfaces for decorations -- but reading,
+-- dispatching and flushing belong to the one thread that owns the connection.
 module XMonad.River.Connection
   ( -- * Connection
     Connection
@@ -185,7 +189,7 @@ displayListener conn opcode body = case opcode of
   1 -> do
     i <- decode getWord32 body
     clearListener conn (ObjectId i)
-    modifyIORef' (connFreeIds conn) (i :)
+    atomicModifyIORef' (connFreeIds conn) (\is -> (i : is, ()))
   _ -> pure ()
 
 --------------------------------------------------------------------------------
@@ -194,15 +198,12 @@ displayListener conn opcode body = case opcode of
 -- | Allocate a client-side object id.
 newObject :: Connection -> IO ObjectId
 newObject conn = do
-  free <- readIORef (connFreeIds conn)
-  case free of
-    (i:rest) -> do
-      writeIORef (connFreeIds conn) rest
-      pure (ObjectId i)
-    [] -> do
-      i <- readIORef (connNextId conn)
-      writeIORef (connNextId conn) (i + 1)
-      pure (ObjectId i)
+  reused <- atomicModifyIORef' (connFreeIds conn) $ \case
+    (i:rest) -> (rest, Just i)
+    []       -> ([], Nothing)
+  case reused of
+    Just i  -> pure (ObjectId i)
+    Nothing -> ObjectId <$> atomicModifyIORef' (connNextId conn) (\i -> (i + 1, i))
 
 -- | Drop a destroyed object's listener. The id itself is only reusable once
 -- the server confirms with @delete_id@, so it is not returned to the free list
@@ -213,7 +214,7 @@ freeObject = clearListener
 -- | Queue a request. Nothing is written to the socket until 'flush'.
 request :: Connection -> ObjectId -> Word16 -> Encoded -> IO ()
 request conn oid opcode args =
-  modifyIORef' (connOut conn) (<> encodeMessage oid opcode args)
+  atomicModifyIORef' (connOut conn) (\o -> (o <> encodeMessage oid opcode args, ()))
 
 -- | Queue a request that carries file descriptors.
 --
@@ -230,8 +231,8 @@ request conn oid opcode args =
 -- descriptor.
 requestWithFds :: Connection -> ObjectId -> Word16 -> Encoded -> [Fd] -> IO ()
 requestWithFds conn oid opcode args fds = do
-  modifyIORef' (connOut conn) (<> encodeMessage oid opcode args)
-  modifyIORef' (connOutFds conn) (++ fds)
+  atomicModifyIORef' (connOut conn) (\o -> (o <> encodeMessage oid opcode args, ()))
+  atomicModifyIORef' (connOutFds conn) (\fs -> (fs ++ fds, ()))
 
 -- | Take the next descriptor delivered alongside an event.
 --
@@ -258,11 +259,11 @@ takeFdOrFail conn argName = takeFd conn >>= \case
 
 setListener :: Connection -> ObjectId -> Listener -> IO ()
 setListener conn (ObjectId i) l =
-  modifyIORef' (connListeners conn) (IM.insert (fromIntegral i) l)
+  atomicModifyIORef' (connListeners conn) (\ls -> (IM.insert (fromIntegral i) l ls, ()))
 
 clearListener :: Connection -> ObjectId -> IO ()
 clearListener conn (ObjectId i) =
-  modifyIORef' (connListeners conn) (IM.delete (fromIntegral i))
+  atomicModifyIORef' (connListeners conn) (\ls -> (IM.delete (fromIntegral i) ls, ()))
 
 --------------------------------------------------------------------------------
 -- Event loop
@@ -274,8 +275,9 @@ clearListener conn (ObjectId i) =
 -- byte is copied twice on its way out.
 flush :: Connection -> IO ()
 flush conn = do
-  pending <- readIORef (connOut conn)
-  writeIORef (connOut conn) mempty
+  -- Both taken atomically, and the bytes before the descriptors, so a request
+  -- with descriptors queued between the two cannot ship its fds first.
+  pending <- atomicModifyIORef' (connOut conn) $ \p -> (mempty, p)
   fds <- atomicModifyIORef' (connOutFds conn) $ \fs -> ([], fs)
   let bs = runEncoded pending
   unless (BS.null bs && null fds) $ sendAllWithFds conn bs fds
