@@ -1,20 +1,8 @@
 -- | What the window manager decided, as a value.
 --
--- The manage and render sequences used to compute and transmit in one pass:
--- 'XMonad.River.WM.applyLayout' ran the layout and sent @propose_dimensions@
--- from inside the same @X@ action.  That works only while the thing computing
--- and the thing holding the connection are the same thread, and they are about
--- to stop being -- see @DESIGN.md@.  So the decision is separated from its
--- delivery: everything above computes a 'Plan', and one place below transmits
--- it.
---
--- The shape follows river's own.  Most of what a sequence sends is a /total
--- restatement/ -- river keeps no memory of rendering state, so every frame
--- states position, borders, stacking and visibility again from scratch -- and
--- a restatement is naturally a value that may be re-sent verbatim.  A few
--- requests are not restatements but one-shot effects, and re-sending one of
--- those is a bug rather than a no-op: @close@ twice kills a second window.
--- Hence 'Plan' and 'Op' rather than one list of things to do.
+-- The worker computes a 'Plan' and the loop transmits it.  Most of what a
+-- sequence sends restates state and is a value that may be re-sent; a few
+-- requests are one-shot effects ('Op') and must go exactly once.
 module XMonad.River.Plan
   ( Plan(..)
   , emptyPlan
@@ -36,11 +24,8 @@ data FocusTarget
   | ClearFocus
   deriving (Eq, Show)
 
--- | Everything restated on each sequence.
---
--- Safe to transmit again unchanged, which is what lets the loop answer a
--- @manage_start@ it has nothing new for: re-affirming the current plan is a
--- valid, cheap, consistent sequence.
+-- | Everything restated on each sequence: safe to transmit again unchanged,
+-- which is what lets the loop answer a @manage_start@ it has nothing new for.
 data Plan = Plan
   { planSerial     :: !Int
     -- ^ Monotonic.  Lets whoever published a plan tell when it has landed.
@@ -87,11 +72,8 @@ emptyPlan = Plan
   , planLayerDefault = Nothing
   }
 
--- | Effects that happen once and are then forgotten.
---
--- Everything here is a request river treats as an event rather than as state,
--- so it must be delivered exactly once.  They are drained as they are
--- transmitted, where a 'Plan' is kept.
+-- | Effects that happen once and are then forgotten.  Drained as they are
+-- transmitted: @close@ twice kills a second window.
 data Op
   = OpClose !Window
     -- ^ @river_window_v1.close@, from 'XMonad.Operations.kill'.

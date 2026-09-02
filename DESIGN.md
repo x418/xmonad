@@ -1,245 +1,140 @@
 # Design
 
-[river](https://github.com/riverwm/river) is a Wayland compositor which
-communicates with a separate window management process. This allows for a port of XMonad to Wayland without dealing with compositing. This architecture also allows for recompile hot-swapping.
+[river](https://github.com/riverwm/river) is a Wayland compositor that hands
+window management policy to a separate process over
+`river-window-management-v1`.  That is what lets xmonad run on Wayland
+without compositing, and what lets `M-q` swap the window manager under live
+clients.
 
 ## Decisions
 
-**No libwayland.** Instead, protocol bindings are generated from XML. They use `store-core` which provides fast serialization. The one thing that needs C is fd passing.
+**No libwayland.**  Bindings are generated from the protocol XML
+(`util/generate-protocol.hs`) over `store-core`.  The one thing that needs C
+is descriptor passing (`src/cbits/wl-fd.c`).
 
-**API is a strict subset of upstream xmonad.** The goal is to be able to run
-xmonad configurations with minimal modification. If something cannot be
-faithfully ported, it is not exported. River-only APIs are exported from
-`XMonad.River`.
+**The API is a strict subset of upstream xmonad's.**  If something cannot be
+faithfully ported it is not exported, so a config fails at the unportable
+call, at compile time.  `tests/api/check-subset.sh` enforces it; river-only
+API lives in `XMonad.River`.
 
-**Window changes are deferred.** A keybinding action can make changes to window
-state. These changes do not take effect immediately - instead they are deferred.
+**Window management follows river's two sequences.**  Window management
+state (dimensions, focus, bindings) may change only inside a manage sequence;
+rendering state (position, stacking, borders, visibility) is applied at
+`render_finish`.  So `windows` does not lay out: the layout runs once at the
+end of the manage sequence, after every queued action, and produces a `Plan`.
 
-**Two threads: protocol and worker thread.** River sometimes blocks event
-handling while waiting for the window management process. If responses were
-blocked on user code, this could cause a freeze of all event handling (keyboard
-and pointer events in all windows). To address this, a protocol thread ensures
-that responses are always sent promptly. A separate worker thread runs user
-code, owns `XState`, and communicates with the protocol thread.
+**Two threads.**  The *loop* (the main thread) owns the connection and never
+runs user code, so river is always answered.  The *worker* owns `XState` and
+runs every `X` action -- bindings, hooks, layouts -- serialised, in the order
+asked.  River holds input for the seat until a sequence is answered, so a
+blocked action costs window management, never the session.
 
-**`xmonad --restart` handled via a unix socket.** Before, X11 messages were used
-for restart. Because it is a socket rather than a signal, the request can be
-answered. Refusing to restart -- the successor's executable is gone, the worker
-had to be aborted -- reaches the terminal that asked, with an exit status,
-instead of only the session log.
+**Restart over a unix socket** (`XMonad.River.Control`): the request can be
+refused with a reason, and its listener has a thread of its own so it can
+interrupt a wedged loop.
 
-The listener has a thread of its own rather than an fd in the event loop's wait
-set. The request most worth delivering is the one sent to a window manager that
-has stopped reading, so a listener sharing the loop's fate could not serve it;
-on its own thread it can still interrupt a wedged loop, which is what keeps
-`xmonad --restart` an escape hatch. The listening descriptor is close-on-exec,
-without which the successor of a restart inherits it, concludes another window
-manager owns the path, and quietly accepts connections nobody reads.
+## Architecture
 
-**Restart hands over with a bounded grace period.** A restart request arrives on
-the protocol thread, which asks the worker to finish its current action, waits a
-little, and only then tears down and writes state.
+### Ownership
 
-## Architecture: a worker thread and a published plan
+One writer per field.  Where two threads meet, the mechanism says how.
 
-Who owns what.
-
-- A **worker thread** owns `XState` and runs *all* user code — binding actions,
-  manage hooks, `runLayout`, window adoption — serialized, in upstream's order.
-- The **loop** owns the connection and nothing else. It never runs user code.
-
-Loop → worker, the compositor's view: the window, output and seat maps. Written
-only by the loop, read by the worker, each behind its own `IORef` so a read is a
-pointer load and never a torn one. The worker's view is therefore always
-slightly stale, which is why transmitting filters against the live maps rather
-than trusting the plan.
-
-Worker → loop, what the compositor should be told. It splits in two, and the
-split is the crux of the design: most of what a sequence sends is a *total
-restatement* and is therefore a value, but a few requests are one-shot effects
-that must be delivered exactly once. Re-sending a restatement is free;
-re-sending a `close` kills a second window.
-
-```haskell
--- Restated in full on every sequence.  Safe to re-transmit verbatim.
-data Plan = Plan
-  { planSerial     :: !Int                       -- monotonic; lets the worker
-                                                 -- see when a plan has landed
-  , planPlacements :: ![(Window, Rectangle)]     -- bottom-to-top, floats last
-  , planBorders    :: !(M.Map Window (Dimension, RGBA))
-  , planVisible    :: !(S.Set Window)
-  , planRaised     :: ![Window]
-  , planFocus      :: !FocusTarget               -- FocusWindow w | ClearFocus
-  , planLayerDefault :: !(Maybe (ObjectId, Maybe ObjectId))
-  , planMustLand   :: !Bool                      -- see below
-  }
-
--- Delivered once, then dropped.
-data Op
-  = OpClose Window
-  | OpWarpPointer Seat Position
-  | OpPointerOpStart Seat PointerOp | OpPointerOpEnd Seat
-  | OpSetPosition Window Position Position
-  | OpProposeDimensions Window Dimension Dimension
-  | OpUseDecorations Window Bool
-  | OpCaptureInput [(KeyMask, KeySym)] KeyMask Bool Int
-  | OpGrabKeys [(KeyMask, KeySym)] | OpUngrabKeys
+```
+riverWindows / riverOutputs / riverSeats   loop writes, worker reads   IORef
+riverKeyBindings, rtPointerBind, rtArmed,
+  rtGrabbed, rtDisarm, rtHovered, rtPending,
+  rtSeqNo, rtSent, rtAsked, rtLast*         loop only                   IORef
+riverCapture, riverExtraKeys, riverOverlays,
+  riverOverlayPos, rtLayoutMoved            worker writes, loop reads   atomicWriteIORef / atomicModifyIORef'
+riverPlacements, riverRestack, riverBorders,
+  riverAfterLayout, riverDragOrigin,
+  riverGeometry, riverSizeHints, rtAdopted  worker only                 IORef
+riverDirty                                 worker sets, loop swaps     TVar Bool   (wakes the loop)
+riverMailbox, rtJobs                       any thread posts            TVar [a]    (wakes the loop)
+shPlan, shSeqDone                          worker publishes            TVar        (wakes the loop)
+riverNowOps                                worker queues               TVar [Op]   (wakes the loop)
+riverOps                                   worker queues, loop drains  atomic IORef, inside a sequence
 ```
 
-A second, smaller queue carries what needs no sequence and must not wait for
-one — `exit_session`, `stop`, `set_xcursor_theme`. Those are drained on every
-pass of the loop, because waiting for a sequence would mean waiting for
-something nothing is going to ask for.
+The `Connection`'s request path (`request`, `newObject`, `setListener`) is
+atomic, so the worker may create surfaces for decorations; reading,
+dispatching and flushing are the loop's alone.  The one sequence-bound
+request contrib made from the worker, `set_position` on a shell surface, is
+recorded in `riverOverlayPos` and applied by the render sequence.
 
-The plan is replaced; the ops are drained. Re-sending a plan is free, and
-re-sending an op is a bug.
+### The loop
 
-**Ops come before the thread split, not after.** `Connection` buffers requests
-in `IORef`s and is not thread-safe, so a worker thread may not touch it at all
-— and until `kill`, `warpPointer` and the interactive drags stop issuing their
-own requests, user code touches it constantly. Routing them through the queue
-is what makes the worker possible, so it has to land first.
+One STM transaction waits on the socket (`threadWaitReadSTM`) and on
+everything else that can wake it: posted actions, loop jobs, the dirty flag,
+a now-op, a plan that landed late.  Each pass drains the mailboxes, sends
+`manage_dirty` if anything asked, sends the now-ops, flushes, waits.
 
-Nothing reachable from `X` issues a request any more. Each case was split by
-which thread the work belongs to: the window, output and seat handlers do their
-protocol work and their bookkeeping on the loop and hand back only the hook a
-config might have installed; `reapClosed` keeps the `WindowSet` half while
-`reapObjects` destroys the objects; the layer-surface default became a field of
-the plan; `requestManageSequence` sets a flag the loop drains rather than
-sending `manage_dirty` itself.
+### A manage sequence
 
-**The worker publishes at every `windows`.** Upstream's `windows` applies
-immediately — it issues the X requests and the screen updates — so an action
-that lays out, works, and lays out again shows the first result straight away.
-Matching that means one publish per `windows` call rather than one when the
-action returns. Aborting an action therefore leaves exactly what was already on
-screen: nothing un-happens. This is not atomic, and an action needing two
-`windows` calls for one logical change can be interrupted between them — but an
-exception in that same action does the same under X11.
+1. The loop numbers the sequence, drains the pending binding actions and
+   hands `manageSequence n acts` to the worker.
+2. The worker: restore a predecessor's state (first sequence only), drop what
+   river closed, reconcile screens with outputs, adopt new windows through
+   the manage hook, run the actions, lay out, publish the `Plan`, mark `n`
+   done.
+3. The loop waits up to `planGraceMicros` for *that* sequence number.  If it
+   landed, closed objects are destroyed.  Either way the plan in hand is
+   transmitted -- bindings for new seats, the one-shot ops, dimensions,
+   focus -- and `manage_finish` is sent.
+4. A plan that lands after its sequence was answered wakes the loop, which
+   sends one `manage_dirty` for it.  Nothing is lost; it is one sequence late.
 
-`manage_start` then means "transmit the current plan, `manage_finish`". If the
-worker has published nothing new, the loop re-affirms the plan it already has —
-a valid, cheap, consistent sequence. Response time is bounded by serializing a
-value and writing a socket, with no user code in the path, so a blocked action
-degrades to exactly upstream's failure mode: window management stops until it
-returns, and the session keeps running.
+The render sequence transmits the plan's rendering half.  Both transmissions
+send only what differs from the last one sent -- river keeps rendering state
+between frames -- and check every reference against the objects river still
+has, since the plan may be older than the maps.
 
-Four things this forces:
+### Plan and Op
 
-- **Liveness filtering is the loop's job, at transmit time.** The worker's
-  `World` is always slightly stale, so a plan can name a window river has since
-  closed. The `M.member win known` guards that `applyLayout` and
-  `renderSequence` do today do not disappear — they move, and they must cover
-  every reference: placements, borders, visible, raised, focus, and each op. One
-  missed reference is a protocol error, which disconnects the window manager.
-- **Compositor events split.** The bookkeeping is the loop's; only the hook a
-  config installed goes to the worker. A window that appears while an action is
-  blocked is recorded at once but not adopted into the `WindowSet` until the
-  action returns — which is precisely what X11 does.
-- **The manage-hook ordering guarantee becomes load-bearing.** A window absent
-  from the current plan must stay hidden until a plan includes it, or it flashes
-  on screen unmanaged.
-- **Input routing is loop state.** Anything that has to be coherent with a key
-  press — which bindings are enabled, whether a submap is open — belongs to the
-  loop rather than the worker. `submapNextKey` becomes an op naming the key set;
-  the loop arms the bindings, asks for the next unbound key, holds the deadline,
-  and posts back which key was chosen, leaving the worker only the action to
-  run. `grabKeys` and `whileModifiersHeld` have the identical shape and get the
-  identical treatment. Without this the `ate_unbound_key` callback would be
-  reading a slot the worker is concurrently writing.
+Most of what a sequence sends is a restatement and is a value (`Plan`):
+placements, borders, visibility, stacking, focus.  A few requests are
+one-shot effects -- `close`, `pointer_warp`, `set_capabilities` -- and are
+`Op`s, drained as they are sent.  Re-sending a plan is free; re-sending an op
+is a bug.
 
-**Latency, and a bounded wait.** A plan costs every binding an extra round trip:
-today a binding's effect lands in the sequence it triggered, afterwards it lands
-one sequence later. The mitigation is for the loop to wait a bounded few
-milliseconds for a publication before finishing the sequence, falling back to
-re-affirming. Fast actions land immediately; slow ones cannot wedge anything.
-This is not the timeout that was tried and rejected — that one bounded the
-damage of a block that still happened, and its bound was on how long a person
-thought. This one bounds a wait for a computation that either finished or did
-not, and blocking is impossible either way.
+### Input routing
 
-**A plan may require its sequence.** Some publications are only correct if they
-land in the sequence that provoked them. Arming a submap is the case: it has to
-be atomic with the key press that opened it, or the config's own bindings are
-still live when the next key arrives. Such a plan is marked, and the loop waits
-longer for it than the ordinary few milliseconds. The wait is still bounded —
-an unbounded one is the freeze this design exists to remove — so it is a strong
-preference and not a guarantee.
+Anything that must be coherent with a key press is loop state.  A submap or
+a hold-to-cycle is an `InputCapture` the config writes and the loop arms
+inside the sequence that carried the key press, atomically with it; the loop
+reports which key fired by index and the config runs the action.  A capture
+ends on its key, an unbound key, the watched modifier's release, or a
+deadline, whichever claims the slot first.  `Ctrl-Alt-Shift-Escape` is bound
+outside the config and cannot be disabled; it closes every prompt and
+re-enables every binding.
 
-**What it buys beyond responsiveness:** a wedged action becomes killable.
-`throwTo` the worker and the loop never notices, which generalizes
-`closeAllPrompts` from "only helps if what is stuck is a prompt" into a real
-escape hatch.
+### Prompts
 
-**What does not change:** the exported API. Actions still run to completion,
-serialized, in order; a blocking helper can keep blocking and keep returning its
-`String`.
+A prompt is an ordinary Wayland client on a second connection and its own
+thread (`XMonad.River.Client`): a layer surface with exclusive keyboard
+interactivity, which is the only way to get real key events, dead keys and
+compose.  Its teardown runs whatever happens, because a surface holding the
+keyboard with nobody reading it is a session with no keyboard.
 
-## Known issues and open questions
+## Open questions
 
-FIXME: address these
+- **Submap teardown is a sequence late.**  `enable`/`disable` are legal only
+  inside a sequence and a submap ends on a key press outside one, so the
+  config's bindings come back at the next sequence.
+- **A submap can arm late.**  If the worker is behind, the sequence goes out
+  without the submap and the globals are live for a round trip.  A real
+  guarantee needs submap prefixes declared to the loop ahead of time, which
+  is a contrib change.
+- **The state file is written by the worker.**  A wedged worker degrades a
+  restart to the last committed state (`restartGraceMicros`).  The loop could
+  write it from the last published plan, at the cost of `ReleaseResources`
+  becoming best-effort.
+- **A dead worker.**  `userCode` catches per action; a worker that died would
+  leave a loop that answers river and does nothing.  It needs a supervisor.
+- **Compositor-side fullscreen.**  `river_window_v1.fullscreen` is not used;
+  fullscreen is the layout's, with `inform_fullscreen` telling the client.
 
-**Submap teardown cannot happen when the key fires.** `enable` and `disable`
-are manage-sequence-only and a submap key fires outside one, so restoring the
-config's bindings is always deferred to the next sequence — today through the
-mailbox, and in the loop-owned version through a pending-teardown slot drained
-at the next transmit. Worth stating because the arming side is the opposite: it
-has to be atomic with the press, so the two halves of a submap live in
-different sequences by construction.
+## Assumptions about river
 
-**Nothing tests submaps.** `headless-prompt.sh` covers prompts, not this, and
-the failure mode is a session in which every binding is disabled. A test that
-arms a submap, presses a key and asserts the globals come back belongs
-alongside the change rather than after it.
-
-**A submap can still arm late.** Loop-owned input routing removes the data race,
-but not the delay: if the worker is behind an action that overran its wait, the
-sequence goes out without the submap and the config's globals are live for a
-round trip — up to about 100ms when a client is slow to ack a configure, which
-is inside the speed at which people type a chord. Pressing the second key there
-runs its global binding instead. A real guarantee needs the loop to know the key
-set *before* the worker runs, which means declaring submap prefixes rather than
-discovering them inside an opaque `X ()`; that is a change on the contrib side,
-recorded here so it is not rediscovered.
-
-**Where the state file gets written from is unsettled.** Publishing at every
-`windows` means the loop always holds a snapshot it could serialize itself, so a
-restart need not wait on the worker at all: write from the last publish and
-exec. That would take the worker off the restart path entirely, at the cost of
-`broadcastMessage ReleaseResources`, which is user code and would become
-best-effort — skipped when the worker is wedged. Cheaper here than under X11,
-where there were server resources to hand back, but still a behaviour change.
-The alternative is to keep writing from the worker and accept that a wedged
-worker degrades the restart.
-
-**How long the grace period should be is unsettled**, both the ordinary one and
-the longer wait for a plan that requires its sequence. Too short and a submap
-arms late; too long and every restart feels slow.
-
-**Cooperative cancellation is not an option, and this is why.** Setting a flag
-for the worker to check cannot work for the case that matters: a blocked
-`readProcess` never returns to check anything. So aborting is `throwTo` or
-nothing. It is still worth throwing before an exec rather than just exec'ing,
-so that `bracket` and `finally` in user code get to run — with a bound on the
-unwinding, since a `finally` that blocks must not hold a restart hostage.
-
-**A dead worker would be worse than a crash.** Today `userCode` catches per
-action. A worker that dies under a live loop leaves a window manager that still
-answers sequences but responds to nothing, which looks alive. It needs a
-supervisor that restarts it from published state or exits so river releases the
-session.
-
-## Assumptions
-
-**Two protocol facts are river's rather than ours.** That
-`river_window_v1.identifier` is stable across a restart, and that it arrives
-before the first `manage_start`, are both properties of the compositor.
-`tests/headless-restart.sh` checks them, because a river upgrade could change
-either without anything here failing to compile.
-
-## Upstream River issues
-
-**Should river mediate state handover?** Passing window placement to a successor
-through a state file works because both processes share a filesystem. A channel
-across `stop` → `finished` → `exec` would not depend on that. Not blocking
-anything; still the tidier design.
+`river_window_v1.identifier` is stable across a restart and arrives before
+the first `manage_start`.  `tests/headless-restart.sh` checks both.

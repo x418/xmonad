@@ -3,23 +3,11 @@
 -- Module      :  XMonad.River.State
 -- License     :  BSD3-style (see LICENSE)
 --
--- The compositor-connection state the window manager carries around.
---
--- Upstream's 'XMonad.Core.XConf' needs three things from X11: the display, the
--- root window, and two border pixels.  River needs rather more than that --
--- the bound globals, the accumulated view of windows, outputs and seats, and a
--- handful of 'Data.IORef.IORef's that the event loop and the 'XMonad.Core.X'
--- monad both reach.  Holding those as seventeen fields on @XConf@ made that
--- record four times the size of upstream's, which is the one place an upstream
--- change to @XConf@ would be certain to conflict.
---
--- So they live here instead, behind a single @riverState@ field.  Nothing is
--- hidden by the move: the field names are unchanged, and a call site says
--- @asks (riverWindows . riverState)@ where it used to say @asks riverWindows@.
---
--- The record is parameterised over the monad because several fields hold
--- actions, and 'XMonad.Core.X' is defined in "XMonad.Core", which imports this
--- module.  "XMonad.Core" instantiates it as @RiverState X@.
+-- What the backend keeps beyond 'XMonad.Core.XState': the bound globals,
+-- the compositor's view of windows, outputs and seats, and the queues the
+-- loop and the worker meet at.  One field on @XConf@ rather than seventeen,
+-- so an upstream change to @XConf@ merges.  Parameterised over the monad
+-- because "XMonad.Core" instantiates it as @RiverState X@.
 --
 -----------------------------------------------------------------------------
 
@@ -45,22 +33,11 @@ import XMonad.River.Plan (Op)
 import XMonad.River.Types (BorderColor, Dimension, KeyMask, KeySym, Position, Rectangle, RiverOutput, RiverSeat, RiverWindow, SizeHints, Window, WindowAttributes)
 import XMonad.River.Wire (ObjectId)
 
--- | Everything the window manager knows about its connection to river.
--- | An interaction that has taken the keyboard for a while.
---
--- A submap and a hold-to-cycle -- @M-Tab@ -- are the same thing at this level:
--- both disable every one of the window manager's bindings, install a set of
--- their own, and end.  They differ only in what ends them, which is what
--- 'icOneShot' and 'icMods' say.  One type rather than two because they are
--- also /mutually exclusive/: each disables the whole binding set, so two open
--- at once would have one teardown re-enabling bindings the other still thinks
--- it has disabled.  Sharing a slot makes that exclusion structural rather than
--- something to remember.
---
--- Held as data rather than as actions to run, because arming and tearing down
--- are the event loop's work while the actions are the config's: the loop
--- reports which key fired by index, and this turns that index back into
--- something to run.  See @DESIGN.md@ on input routing being loop state.
+-- | An interaction that has taken the keyboard: a submap or a hold-to-cycle.
+-- Both disable the config's bindings and install their own; they differ in
+-- what ends them.  One slot for both, since two open at once would tear each
+-- other down.  The loop arms it and reports keys by index; the config's
+-- actions run on the worker.
 data InputCapture m = InputCapture
     { icKeys       :: ![(KeyMask, KeySym)]
       -- ^ What to listen for.  Position is identity: the loop knows only
@@ -102,39 +79,17 @@ data RiverState m = RiverState
       -- ^ guards requests river only permits during a manage sequence
     , riverRestart  :: !(IORef (Maybe (FilePath, [String])))
       -- ^ program and arguments to exec once river confirms this window
-      -- manager has stopped.  Not a shell command string: @sh -c@ forks
-      -- rather than execs for anything but the simplest word, so routing the
-      -- restart through a shell left one behind on every @M-q@, each the
-      -- parent of the next.
+      -- manager has stopped.  Exec'd directly: @sh -c@ would fork and stay.
     , riverMailbox :: !(Mailbox (m ()))
-      -- ^ How a thread that is not the event loop gets work done.  X11 let a
-      -- background thread post a client message to the root window; there is
-      -- no such relay here, so the channel is ours.  See
-      -- "XMonad.River.Mailbox".
+      -- ^ How a thread that is not the event loop gets an action run.
     , riverPlacements :: !(IORef [(Window, Rectangle)])
-      -- ^ Where the last layout run put each window, in river's global
-      -- coordinate space.  This is the only record of a window's position:
-      -- river reports a window's size but never where it is, because the
-      -- window manager is the thing that decided.  See
-      -- 'XMonad.River.windowRect'.
+      -- ^ Where the last layout put each window: the only record of a
+      -- window's position, since river never reports one.  Topmost first.
     , riverExtraKeys :: !(IORef [(m (), m ())])
-      -- ^ Bindings installed at runtime, over and above the config's.
-      --
-      -- X11 called this grabbing a key: a window manager could ask the server
-      -- for one at any moment and give it back later.  River has no grab, so
-      -- what stands in for one is a @river_xkb_binding_v1@ created on demand;
-      -- this is where those live so they can be destroyed again.  See
-      -- 'XMonad.River.grabKeys'.
+      -- ^ Press and release actions for 'XMonad.River.grabKeys', by index.
     , riverRestack :: !(IORef [Window])
-      -- ^ Windows to raise above the layout's own order, bottom-to-top.
-      --
-      -- The render sequence restacks from the layout on every frame, so a
-      -- request made anywhere else -- a logHook raising the current
-      -- workspace, say -- is overwritten before anyone sees it.  This is
-      -- where such a request is kept so that it is re-applied every frame
-      -- instead, which is what "raise it and have it stay raised" has to
-      -- mean when something else owns the order.  Windows that are no longer
-      -- placed are dropped as they go.
+      -- ^ Windows to keep above the layout's order, bottom-to-top.  Dropped
+      -- as they stop being placed.
     , riverOverlays :: !(IORef [ObjectId])
       -- ^ Nodes of the window-manager surfaces that are currently mapped,
       -- bottom-to-top.  These are @river_shell_surface_v1@ nodes --
@@ -146,24 +101,13 @@ data RiverState m = RiverState
       -- rendering state and legal only inside a sequence, so the surface's
       -- owner records the position here and the render sequence applies it.
     , riverCapture :: !(IORef (Maybe (InputCapture m)))
-      -- ^ The interaction currently holding the keyboard, or 'Nothing'.
-      -- Written by 'XMonad.River.submapNextKey' and
-      -- 'XMonad.River.whileModifiersHeld'; taken -- atomically, so exactly one
-      -- of several racing claimants wins -- by whichever of a key, an unbound
-      -- key, a modifier release or the deadline gets there first.
+      -- ^ The interaction holding the keyboard, if any.  Written by the
+      -- config; claimed atomically by whichever end wins.
     , riverDragOrigin :: !(IORef (Position, Position))
-      -- ^ Where the pointer was when the current interactive operation began.
-      -- river reports a drag as a delta from its start; 'mouseDrag' promises
-      -- its caller an absolute position, so the origin has to be remembered.
+      -- ^ Where the pointer was when the interactive operation began; river
+      -- reports deltas, 'XMonad.Operations.mouseDrag' promises positions.
     , riverAfterLayout :: !(IORef [m ()])
-      -- ^ Actions waiting for the layout to run, newest first.
-      --
-      -- X11 needed no such queue: @windows@ moved and resized the windows
-      -- before it returned, so a binding could change the 'WindowSet' and
-      -- immediately ask where something had ended up.  Here the layout runs at
-      -- the end of the manage sequence, /after/ every binding action, so the
-      -- same code reads the geometry from before its own change.  This is
-      -- where an action that needs the answer waits for it.  See
+      -- ^ Actions waiting for the layout, newest first; see
       -- 'XMonad.River.afterLayout'.
     , riverGeometry :: !(IORef (M.Map Window WindowAttributes))
       -- ^ What the last layout decided, for 'XMonad.Core.getWindowAttributes'.
@@ -239,25 +183,9 @@ overrideBorderColor ref w c = atomicModifyIORef' ref $ \m ->
 forgetBorderOverride :: Borders -> Window -> IO ()
 forgetBorderOverride ref w = atomicModifyIORef' ref (\m -> (M.delete w m, ()))
 
--- | Correct the recorded geometry of a window that something has just moved or
--- resized outside a layout run.
---
--- X11 had no equivalent because it needed none: @moveResizeWindow@ changed
--- what the server would report, and a caller reading the geometry straight
--- back got the new one.  'riverPlacements' is this backend's stand-in for that
--- report, so anything that moves a window has to say so here or the next
--- reader -- 'XMonad.Operations.floatLocation', in particular, which is how a
--- drag records where it got to -- answers with the position from the last
--- layout run and undoes the move.
---
--- A window with no placement is left alone rather than added.  It has no
--- geometry for this to correct, and inventing one would tell
--- 'XMonad.River.windowUnderPointer' that a window the layout never placed is
--- under the pointer.
---
--- Lives here, rather than beside either of its callers, because both
--- "XMonad.Operations" and "XMonad.River" need it and the latter imports the
--- former.
+-- | Correct the recorded geometry of a window something just moved outside a
+-- layout run, so 'XMonad.Operations.floatLocation' reads the move back rather
+-- than undoing it.  A window with no placement is left alone.
 updatePlacement :: MonadIO m => IORef [(Window, Rectangle)] -> Window -> Rectangle -> m ()
 updatePlacement ref w r = liftIO $ modifyIORef' ref $
     map (\e -> if fst e == w then (w, r) else e)

@@ -77,18 +77,9 @@ data Rectangle = Rectangle
 -- protocol asks for.
 type BorderColor = (Word32, Word32, Word32, Word32)
 
--- | A packed @0xRRGGBB@ colour.
---
--- X11's 'Pixel' was an index into a colormap, resolved by the server, and
--- 'Word64' wide.  There are no colormaps here and nothing to allocate against,
--- so this is the colour itself rather than a handle to one -- which is also
--- why it is narrower.
---
--- It exists because a config reaches it through @import XMonad@ on the X11
--- build, by way of the @Graphics.X11@ re-export, and several xmonad-contrib
--- modules name it in their own signatures.  The operations that /produced/ one
--- -- @initColor@, @allocNamedColor@ -- are absent; a colour is parsed straight
--- to 'BorderColor' by 'parseColorMaybe'.
+-- | A packed @0xRRGGBB@ colour.  X11's was a colormap index; there is no
+-- colormap, so this is the colour itself.  Kept because contrib signatures
+-- name it.
 type Pixel = Word32
 
 -- | Widen a packed @0xRRGGBB@ colour into the form @set_borders@ takes.
@@ -149,30 +140,18 @@ type ButtonMask = KeyMask
 --------------------------------------------------------------------------------
 -- Windows
 
--- | A managed window.  Under X11 this was a server-side resource id; here it
--- is the @river_window_v1@ protocol object.
---
--- The distinction matters in one place: river object ids are recycled after
--- @wl_display.delete_id@, so a 'Window' must never be retained past the
--- @closed@ event.  A window's @identifier@ event provides a genuinely unique
--- string for anything that needs to outlive the object -- which is also why
--- river does not export xmonad's state-file machinery: an id serialised now
--- means nothing to the process that reads it back.
+-- | A managed window: the @river_window_v1@ object.  Ids are recycled after
+-- @closed@, so a 'Window' must not outlive the object; @identifier@ is the
+-- name that does.
 type Window = ObjectId
 
 --------------------------------------------------------------------------------
 -- Events
 
--- | What the river layer surfaces to @handleEventHook@ and to layouts.
---
--- Deliberately small.  Most of what an X11 window manager learns from raw
--- events, river delivers as accumulated state on 'RiverWindow' instead, so
--- there is nothing to translate.
---
+-- | What reaches @handleEventHook@ and layouts.  Small: most of what X11
+-- delivered as events, river delivers as state on 'RiverWindow'.
 -- 'DestroyWindowEvent' keeps its X11 spelling because @XMonad.Layout@
--- matches on it by name to release a layout's per-window state, and
--- @river_window_v1.closed@ means exactly what the X11 event meant.  The rest
--- are named for what river actually reports.
+-- matches on it by name.
 data Event
   = DestroyWindowEvent { ev_window :: !Window }
     -- ^ @river_window_v1.closed@: the window is gone and its id may be reused.
@@ -184,94 +163,35 @@ data Event
   | SeatAdded          { ev_seat   :: !ObjectId }
   | SeatRemoved        { ev_seat   :: !ObjectId }
   | ScreenLayoutChanged
-    -- ^ The set of screen rectangles changed: an output appeared or went
-    -- away, or one of them moved or changed size.
-    --
-    -- X11 made a config work this out for itself, from @ConfigureNotify@ on
-    -- the root window versus @RRScreenChangeNotify@, and clear the burst of
-    -- duplicates Xorg emitted with them.  river reports each output's position
-    -- and dimensions directly, so the window manager can just compare the
-    -- result -- this is sent only when the rectangles genuinely differ from
-    -- what the 'WindowSet' already had.  See "XMonad.Hooks.Rescreen".
+    -- ^ The set of screen rectangles changed.  Sent only when they genuinely
+    -- differ from what the 'WindowSet' had; see "XMonad.Hooks.Rescreen".
   | SessionLocked
   | SessionUnlocked
   | KeyPressed { ev_state :: !KeyMask, ev_keysym :: !KeySym }
-    -- ^ A key captured by "XMonad.River.Keyboard".
-    --
-    -- Not something river volunteers: the window manager only learns about
-    -- keys it has created a binding for, so this reaches a config only while
-    -- something -- a prompt, a submap -- is holding a grab.  Ordinary
-    -- keybindings never arrive this way; they run their action directly.
+    -- ^ A captured key.  Reaches a config only while a prompt or submap
+    -- holds keys; ordinary bindings run their action directly.
   | TimerFired !Int
     -- ^ A timer started with @XMonad.Util.Timer.startTimer@ has expired.
-    --
-    -- Not something the compositor sends: the window manager posts it to
-    -- itself when a timer thread reports in.  X11 did the same thing by
-    -- sending a client message to the root window, which needed an interned
-    -- atom and a round trip through the server; here it is a constructor.
+    -- Posted by the window manager to itself.
   | WindowFullscreenChanged { ev_window :: !Window, ev_fullscreen :: !Bool }
-    -- ^ @river_window_v1.fullscreen_requested@ or @exit_fullscreen_requested@:
-    -- a client asked to become fullscreen, or to stop being.
-    --
-    -- It is a request, not a fact.  River leaves the decision to the window
-    -- manager: the flag behind
-    -- 'XMonad.Hooks.ManageHelpers.isFullscreen' is updated before this is
-    -- sent, so a hook can read the state it is being told about, but nothing
-    -- has resized anything.  Acting on it is what
-    -- "XMonad.Layout.Fullscreen" is for.
-    --
-    -- Named for what happened rather than for the two protocol events,
-    -- because a handler almost always wants both and the flag is the
-    -- difference between them.  X11 delivered the same thing as a
-    -- @_NET_WM_STATE@ client message carrying add\/remove\/toggle, and the
-    -- toggle case is why upstream's handler has to read the current state
-    -- before it can act; here the answer is in the event.
+    -- ^ A client asked to become fullscreen, or to stop being.  A request:
+    -- the flag behind 'XMonad.Hooks.ManageHelpers.isFullscreen' is already
+    -- updated, nothing has been resized.  "XMonad.Layout.Fullscreen" acts on
+    -- it.
   | SurfaceClicked { ev_window :: !Window, ev_x :: !Position, ev_y :: !Position }
-    -- ^ @river_seat_v1.shell_surface_interaction@: a surface the window
-    -- manager drew was pressed, rather than merely hovered over.
-    --
-    -- This is the port of X11's @ButtonPress@ on a decoration window, and it
-    -- is a separate constructor because a decoration is not a
-    -- @river_window_v1@ -- it is a @river_shell_surface_v1@ this process
-    -- created, so river reports a click on it separately from a click on a
-    -- client's window.  The id here is that shell surface, which is what
-    -- @XMonad.Util.XUtils.createNewWindow@ returned and therefore the same
-    -- 'Window' a decoration is known by in "XMonad.Layout.Decoration".
-    --
-    -- The position is river's global coordinate space, matching X11's
-    -- @ev_x_root@ \/ @ev_y_root@ rather than its window-relative @ev_x@ \/
-    -- @ev_y@; a caller wanting the offset within the decoration subtracts the
-    -- rectangle it put there.  It is the pointer position as of this manage
-    -- sequence, which is the position at the moment of the press: river sends
-    -- @shell_surface_interaction@ and any @pointer_position@ change before the
-    -- @manage_start@ that delivers them, so the two cannot be out of step.
-    --
-    -- No button number, and no press\/release distinction.  River reports that
-    -- an interaction happened and deliberately not what caused it -- it may
-    -- have been touch or a tablet tool -- so a hook that switched on
-    -- @button1@ has nothing to switch on.
+    -- ^ A surface the window manager drew was pressed: X11's @ButtonPress@
+    -- on a decoration.  The id is the shell surface
+    -- @XMonad.Util.XUtils.createNewWindow@ returned; the position is global,
+    -- as of this manage sequence.  No button number: it may have been touch.
   deriving (Eq, Show)
 
 --------------------------------------------------------------------------------
 -- Size hints
 
--- | What river tells the window manager about a window's preferred size.
---
--- Shaped like X11's @SizeHints@ so that the size-hint arithmetic in
--- "XMonad.Operations" is the same pure code on both backends, and deliberately
--- narrower: 'river_window_v1.dimensions_hint' carries a minimum and a maximum
--- and nothing else.
---
--- The three fields that are always 'Nothing' are not oversights.  Wayland has
--- no resize increments, no aspect ratio hint and no base size; there is
--- nothing for them to be read from, on any compositor.  They are kept so that
--- the arithmetic -- which already does the right thing with an absent hint --
--- needs no river-specific variant, and so that a layout written against
--- xmonad's 'SizeHints' still typechecks.
---
--- X11's @sh_win_gravity@ is absent entirely: gravity describes how a window
--- moves when its parent resizes, and Wayland has neither the parent
--- relationship nor the concept.
+-- | A window's preferred size, in X11's shape so the size-hint arithmetic in
+-- "XMonad.Operations" is shared.  @dimensions_hint@ carries a minimum and a
+-- maximum; Wayland has no increments, aspect or base size, so those are
+-- always 'Nothing'.
 data SizeHints = SizeHints
   { sh_min_size    :: Maybe (Dimension, Dimension)
   , sh_max_size    :: Maybe (Dimension, Dimension)
@@ -296,25 +216,10 @@ noSizeHints = SizeHints
 --------------------------------------------------------------------------------
 -- Window attributes
 
--- | What X11 answered @XGetWindowAttributes@ with, restricted to the parts
--- river can answer for.
---
--- Same reasoning as 'SizeHints': keeping the X11 name and field names means a
--- module that only wants a window's geometry compiles unchanged, and there are
--- a lot of those.  The fields that are here are real answers.
---
--- The ones that are not here are the X11 server's own bookkeeping, and there
--- is no server: @wa_colormap@, @wa_visual@, @wa_depth@, @wa_backing_store@,
--- @wa_save_under@, @wa_your_event_mask@ and the rest describe how a window is
--- stored and drawn by X, which under Wayland is between the client and the
--- compositor and no business of the window manager's.  A module reaching for
--- one of those gets a compile error, which is the right answer: it is doing
--- X11 drawing, not window management.
---
--- One caveat on 'wa_x' and 'wa_y'.  X11 reported where the window /was/;
--- these report where the last layout run /put/ it, because river never says
--- where a window is -- the window manager is what decided.  For a window the
--- layout did not place, both are zero and 'wa_map_state' is 'waIsUnmapped'.
+-- | What @XGetWindowAttributes@ answered, restricted to what river can
+-- answer: geometry as the last layout put it (zero and unmapped for a window
+-- it did not place), border width, map state.  The server's own bookkeeping
+-- fields are absent.
 data WindowAttributes = WindowAttributes
   { wa_x                 :: !Position
   , wa_y                 :: !Position
@@ -424,19 +329,10 @@ layerHasFocus :: LayerFocus -> Bool
 layerHasFocus LayerFocusNone = False
 layerHasFocus _              = True
 
--- | The modifier masks, with X11's values -- which are also river's.
---
--- @river_seat_v1.modifiers@ assigns shift=1, ctrl=4, mod1=8, mod3=32, mod4=64,
--- mod5=128, exactly matching @ShiftMask@ and friends.  This is not a
--- coincidence to be grateful for so much as the reason the port is possible at
--- all: it means @mod4Mask@ keeps both its value and its meaning, and a keymap
--- moves across as data.
---
--- 'lockMask' and 'mod2Mask' are the exception.  river has no bit for either --
--- caps lock and num lock are resolved before the window manager sees a
--- binding -- so they keep their X11 values for arithmetic that combines masks,
--- but no binding will ever match on them.  'XMonad.Operations.cleanMask' is
--- the identity here for the same reason.
+-- | The modifier masks, with X11's values, which are also river's:
+-- @river_seat_v1.modifiers@ assigns shift=1, ctrl=4, mod1=8, mod3=32,
+-- mod4=64, mod5=128.  'lockMask' and 'mod2Mask' have no river bit; no
+-- binding matches on them.
 shiftMask, lockMask, controlMask, mod1Mask, mod2Mask, mod3Mask, mod4Mask,
   mod5Mask, noModMask :: KeyMask
 shiftMask   = 1

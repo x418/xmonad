@@ -172,20 +172,14 @@ import XMonad.River.Runtime (RestartRequested(..), setMainThread, warnUnimplemen
 import XMonad.River.Types
 import XMonad.River.State (Display'(..), InputCapture(..), RiverState(..), updatePlacement)
 
--- | Run an action on the event loop, from any thread.
---
--- The action is queued and runs at the start of the next manage sequence.
--- That is not a delay to work around: river permits window management state to
--- change only during a sequence, so it is the earliest moment the action could
--- legally do anything.
+-- | Run an action on the worker, from any thread.  It runs at the start of
+-- the next manage sequence, the earliest moment it could legally change
+-- anything.
 postAction :: XConf -> X () -> IO ()
 postAction c = MB.post (riverMailbox (riverState c))
 
--- | Ask the compositor to start a manage sequence, because state it cannot see
--- has changed.
---
--- This is what makes actions triggered from forked threads and timers take
--- effect.
+-- | Ask river for a manage sequence, because state it cannot see has
+-- changed.  What makes actions from timers and forked threads take effect.
 manageDirty :: X ()
 manageDirty = do
   ref <- asks (riverDirty . riverState)
@@ -193,31 +187,13 @@ manageDirty = do
 
 -- | Run an action once the layout has been applied, rather than now.
 --
--- For code that changes the 'XMonad.Core.WindowSet' and then needs to know
--- where something ended up.  Under X11 that needed nothing: @windows@ moved
--- and resized every window before it returned, so the server could be asked
--- immediately and would answer about the new arrangement.  Here the layout is
--- the last thing a manage sequence does, so a binding that calls @windows@ and
--- then 'windowRect' -- or 'XMonad.Core.getWindowAttributes', or anything else
--- resting on those -- reads geometry from before its own change.
---
--- The symptom is quiet and easy to misread, because it is /correct/ for every
--- action that moves the focus without moving a window: @focusUp@ leaves both
--- windows where they were, so last sequence's answer is still true.  It is
--- only wrong when the window itself moves.  Swapping two windows and warping
--- the pointer to the focused one -- @windows W.swapUp >> warpToWindow@ -- puts
--- the pointer where that window used to be, which is where it already is, so
--- nothing appears to happen at all.
---
--- Still in the same sequence, so there is no visible delay: the queue is
--- drained at the end of 'XMonad.River.WM.applyLayout', after both
--- 'windowRect' and @getWindowAttributes@ have been brought up to date, and
--- before anything is transmitted.  An action queued from outside a manage
--- sequence asks for one, since otherwise nothing would come to run it.
---
--- Changing the 'XMonad.Core.WindowSet' from here works but is a sequence late:
--- the layout that would act on it has already run.  This is for reading the
--- result of a change, not for making another one.
+-- Under X11 @windows@ moved every window before it returned, so a binding
+-- could change the 'WindowSet' and ask where something ended up.  Here the
+-- layout runs at the end of the sequence, so the same code would read the
+-- geometry from before its own change -- @windows W.swapUp >> warpToWindow@
+-- warps to where the window used to be.  Still the same sequence: the queue
+-- is drained at the end of the layout, before anything is transmitted.  For
+-- reading the result of a change, not for making another one.
 afterLayout :: X () -> X ()
 afterLayout act = do
   ref <- asks (riverAfterLayout . riverState)
@@ -225,49 +201,26 @@ afterLayout act = do
   inSeq <- io . readIORef =<< asks (inManageSeq . riverState)
   unless inSeq manageDirty
 
--- | End the Wayland session, taking the compositor with it.
---
--- X11's equivalent was exiting the process and letting the server notice.
--- Under river that only hands the seat to the next window manager: the
--- compositor keeps running, and every client with it.
+-- | End the Wayland session.  Exiting the process would only hand the seat
+-- to the next window manager; the compositor and every client keep running.
 exitSession :: X ()
 exitSession = emitNow OpExitSession
 
--- | Where a window is, in river's global coordinate space.
---
--- This is what @withWindowAttributes@ was reached for under X11, and it is not
--- a query: river reports a window's size but never its position, since the
--- window manager is the thing that chose it.  So the answer is whatever the
--- last layout run decided, which is also what was sent to the compositor.
---
--- 'Nothing' for a window that is not currently placed -- one on a workspace
--- that is not on screen, or one that has just appeared and not yet been laid
--- out.  Under X11 those still had geometry, so a caller that assumed an answer
--- has to be given one here.
+-- | Where a window is: what the last layout decided, which is also what was
+-- sent.  river never reports a position, since the window manager chose it.
+-- 'Nothing' for a window not currently placed.
 windowRect :: Window -> X (Maybe Rectangle)
 windowRect w = do
     placements <- io . readIORef =<< asks (riverPlacements . riverState)
     pure (lookup w placements)
 
--- | Put a window at an absolute position and size.
+-- | Put a window at an absolute position and size, size hints applied.
 --
--- X11's @moveResizeWindow@ in one call, and it needs two here because river
--- splits the state: a position is rendering state and may be set at any time,
--- while dimensions are window management state and may only be proposed during
--- a manage sequence.  Calling this outside one silently drops the resize, so
--- callers belong in a binding action or a 'XMonad.Operations.mouseDrag'
--- callback, both of which river runs inside a sequence.
---
--- Size hints are applied, as the X11 callers all did by hand.
---
--- The recorded geometry is updated too, and that is not bookkeeping.  Under
--- X11 this call changed what the server would report, immediately, and callers
--- rely on reading it straight back: 'XMonad.Actions.FlexibleManipulate' moves
--- the window and then calls 'XMonad.Operations.float', which asks where the
--- window is in order to record it.  Nothing here reaches a server, so the
--- record has to be kept by hand -- and without it 'XMonad.Operations.float'
--- answers with the position from the last layout run and puts the window
--- straight back, once per motion event.  See 'updatePlacement'.
+-- Position is rendering state and dimensions are window management state,
+-- so the resize is dropped outside a manage sequence; callers belong in a
+-- binding or a 'XMonad.Operations.mouseDrag' callback.  The recorded
+-- geometry is updated too, so 'XMonad.Operations.float' reads the new
+-- position back rather than the last layout's.
 moveResizeWindow :: Window -> Rectangle -> X ()
 moveResizeWindow w r = do
     known <- io . readIORef =<< asks (riverWindows . riverState)
@@ -279,12 +232,8 @@ moveResizeWindow w r = do
         ref <- asks (riverPlacements . riverState)
         updatePlacement ref w r { rect_width = width, rect_height = height }
 
--- | Where the pointer is, in river's global coordinate space.
---
--- X11 had @queryPointer@, which asked the server.  river reports pointer
--- motion as it happens and answers no questions, so this is the last position
--- it sent.  'Nothing' when there is no seat, or before the pointer has moved
--- at all.
+-- | Where the pointer is, as river last reported it.  'Nothing' before it has
+-- moved, or with no seat.
 pointerPosition :: X (Maybe (Position, Position))
 pointerPosition = do
     seats <- io . readIORef =<< asks (riverSeats . riverState)
@@ -292,18 +241,8 @@ pointerPosition = do
         (s:_) -> Just (rsPointer s)
         []    -> Nothing
 
--- | Which window the pointer is over.
---
--- X11's @queryPointer@ answered this as its @child@ result, because the server
--- owned the window tree and could hit-test it.  River owns no such tree to
--- ask: the window manager is what decided where every window went.  So the
--- answer is computed from the placements the last layout run produced, which
--- is the same information the server would have been reporting back.
---
--- 'Nothing' when the pointer is over no managed window, and when there is no
--- pointer at all.  Windows the layout did not place -- on a workspace that is
--- not on screen -- are not candidates, which is right: they are not under
--- anything.
+-- | Which placed window the pointer is over, from the last layout's
+-- placements: the first rectangle containing it, which is the topmost.
 windowUnderPointer :: X (Maybe Window)
 windowUnderPointer = pointerPosition >>= \case
     Nothing -> pure Nothing
@@ -311,19 +250,9 @@ windowUnderPointer = pointerPosition >>= \case
         placements <- io . readIORef =<< asks (riverPlacements . riverState)
         pure $ fst <$> find (pointWithin px py . snd) placements
 
--- | How many outputs the compositor has, over a connection of its own.
---
--- Every other query here answers from what river has told the running window
--- manager.  This one does not need one: it opens an ordinary Wayland client
--- connection, counts the @wl_output@ globals the registry advertises, and
--- closes it again.  That is what a config calling @countScreens@ in @main@ --
--- before xmonad starts, to size its workspace list -- needs, and it is exactly
--- what the X11 version did with @openDisplay ""@ and Xinerama.
---
--- river permits one /window manager/, not one client, so this does not
--- conflict with a session already running.  Answers @0@ if there is no
--- compositor to ask, rather than throwing: a caller in @main@ has nowhere
--- useful to catch.
+-- | How many outputs the compositor has, over a connection of its own -- for
+-- a config calling @countScreens@ in @main@, before xmonad starts.  @0@ if
+-- there is no compositor to ask.
 countOutputs :: MonadIO m => m Int
 countOutputs = io $ handle (\(_ :: SomeException) -> pure 0) $ do
     conn <- C.connect
@@ -331,33 +260,16 @@ countOutputs = io $ handle (\(_ :: SomeException) -> pure 0) $ do
     C.disconnect conn
     pure $ length [ () | g <- globals, C.globalInterface g == BC.pack "wl_output" ]
 
--- | Capture these keys until 'ungrabKeys', running the given action for each.
+-- | Capture these keys until 'ungrabKeys', running the action for each.
 --
--- The river answer to X11's @grabKey@.  There is no grab to take: a key
--- reaches a window manager because a @river_xkb_binding_v1@ exists for it, so
--- "grabbing" is creating one and "ungrabbing" is destroying it.  Two
--- consequences follow from that, and both are improvements:
---
--- * it is per keysym and modifier mask, never per keycode.  X11's @grabKey@
---   took a @KeyCode@, which is why callers had to run 'mkGrabs' first; river
---   binds the keysym directly, so the keymap never enters into it.
--- * a captured key does not shadow the config's binding for the same key by
---   accident -- both bindings exist, and river fires both.  A caller that
---   wants exclusivity should say so by not choosing keys the config uses.
---
--- Replaces any previous set: this is the whole standing capture, not an
--- addition to it, which is what a caller recomputing its keymap on every
--- change wants.  Removing the last one restores the plain configuration.
+-- X11's @grabKey@: a key reaches the window manager because a binding
+-- exists for it, so grabbing is creating one.  Per keysym and modifier
+-- mask, never per keycode.  The config's binding for the same key still
+-- fires; river fires both.  Replaces any previous set.
 grabKeys :: M.Map (KeyMask, KeySym) (X ()) -> X ()
 grabKeys keymap = grabKeysUpDown (M.map (, pure ()) keymap)
 
--- | As 'grabKeys', but with an action for the key going up as well as down.
---
--- X11 gave a window manager key releases only if it had asked for
--- @keyReleaseMask@, and told press from release by the event type.  A river
--- binding reports both without being asked, so this is the same capture with
--- the second half wired up -- which is all "XMonad.Actions.UpKeys" ever
--- wanted.
+-- | As 'grabKeys', with an action for the key going up as well as down.
 grabKeysUpDown :: M.Map (KeyMask, KeySym) (X (), X ()) -> X ()
 grabKeysUpDown keymap = do
     conf <- ask
@@ -376,22 +288,14 @@ ungrabKeys = do
     io (atomicWriteIORef (riverExtraKeys (riverState conf)) [])
     emitOp OpUngrabKeys
 
--- | Keep a window above the ones the layout placed.
---
--- X11's @raiseWindow@ was a request the server obeyed until someone else
--- restacked.  Here the render sequence restacks from the layout every frame,
--- so a one-off request would be undone before it was seen; this is recorded
--- and re-applied each frame instead.  It lapses when the window stops being
--- placed -- closed, or moved to a workspace that is not on screen -- so
--- nothing has to remember to undo it.
+-- | Keep a window above the ones the layout placed.  The render sequence
+-- restacks from the layout every frame, so this is a standing request; it
+-- lapses when the window stops being placed.
 raiseWindow :: Window -> X ()
 raiseWindow w = restackWindows [w]
 
 -- | Keep these windows above the ones the layout placed, topmost first.
---
--- X11's @restackWindows@ took the same order: the head ends up on top.  The
--- list replaces any previous request rather than adding to it, which is what
--- a caller recomputing the whole order every 'logHook' wants.
+-- Replaces any previous request.
 restackWindows :: [Window] -> X ()
 restackWindows ws = do
     ref <- asks (riverRestack . riverState)
@@ -400,72 +304,30 @@ restackWindows ws = do
     io (atomicWriteIORef ref (reverse ws))
     manageDirty
 
--- | The window this one is a dialog for, if any.
---
--- X11 spelled this @WM_TRANSIENT_FOR@ and answered it with
--- @getTransientForHint@; Wayland spells it @xdg_toplevel.set_parent@ and river
--- reports it as @river_window_v1.parent@.  Same relationship, same use --
--- deciding that a window is a dialog and belongs on top of, or focused
--- instead of, the window that raised it.
---
--- Unlike the X11 call this asks nothing: the answer is what river last said.
+-- | The window this one is a dialog for: @xdg_toplevel.set_parent@, what
+-- @WM_TRANSIENT_FOR@ answered.
 windowParent :: Window -> X (Maybe Window)
 windowParent w = do
     known <- io . readIORef =<< asks (riverWindows . riverState)
     pure (M.lookup w known >>= rwParent)
 
--- | Choose the XCursor theme the compositor draws with.
---
--- This is what replaces X11's @setDefaultCursor@, and it is a different
--- question with a different answer.  X11 named one glyph from the cursor font
--- and set it on the root window; every window that did not override it
--- inherited that shape.  Wayland has no root window and no cursor font: a
--- client picks its own cursor from a theme, and the compositor draws the
--- cursor wherever no client does.  So the choice available to a window manager
--- is which /theme/ the compositor draws from, not which shape it draws.
---
--- > startupHook = setCursorTheme "Adwaita" 24
---
--- Applies to cursors the compositor renders, and not necessarily to those a
--- client renders for itself.  river's own documentation notes the consequence:
--- a window manager generally wants @XCURSOR_THEME@ and @XCURSOR_SIZE@ in the
--- environment of the programs it spawns as well, so that clients drawing their
--- own cursors agree with the compositor about which theme that is.
---
--- Applied to every seat.  Requires river offering @river_window_management_v1@
--- version 2 or better; on version 1 the request does not exist and this warns
--- rather than failing.
+-- | The XCursor theme the compositor draws with, on every seat.  Clients
+-- draw their own cursors from @XCURSOR_THEME@ and @XCURSOR_SIZE@, which the
+-- programs this spawns should have in their environment too.
 setCursorTheme :: String -> Int -> X ()
 setCursorTheme name size = do
     seats <- io . readIORef =<< asks (riverSeats . riverState)
     forM_ (M.elems seats) $ \s ->
         emitNow (OpSetXcursorTheme (rsObject s) (BC.pack name) (fromIntegral size))
 
--- | Ask a window to let the window manager draw its frame.
---
--- The default for every new window, and the reason it has to be asked for is
--- that river's default is @use_csd@: a window manager that says nothing gets
--- clients drawing their own title bars and close buttons.  On a tiling desktop
--- that is decoration on every window that nobody asked for.
---
--- \"Server side\" does not mean river draws a title bar.  It draws what this
--- window manager asks for, which is the border from
--- 'XMonad.Core.borderWidth' and nothing else.
---
--- Has no effect on a client that only supports client-side decoration; river
--- documents that, which is why this is not conditional on the decoration hint.
---
--- Only legal during a manage sequence, so a manage hook is the place for it.
+-- | Ask a window to let the window manager draw its frame.  The default for
+-- every new window (river's is @use_csd@); a CSD-only client ignores it.
+-- Manage sequence only, so a manage hook is the place.
 useServerDecorations :: Window -> X ()
 useServerDecorations w = emitOp (OpUseDecorations w True)
 
--- | Let a window draw its own title bar and borders.
---
--- Undoes 'useServerDecorations' for one window, from a manage hook:
---
--- > manageHook = className =? \"Gimp\" --> liftX (ask >>= useClientDecorations) <> idHook
---
--- Only legal during a manage sequence.
+-- | Let a window draw its own title bar and borders; undoes
+-- 'useServerDecorations' for one window, from a manage hook.
 useClientDecorations :: Window -> X ()
 useClientDecorations w = emitOp (OpUseDecorations w False)
 
@@ -492,25 +354,10 @@ outputNames = do
                    , let (w, h) = roSize o, w > 0 && h > 0 ]
     pure [ (S i, BC.unpack n) | (i, o) <- zip [0 ..] live, Just n <- [roName o] ]
 
--- | Close every prompt, releasing any keyboard grab one is holding.
---
--- Bind this.  It is the only thing that reliably gets a wedged session back,
--- and the reason it works is a detail of river worth knowing: river matches
--- xkb bindings /before/ it consults keyboard focus, so a window manager
--- binding still fires while a layer surface holds an exclusive keyboard grab.
--- A prompt that has stopped reading its keyboard cannot be escaped by typing
--- at it, but it can still be killed by a binding.
---
--- > , ((modMask .|. shiftMask, xK_Escape), closeAllPrompts)
---
--- Closing is not polite: the client threads are killed rather than asked, on
--- the grounds that a thread which is not answering is exactly the case this
--- exists for.  Each unwinds through its own teardown, so the surfaces go and
--- the connections drop.  A prompt that was working simply disappears, which is
--- what pressing an escape hatch should do.
---
--- Reports how many were closed, so that pressing it when nothing is stuck says
--- so rather than appearing to do nothing.
+-- | Close every prompt, releasing any keyboard grab one is holding.  Bind
+-- it: river matches xkb bindings before it consults keyboard focus, so this
+-- fires while a wedged prompt holds an exclusive grab.  The client threads
+-- are killed, not asked.
 closeAllPrompts :: X ()
 closeAllPrompts = io $ do
   n <- closeAllClients
