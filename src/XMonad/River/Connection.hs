@@ -100,17 +100,12 @@ data Connection = Connection
   , connFreeIds   :: !(IORef [Word32])
     -- ^ Ids reclaimed via @wl_display.delete_id@, reused before allocating new
     -- ones as the protocol requires.
-  , connOut       :: !(IORef Encoded)
-    -- ^ Pending requests, accumulated as a single writer rather than a list of
-    -- buffers so that 'flush' neither allocates per message nor copies any
-    -- byte twice.
+  , connOut       :: !(IORef (Encoded, [Fd]))
+    -- ^ Pending request bytes and their descriptors. They share one atomic
+    -- queue because Wayland matches ancillary descriptors to fd arguments by
+    -- position; observing one without the other corrupts the request stream.
   , connIn        :: !(IORef ByteString)
     -- ^ Bytes read but not yet forming a complete message.
-  , connOutFds    :: !(IORef [Fd])
-    -- ^ Descriptors owed to the pending requests, oldest first.  A Wayland fd
-    -- argument occupies no space in the message body: it travels entirely as
-    -- ancillary data, and the server matches it to the request by position.
-    -- So these ride out with the next 'flush' and their order is the contract.
   , connInFds     :: !(IORef [Fd])
     -- ^ Descriptors received but not yet claimed by a decoded event.
   , connListeners :: !(IORef (IM.IntMap Listener))
@@ -157,12 +152,11 @@ newConnection sock = do
   -- Client ids start at 2; 1 is wl_display.
   nextId    <- newIORef 2
   freeIds   <- newIORef []
-  out       <- newIORef mempty
+  out       <- newIORef (mempty, [])
   inBuf     <- newIORef BS.empty
-  outFds    <- newIORef []
   inFds     <- newIORef []
   listeners <- newIORef IM.empty
-  let conn = Connection sock nextId freeIds out inBuf outFds inFds listeners
+  let conn = Connection sock nextId freeIds out inBuf inFds listeners
   setListener conn displayId (displayListener conn)
   pure conn
 
@@ -215,14 +209,15 @@ freeObject = clearListener
 -- | Queue a request. Nothing is written to the socket until 'flush'.
 request :: Connection -> ObjectId -> Word16 -> Encoded -> IO ()
 request conn oid opcode args =
-  atomicModifyIORef' (connOut conn) (\o -> (o <> encodeMessage oid opcode args, ()))
+  atomicModifyIORef' (connOut conn) $ \(out, fds) ->
+    ((out <> encodeMessage oid opcode args, fds), ())
 
 -- | Queue a request that carries file descriptors.
 --
 -- The descriptors contribute nothing to the message body -- a Wayland @fd@
 -- argument is pure ancillary data -- so the bytes are queued exactly as
--- 'request' would, and the descriptors are appended to a parallel queue that
--- 'flush' attaches to the same @sendmsg@.  Order is the whole protocol here:
+-- 'request' would, and the descriptors are appended to the same atomic queue.
+-- Order is the whole protocol here:
 -- the server pairs each descriptor with the next fd argument it decodes.
 --
 -- __This takes ownership of the descriptors.__  They are closed once the
@@ -231,9 +226,9 @@ request conn oid opcode args =
 -- the obvious thing to write -- would have the connection transmit a closed
 -- descriptor.
 requestWithFds :: Connection -> ObjectId -> Word16 -> Encoded -> [Fd] -> IO ()
-requestWithFds conn oid opcode args fds = do
-  atomicModifyIORef' (connOut conn) (\o -> (o <> encodeMessage oid opcode args, ()))
-  atomicModifyIORef' (connOutFds conn) (\fs -> (fs ++ fds, ()))
+requestWithFds conn oid opcode args newFds =
+  atomicModifyIORef' (connOut conn) $ \(out, fds) ->
+    ((out <> encodeMessage oid opcode args, fds ++ newFds), ())
 
 -- | Take the next descriptor delivered alongside an event.
 --
@@ -276,10 +271,7 @@ clearListener conn (ObjectId i) =
 -- byte is copied twice on its way out.
 flush :: Connection -> IO ()
 flush conn = do
-  -- Both taken atomically, and the bytes before the descriptors, so a request
-  -- with descriptors queued between the two cannot ship its fds first.
-  pending <- atomicModifyIORef' (connOut conn) $ \p -> (mempty, p)
-  fds <- atomicModifyIORef' (connOutFds conn) $ \fs -> ([], fs)
+  (pending, fds) <- atomicModifyIORef' (connOut conn) $ \p -> ((mempty, []), p)
   let bs = runEncoded pending
   unless (BS.null bs && null fds) $ sendAllWithFds conn bs fds
   -- The compositor holds its own descriptors now, so ours are dead weight --

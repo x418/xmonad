@@ -541,19 +541,23 @@ float w = do
 -- @op_release@ fires when the button goes up; "XMonad.River.WM.Events"
 -- routes those back here, so the @(motion, cleanup)@ contract is upstream's.
 mouseDrag :: (Position -> Position -> X ()) -> X () -> X ()
-mouseDrag f done = do
+mouseDrag f done = void (startMouseDrag f done)
+
+startMouseDrag :: (Position -> Position -> X ()) -> X () -> X Bool
+startMouseDrag f done = do
     drag <- gets dragging
     case drag of
-        Just _ -> return () -- already dragging
+        Just _ -> return False -- already dragging
         Nothing -> do
             seats <- io . readIORef =<< asks (riverSeats . riverState)
             case filter (not . rsRemoved) (M.elems seats) of
-                [] -> return ()
+                [] -> return False
                 (s:_) -> do
                     origin <- asks (riverDragOrigin . riverState)
                     io (writeIORef origin (rsPointer s))
                     emitOp (OpPointerOpStart (rsObject s))
                     modify $ \st -> st { dragging = Just (f, cleanup) }
+                    pure True
   where
     cleanup = do
         modify $ \st -> st { dragging = Nothing }
@@ -607,10 +611,7 @@ mouseResizeWindow w = whenX (isClient w) $ do
     placements <- io . readIORef =<< asks (riverPlacements . riverState)
     known <- io . readIORef =<< asks (riverWindows . riverState)
     forM_ ((,) <$> lookup w placements <*> M.lookup w known) $ \(r, rw) -> do
-        -- Told to the client, which may draw a resize cursor or skip
-        -- intermediate relayouts.
-        emitOp (OpInformResize w True)
-        mouseDrag
+        started <- startMouseDrag
             (\ex ey -> do
                 (ox, oy) <- dragOrigin
                 let (width, height) =
@@ -620,6 +621,9 @@ mouseResizeWindow w = whenX (isClient w) $ do
                 dragWindowTo w r { rect_width = width, rect_height = height }
                 float w)
             (emitOp (OpInformResize w False) >> float w)
+        -- Told only after claiming the drag, so every start has the release
+        -- callback above as its matching end.
+        when started (emitOp (OpInformResize w True))
 
 -- | A type to help serialize xmonad's state to a file.
 --

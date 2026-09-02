@@ -89,6 +89,8 @@ data Runtime = Runtime
   , rtBoundSeats     :: !(IORef (S.Set ObjectId))
   , rtGrabbed        :: !(IORef [ObjectId])
     -- ^ Bindings 'XMonad.River.grabKeys' asked for.
+  , rtGrabbedKeys    :: !(IORef (Maybe (Int, [(KeyMask, KeySym)])))
+    -- ^ Desired grabbed keys, retained so a newly added seat receives them.
   , rtArmed          :: !(IORef [ObjectId])
     -- ^ Bindings an open capture installed.
   , rtArmedGen       :: !(IORef Int)
@@ -103,14 +105,19 @@ data Runtime = Runtime
   , rtLayerDefault   :: !(IORef (Maybe ObjectId))
     -- ^ The output last nominated for layer surfaces that name none.
   , rtStartupSent    :: !(IORef Bool)
-  , rtModWatcher     :: !(IORef (Maybe (Word32 -> Word32 -> IO ())))
+  , rtModWatcher     :: !(IORef (Maybe (Word32 -> Word32 -> IO Bool)))
     -- ^ What to run when the watched modifiers change.  One slot:
-    -- @modifiers_watch@ is one mask per seat.  Taken as it fires, so a
-    -- release concluding an interaction is delivered once.
+    -- @modifiers_watch@ is one mask per seat. The result says whether the
+    -- watched transition ended the interaction; unrelated transitions retain
+    -- the watcher.
   , rtModWatched     :: !(IORef Bool)
     -- ^ A @modifiers_watch@ with a non-zero mask is in force and has to be
     -- withdrawn when the capture ends, or river reports -- and starts a
     -- manage sequence for -- every modifier change for the rest of the session.
+  , rtEatGenerations :: !(IORef (M.Map ObjectId Int))
+    -- ^ Outstanding @ensure_next_key_eaten@ request per xkb-seat object. The
+    -- generation prevents a late event for a superseded capture ending its
+    -- replacement.
   , rtGlobals        :: !(IORef (M.Map Word32 Global))
     -- ^ The registry, kept current, so an output's @wl_output@ can be bound
     -- by the name @river_output_v1.wl_output@ carries.

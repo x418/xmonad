@@ -101,9 +101,10 @@ transmitManage rt plan = do
 
   -- Seats that appeared since the last sequence get the config's bindings.
   bound <- readIORef (rtBoundSeats rt)
-  forM_ [ s | (s, rsx) <- M.toList seats, not (rsRemoved rsx), not (S.member s bound) ] $ \seat -> do
-    bindSeat rt seat
-    modifyIORef' (rtBoundSeats rt) (S.insert seat)
+  forM_ [ rsx | (s, rsx) <- M.toList seats, not (rsRemoved rsx), not (S.member s bound) ] $ \seat -> do
+    bindSeat rt (rsObject seat)
+    modifyIORef' (rtBoundSeats rt) (S.insert (rsObject seat))
+    reconcileAddedSeat rt seat
 
   -- Restore the config's bindings after a capture ended.  First, so a capture
   -- opened by the action the last one ran arms on a clean set.
@@ -124,6 +125,10 @@ transmitManage rt plan = do
       writeIORef (rtModWatcher rt) Nothing
       forM_ (liveSeats seats) $ \s -> forM_ (rsXkbSeat s) $ \x ->
         riverXkbBindingsSeatV1ModifiersWatch conn x 0
+    when (rtXkbVersion rt >= 2) $
+      forM_ (liveSeats seats) $ \s -> forM_ (rsXkbSeat s) $
+        riverXkbBindingsSeatV1CancelEnsureNextKeyEaten conn
+    writeIORef (rtEatGenerations rt) M.empty
     writeIORef (rtDisarm rt) False
 
   -- river remembers the layer-surface default; reissued only when it moves.
@@ -154,30 +159,15 @@ transmitManage rt plan = do
       riverWindowV1ProposeDimensions conn w (fromIntegral dw) (fromIntegral dh)
     OpCaptureInput ks mods oneShot gen -> armCapture rt seats ks mods oneShot gen
     OpUngrabKeys -> do
+      writeIORef (rtGrabbedKeys rt) Nothing
       old <- atomicModifyIORef' (rtGrabbed rt) (\bs -> ([], bs))
       forM_ old $ \b -> do
         riverXkbBindingV1Disable conn b
         riverXkbBindingV1Destroy conn b
     OpGrabKeys gen ks -> do
+      writeIORef (rtGrabbedKeys rt) (Just (gen, ks))
       bs <- fmap concat $ forM (liveSeats seats) $ \seat ->
-        forM (zip [0 :: Int ..] ks) $ \(i, (mask, keysym)) -> do
-          b <- riverXkbBindingsV1GetXkbBinding conn (rtBindingsGlobal rt)
-                 (rsObject seat) keysym (riverModifiers mask)
-          -- By index, into the table of the generation these were made for:
-          -- the actions stay with the config, the loop holds only the
-          -- objects.  The previous grab's bindings live until this sequence
-          -- destroys them and must not index a table they were not built
-          -- against.
-          let fire pick = do
-                (tableGen, acts) <- readIORef (riverExtraKeys rs)
-                when (tableGen == gen) $
-                  forM_ (take 1 (drop i acts)) (queueAction rt . pick)
-          riverXkbBindingV1Listen conn b $ \case
-            RiverXkbBindingV1Pressed  -> fire fst
-            RiverXkbBindingV1Released -> fire snd
-            _ -> pure ()
-          riverXkbBindingV1Enable conn b
-          pure b
+        bindGrabbedSeat rt (rsObject seat) gen ks
       writeIORef (rtGrabbed rt) bs
     -- Sent by the loop's own pass; see 'sendNow'.
     OpExitSession -> pure ()
@@ -233,6 +223,21 @@ armCapture
   -> [(KeyMask, KeySym)] -> KeyMask -> Bool -> Int -> IO ()
 armCapture rt seats ks mods oneShot gen = do
   globals <- readIORef (rtBindings rt)
+  -- More than one capture can be requested by actions drained in one manage
+  -- sequence. Supersede the previous protocol state before installing the
+  -- newer generation, otherwise its bindings become unreachable.
+  previous <- atomicModifyIORef' (rtArmed rt) (\bindings -> ([], bindings))
+  forM_ previous $ \binding -> do
+    riverXkbBindingV1Disable conn binding
+    riverXkbBindingV1Destroy conn binding
+  watched <- atomicModifyIORef' (rtModWatched rt) (\active -> (False, active))
+  when watched $ forM_ (liveSeats seats) $ \seat ->
+    forM_ (rsXkbSeat seat) $ \x ->
+      riverXkbBindingsSeatV1ModifiersWatch conn x 0
+  when (rtXkbVersion rt >= 2) $ forM_ (liveSeats seats) $ \seat ->
+    forM_ (rsXkbSeat seat) (riverXkbBindingsSeatV1CancelEnsureNextKeyEaten conn)
+  writeIORef (rtEatGenerations rt) M.empty
+  writeIORef (rtModWatcher rt) Nothing
   forM_ (M.keys globals) (riverXkbBindingV1Disable conn)
   writeIORef (rtArmedGen rt) gen
 
@@ -243,23 +248,7 @@ armCapture rt seats ks mods oneShot gen = do
       live = liveSeats seats
 
   temps <- fmap concat $ forM live $ \seat ->
-    forM (zip [0 :: Int ..] ks) $ \(i, (mask, keysym)) -> do
-      b <- riverXkbBindingsV1GetXkbBinding conn (rtBindingsGlobal rt)
-             (rsObject seat) keysym (riverModifiers mask)
-      riverXkbBindingV1Listen conn b $ \case
-        RiverXkbBindingV1Pressed
-          | oneShot -> claim >>= \taken -> forM_ taken $ \cap -> do
-              writeIORef (rtDisarm rt) True
-              queueAction rt (icOnKey cap True i)
-          | otherwise -> do
-              held <- readIORef (riverCapture rs)
-              forM_ held $ \cap -> queueAction rt (icOnKey cap True i)
-        RiverXkbBindingV1Released | not oneShot -> do
-          held <- readIORef (riverCapture rs)
-          forM_ held $ \cap -> queueAction rt (icOnKey cap False i)
-        _ -> pure ()
-      riverXkbBindingV1Enable conn b
-      pure b
+    bindCaptureSeat rt (rsObject seat) ks oneShot gen
   writeIORef (rtArmed rt) temps
 
   -- A hold-to-cycle ends when the modifier goes up.  @modifiers_watch@ is a
@@ -268,18 +257,23 @@ armCapture rt seats ks mods oneShot gen = do
   -- there.
   when (mods /= 0 && rtXkbVersion rt >= 3) $ do
     writeIORef (rtModWatcher rt) $ Just $ \old new ->
-      when (old .&. mods /= 0 && new .&. mods /= old .&. mods) $ do
+      if old .&. mods /= 0 && new .&. mods /= old .&. mods
+      then do
         taken <- claim
         forM_ taken $ \cap -> do
           writeIORef (rtDisarm rt) True
           queueAction rt (icOnEnd cap)
+        pure True
+      else pure False
     writeIORef (rtModWatched rt) True
     forM_ live $ \s ->
       forM_ (rsXkbSeat s) $ \x -> riverXkbBindingsSeatV1ModifiersWatch conn x mods
 
   -- Be told about a key this did not want, so the capture can be abandoned.
   when oneShot $ forM_ live $ \s ->
-    forM_ (rsXkbSeat s) (riverXkbBindingsSeatV1EnsureNextKeyEaten conn)
+    forM_ (rsXkbSeat s) $ \x -> do
+      riverXkbBindingsSeatV1EnsureNextKeyEaten conn x
+      modifyIORef' (rtEatGenerations rt) (M.insert x gen)
 
   -- A deadline, or an abandoned capture is a session with no bindings.  The
   -- work is posted to the loop; this thread touches no connection.
@@ -292,6 +286,72 @@ armCapture rt seats ks mods oneShot gen = do
           "xmonad-river: keyboard capture abandoned after 60s; restoring bindings"
         writeIORef (rtDisarm rt) True
         queueAction rt (icOnEnd cap)
+  where
+    conn = rtConn rt
+
+bindGrabbedSeat :: Runtime -> ObjectId -> Int -> [(KeyMask, KeySym)] -> IO [ObjectId]
+bindGrabbedSeat rt seat gen ks =
+  forM (zip [0 :: Int ..] ks) $ \(i, (mask, keysym)) -> do
+    b <- riverXkbBindingsV1GetXkbBinding conn (rtBindingsGlobal rt)
+           seat keysym (riverModifiers mask)
+    let fire pick = do
+          (tableGen, acts) <- readIORef (riverExtraKeys rs)
+          when (tableGen == gen) $
+            forM_ (take 1 (drop i acts)) (queueAction rt . pick)
+    riverXkbBindingV1Listen conn b $ \case
+      RiverXkbBindingV1Pressed  -> fire fst
+      RiverXkbBindingV1Released -> fire snd
+      _ -> pure ()
+    riverXkbBindingV1Enable conn b
+    pure b
+  where
+    conn = rtConn rt
+    rs = rtState rt
+
+bindCaptureSeat
+  :: Runtime -> ObjectId -> [(KeyMask, KeySym)] -> Bool -> Int -> IO [ObjectId]
+bindCaptureSeat rt seat ks oneShot gen =
+  forM (zip [0 :: Int ..] ks) $ \(i, (mask, keysym)) -> do
+    b <- riverXkbBindingsV1GetXkbBinding conn (rtBindingsGlobal rt)
+           seat keysym (riverModifiers mask)
+    riverXkbBindingV1Listen conn b $ \case
+      RiverXkbBindingV1Pressed
+        | oneShot -> claim >>= \taken -> forM_ taken $ \cap -> do
+            writeIORef (rtDisarm rt) True
+            queueAction rt (icOnKey cap True i)
+        | otherwise -> do
+            held <- readIORef (riverCapture rs)
+            forM_ held $ \cap -> queueAction rt (icOnKey cap True i)
+      RiverXkbBindingV1Released | not oneShot -> do
+        held <- readIORef (riverCapture rs)
+        forM_ held $ \cap -> queueAction rt (icOnKey cap False i)
+      _ -> pure ()
+    riverXkbBindingV1Enable conn b
+    pure b
+  where
+    conn = rtConn rt
+    rs = rtState rt
+    claim = claimCapture rt gen
+
+reconcileAddedSeat :: Runtime -> RiverSeat -> IO ()
+reconcileAddedSeat rt seat = do
+  readIORef (rtGrabbedKeys rt) >>= mapM_ (\(gen, ks) ->
+    bindGrabbedSeat rt (rsObject seat) gen ks >>= modifyIORef' (rtGrabbed rt) . (++))
+  active <- readIORef (riverCapture rs)
+  forM_ active $ \cap -> do
+    globals <- readIORef (rtBindings rt)
+    forM_ (M.keys globals) (riverXkbBindingV1Disable conn)
+    bindings <- bindCaptureSeat rt (rsObject seat) (icKeys cap)
+                  (icOneShot cap) (icGeneration cap)
+    modifyIORef' (rtArmed rt) (++ bindings)
+    writeIORef (rtArmedGen rt) (icGeneration cap)
+    forM_ (rsXkbSeat seat) $ \x -> do
+      when (icMods cap /= 0 && rtXkbVersion rt >= 3) $ do
+        riverXkbBindingsSeatV1ModifiersWatch conn x (icMods cap)
+        writeIORef (rtModWatched rt) True
+      when (icOneShot cap && rtXkbVersion rt >= 2) $ do
+        riverXkbBindingsSeatV1EnsureNextKeyEaten conn x
+        modifyIORef' (rtEatGenerations rt) (M.insert x (icGeneration cap))
   where
     conn = rtConn rt
     rs = rtState rt

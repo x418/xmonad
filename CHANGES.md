@@ -8,6 +8,19 @@
 
 ### Bug Fixes
 
+* The river backend now keeps Wayland request bytes and file descriptors in
+  one queue, shuts down clients atomically, and serialises protocol-object
+  destruction through the event loop.
+
+* River input capture now survives unrelated modifier transitions, cancels
+  outstanding key-eat requests during teardown, and reconciles bindings when
+  seats are hotplugged.
+
+* River screen reconciliation no longer duplicates workspaces onto surplus
+  outputs or repeatedly rescreens against outputs it cannot represent.
+
+* River abnormal shutdown now stops the worker before reading `XState`.
+
 ## 0.18.1 (March 7, 2026)
 
 ### Breaking Changes

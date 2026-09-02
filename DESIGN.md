@@ -51,7 +51,8 @@ riverCapture                               worker installs; the loop   atomicWri
 riverExtraKeys                             worker writes (generation,  atomicWriteIORef; the loop fires a
                                            table), loop reads          binding only for its own generation
 riverOverlays, riverOverlayPos             contrib writes, loop reads  atomicModifyIORef' (XMonad.Util.XUtils)
-riverRestack, rtLayoutMoved                worker writes, loop reads   atomicWriteIORef / atomicModifyIORef'
+riverRestack                               worker only                 IORef
+rtLayoutMoved                              worker writes, loop reads   atomicWriteIORef / atomicModifyIORef'
 riverPlacements, riverGeometry,
   riverBorders, riverAfterLayout,
   riverDragOrigin, riverLogDue,
@@ -68,6 +69,10 @@ riverNowOps                                worker queues               TVar [Op]
 riverOps                                   worker queues, loop drains  atomic IORef; drained by the next
                                            sequence, so an emitOp outside one
                                            needs a manageDirty after it
+connection outgoing requests               any thread queues, loop    TQueue (Encoded, [Fd]); bytes and
+                                           drains                     descriptors are one atomic item
+client registry                            client threads update and   atomicModifyIORef'; shutdown swaps
+                                           shutdown drains             the registry before killing clients
 ```
 
 The `Connection`'s request path (`request`, `newObject`, `setListener`) is

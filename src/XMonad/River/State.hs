@@ -89,6 +89,9 @@ data RiverState m = RiverState
       -- manager has stopped.  Exec'd directly: @sh -c@ would fork and stay.
     , riverMailbox :: !(Mailbox (m ()))
       -- ^ How a thread that is not the event loop gets an action run.
+    , riverLoopJobs :: !(Mailbox (IO ()))
+      -- ^ Protocol lifecycle work that must run on the event loop after any
+      -- render currently in progress. Drawable destruction uses this ordering.
     , riverPlacements :: !(IORef [(Window, Rectangle)])
       -- ^ Where the last layout put each window: the only record of a
       -- window's position, since river never reports one.  Topmost first.

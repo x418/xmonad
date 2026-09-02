@@ -196,8 +196,8 @@ withRegistration :: IO () -> IO ()
 withRegistration act = do
   tid <- myThreadId
   E.bracket_
-    (modifyIORef' liveClients (M.insert tid ()))
-    (modifyIORef' liveClients (M.delete tid))
+    (atomicModifyIORef' liveClients (\clients -> (M.insert tid () clients, ())))
+    (atomicModifyIORef' liveClients (\clients -> (M.delete tid clients, ())))
     act
 
 -- | Kill every running client, releasing any keyboard grab they hold.
@@ -215,8 +215,8 @@ withRegistration act = do
 -- the handler that destroys the surface and drops the connection.
 closeAllClients :: IO Int
 closeAllClients = do
-  tids <- M.keys <$> readIORef liveClients
-  mapM_ killThread tids
+  tids <- atomicModifyIORef' liveClients (\clients -> (M.empty, M.keys clients))
+  void . forkIO $ mapM_ killThread tids
   pure (length tids)
 
 data Request = Redraw | Close
@@ -640,4 +640,3 @@ loop spec cl inbox = go
               Redraw -> redraw spec cl
               Close  -> shutdown spec cl
         go
-

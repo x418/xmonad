@@ -145,13 +145,18 @@ addSeat rt seat = do
       -- capture whose bindings are armed: the key may have been eaten for a
       -- capture that has since ended, with another armed in its place.
       RiverXkbBindingsSeatV1AteUnboundKey -> do
-        taken <- readIORef (rtArmedGen rt) >>= claimCapture rt
-        forM_ taken $ \cap -> do
-          writeIORef (rtDisarm rt) True
-          queueAction rt (icOnEnd cap)
+        generation <- atomicModifyIORef' (rtEatGenerations rt) $ \pending ->
+          (M.delete xs pending, M.lookup xs pending)
+        forM_ generation $ \gen -> do
+          taken <- claimCapture rt gen
+          forM_ taken $ \cap -> do
+            writeIORef (rtDisarm rt) True
+            queueAction rt (icOnEnd cap)
       -- Only sent for modifiers something asked to watch.
       RiverXkbBindingsSeatV1ModifiersUpdate old new ->
-        atomicModifyIORef' (rtModWatcher rt) (\w -> (Nothing, w)) >>= mapM_ (\f -> f old new)
+        readIORef (rtModWatcher rt) >>= mapM_ (\f -> do
+          finished <- f old new
+          when finished (writeIORef (rtModWatcher rt) Nothing))
       _ -> pure ()
     pure (Just xs)
 

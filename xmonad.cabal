@@ -239,6 +239,19 @@ test-suite river-wire
   -- Everything above it is unverified until run against a real river; see
   -- README.river.md.
 
+test-suite river-screen
+  type:           exitcode-stdio-1.0
+  main-is:        river-screen-spec.hs
+  hs-source-dirs: tests
+  build-depends:  base
+                , containers
+                , xmonad
+  default-language: Haskell2010
+  ghc-options:    -Wall
+
+  -- Screen reconciliation is pure and must preserve StackSet's uniqueness
+  -- invariant even when there are more outputs than workspaces.
+
 executable river-submap-spec
   main-is:        river-submap-spec.hs
   hs-source-dirs: tests

@@ -111,6 +111,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm u
     manageRef   <- newIORef False
     restartRef  <- newIORef Nothing
     mailbox     <- MB.newMailbox
+    loopJobs    <- MB.newMailbox
     placeRef    <- newIORef []
     extraKeys   <- newIORef (0, [])
     restackRef  <- newIORef []
@@ -143,6 +144,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm u
       , inManageSeq      = manageRef
       , riverRestart     = restartRef
       , riverMailbox     = mailbox
+      , riverLoopJobs    = loopJobs
       , riverPlacements  = placeRef
       , riverExtraKeys   = extraKeys
       , riverRestack     = restackRef
@@ -227,7 +229,6 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm u
   rt <- do
     pending    <- newIORef []
     dirtySent  <- newIORef False
-    jobs       <- MB.newMailbox
     seqNo      <- newIORef 0
     sent       <- newIORef 0
     asked      <- newIORef 0
@@ -235,6 +236,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm u
     pointerRef <- newIORef M.empty
     bound      <- newIORef S.empty
     grabbed    <- newIORef []
+    grabbedKeys <- newIORef Nothing
     armed      <- newIORef []
     armedGen   <- newIORef 0
     disarm     <- newIORef False
@@ -243,6 +245,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm u
     startup    <- newIORef False
     modWatcher <- newIORef Nothing
     modWatched <- newIORef False
+    eatGens    <- newIORef M.empty
     globalsRef <- newIORef named
     windowsGen <- newIORef 0
     lastManage <- newIORef M.empty
@@ -268,7 +271,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm u
       , rtShared = sh
       , rtPending = pending
       , rtDirtySent = dirtySent
-      , rtJobs = jobs
+      , rtJobs = riverLoopJobs rs
       , rtSeqNo = seqNo
       , rtSent = sent
       , rtAsked = asked
@@ -276,6 +279,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm u
       , rtPointerBind = pointerRef
       , rtBoundSeats = bound
       , rtGrabbed = grabbed
+      , rtGrabbedKeys = grabbedKeys
       , rtArmed = armed
       , rtArmedGen = armedGen
       , rtDisarm = disarm
@@ -284,6 +288,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm u
       , rtStartupSent = startup
       , rtModWatcher = modWatcher
       , rtModWatched = modWatched
+      , rtEatGenerations = eatGens
       , rtGlobals = globalsRef
       , rtWindowsGen = windowsGen
       , rtLastManage = lastManage
@@ -381,6 +386,8 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm u
       onWayland e = do
         hPutStrLn stderr ("xmonad-river: the connection to river is gone: " ++ show e)
         Ctl.answerRestart (Ctl.Refused "the connection to river is gone")
+        void . timeout restartGraceMicros $ readIORef workerRef >>= killThread
+        writeIORef (inManageSeq rs) False
         runX' writeStateToFile `catch` \(_ :: SomeException) -> pure ()
         exitWith (ExitFailure 1)
   let onRestart = do

@@ -29,7 +29,7 @@ import System.Environment (lookupEnv)
 import System.IO (hPutStrLn, stderr)
 
 import XMonad.Core
-import XMonad.Operations (StateFile (..), floatLocation, isFixedSizeOrTransient, readStateFile, scaleRationalRect)
+import XMonad.Operations (StateFile (..), floatLocation, getCleanedScreenInfo, isFixedSizeOrTransient, readStateFile, scaleRationalRect)
 import XMonad.River.Ops (emitOp)
 import XMonad.River.Plan
 import XMonad.River.Protocol.WindowManagement (riverWindowV1CapabilitiesFullscreen)
@@ -174,28 +174,20 @@ nominateLayerOutput rt = forM_ (rtLayerShell rt) $ \_ -> do
 -- "XMonad.Actions.PhysicalScreens" relies on.
 syncScreens :: X ()
 syncScreens = do
-  outs <- io . readIORef =<< asks (riverOutputs . riverState)
-  let rects =
-        [ rect
-        | o <- sortOn roPosition (filter (not . roRemoved) (M.elems outs))
-        , let (x, y) = roPosition o
-        , let (width, height) = roSize o
-        , width > 0 && height > 0
-          -- The area layer shell reports, so a bar's exclusive zone shrinks
-          -- the tiling area rather than being tiled over.
-        , let rect = case roLayerArea o of
-                Just a | rect_width a > 0 && rect_height a > 0 -> a
-                _ -> Rectangle x y (fromIntegral width) (fromIntegral height)
-        ]
-  unless (null rects) $ do
+  screens <- withDisplay getCleanedScreenInfo
+  unless (null screens) $ do
     -- Compared in screen-id order: current-first order changes on every view.
     before <- gets (map (screenRect . W.screenDetail)
                     . sortOn W.screen . screensOf . windowset)
     -- Only when the outputs changed.  'rescreen' re-seats the current
     -- workspace as screen 0; run on every sequence it pinned focus, and
     -- everything that follows W.current, to the leftmost output.
-    when (before /= rects) $ do
-      modify $ \st -> st { windowset = rescreen rects (windowset st) }
+    ws <- gets windowset
+    let updated = rescreen screens ws
+        applied = map (screenRect . W.screenDetail)
+                . sortOn W.screen . screensOf $ updated
+    when (before /= applied) $ do
+      modify $ \st -> st { windowset = updated }
       void (broadcastEvent ScreenLayoutChanged)
 
 -- | Lay the given screen rectangles over the current workspaces, keeping
@@ -204,7 +196,7 @@ syncScreens = do
 rescreen :: [Rectangle] -> WindowSet -> WindowSet
 rescreen rects ws = ws
     { W.current = (W.current ws) { W.screen = 0, W.screenDetail = SD firstRect }
-    , W.visible = zipWith reseat [1 ..] restRects
+    , W.visible = zipWith3 reseat [1 :: Int ..] restRects available
     , W.hidden = newHidden
     }
   where
@@ -212,14 +204,15 @@ rescreen rects ws = ws
       (r:rs) -> (r, rs)
       []     -> (Rectangle 0 0 0 0, [])
     oldVisible = W.visible ws
-    extras = drop (length oldVisible) restRects
-    reseat i r = case drop (i - 1) oldVisible of
-      (s:_) -> s { W.screen = fromIntegral i, W.screenDetail = SD r }
-      [] -> case drop (i - 1 - length oldVisible) pool of
-        (h:_) -> W.Screen h (fromIntegral i) (SD r)
-        []    -> W.Screen (W.workspace (W.current ws)) (fromIntegral i) (SD r)
-    surplus = drop (length restRects) oldVisible
+    requested = length restRects
+    keptVisible = take requested oldVisible
+    surplus = drop requested oldVisible
     pool = map W.workspace surplus ++ W.hidden ws
+    extras = take (requested - length keptVisible) pool
+    available = map Left keptVisible ++ map Right extras
+    reseat i r = \case
+      Left s  -> s { W.screen = fromIntegral i, W.screenDetail = SD r }
+      Right h -> W.Screen h (fromIntegral i) (SD r)
     newHidden = drop (length extras) pool
 
 -- | Run the manage hook for windows river has told us about since the last

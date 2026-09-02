@@ -34,7 +34,7 @@ module XMonad.River (
     -- subprocess watcher cannot touch it.  'postAction' is how such a thread
     -- gets an action run: it is queued and executed at the start of the next
     -- manage sequence, which the loop requests as soon as it wakes.
-    postAction,
+    postAction, postLoop,
 
     -- * Driving the manage sequence
     --
@@ -177,6 +177,13 @@ import XMonad.River.State (Display'(..), InputCapture(..), RiverState(..), updat
 -- anything.
 postAction :: XConf -> X () -> IO ()
 postAction c = MB.post (riverMailbox (riverState c))
+
+-- | Queue protocol lifecycle work on the event loop.
+--
+-- The action runs before the loop dispatches another compositor event. This is
+-- for destruction that must follow any render already using the object.
+postLoop :: IO () -> X ()
+postLoop action = asks (riverLoopJobs . riverState) >>= io . (`MB.post` action)
 
 -- | Ask river for a manage sequence, because state it cannot see has
 -- changed.  What makes actions from timers and forked threads take effect.
