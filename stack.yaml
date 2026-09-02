@@ -3,10 +3,11 @@ resolver: lts-24.53
 packages:
 - ./
 
+# What the cabal file's pkgconfig-depends and c-sources need, for stack's nix
+# integration (on by default on NixOS).  No X11: this backend does not link
+# it, and the X11 libraries upstream lists here would only widen the shell.
 nix:
   packages:
     - zlib
-    - xorg.libX11
-    - xorg.libXrandr
-    - xorg.libXScrnSaver
-    - xorg.libXext
+    - pkg-config
+    - libxkbcommon
