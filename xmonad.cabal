@@ -118,6 +118,10 @@ library
                    XMonad.River.Protocol.WindowManagement
                    XMonad.River.Protocol.XkbBindings
                    XMonad.River.Types
+                   XMonad.River.WM.Events
+                   XMonad.River.WM.Runtime
+                   XMonad.River.WM.Sequence
+                   XMonad.River.WM.Transmit
                    XMonad.River.Wire
                    XMonad.River.Xkb
                    XMonad.River.WM

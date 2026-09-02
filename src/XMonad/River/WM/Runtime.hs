@@ -1,0 +1,161 @@
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+-- | The event loop's state, shared with the worker where it must be.
+--
+-- Each field has one writing thread.  The loop owns the connection and the
+-- fields under /loop only/; the worker owns 'XState' and the fields under
+-- /worker only/; 'Shared' is what the worker publishes and the loop waits on.
+-- The compositor's view -- windows, outputs, seats -- lives in 'RiverState',
+-- written by the loop and read by both.
+module XMonad.River.WM.Runtime
+  ( Shared(..)
+  , Runtime(..)
+  , queueAction
+  , queueActions
+  , adjust
+  , broadcastEvent
+  , screensOf
+  , allEdges
+  , sizeBound
+  , linuxButton
+  ) where
+
+import Control.Concurrent.STM (TVar)
+import Control.Monad.Reader (asks)
+import Data.IORef
+import Data.Int (Int32)
+import Data.Monoid (All(..))
+import Data.Word (Word32)
+import qualified Data.Map.Strict as M
+import qualified Data.Set as S
+
+import XMonad.Core
+import XMonad.River.Connection (Connection, Global)
+import qualified XMonad.River.Mailbox as MB
+import XMonad.River.Plan (Plan)
+import XMonad.River.Protocol.WindowManagement
+import XMonad.River.State (RiverState(..))
+import XMonad.River.Types
+import XMonad.River.Wire (ObjectId)
+import qualified XMonad.StackSet as W
+
+-- | What the worker publishes and the loop waits on.  Worker-written only.
+data Shared = Shared
+  { shPlan    :: !(TVar Plan)
+    -- ^ The last plan the layout produced.  'planSerial' is monotonic.
+  , shSeqDone :: !(TVar Int)
+    -- ^ The highest manage-sequence number the worker has finished.
+  }
+
+-- | The loop's state.  Each field has one writing thread; the comment says
+-- which when it is not the loop.
+data Runtime = Runtime
+  { -- constants
+    rtConn           :: !Connection
+  , rtRegistry       :: !ObjectId
+  , rtManager        :: !ObjectId
+  , rtBindingsGlobal :: !ObjectId
+  , rtXkbVersion     :: !Word32
+    -- ^ Negotiated @river_xkb_bindings_v1@ version; @get_seat@ and
+    -- @ensure_next_key_eaten@ arrived in 2.
+  , rtLayerShell     :: !(Maybe ObjectId)
+  , rtFollowsMouse   :: !Bool
+  , rtKeyActions     :: !(M.Map (KeyMask, KeySym) (X ()))
+  , rtButtonActions  :: !(M.Map (KeyMask, Button) (Window -> X ()))
+  , rtSubmit         :: !(X () -> IO ())
+    -- ^ Hand an action to the worker.
+    -- shared with the X monad
+  , rtState          :: !(RiverState X)
+  , rtShared         :: !Shared
+    -- loop only
+  , rtPending        :: !(IORef [X ()])
+    -- ^ Binding actions awaiting the next manage sequence, newest first.
+  , rtJobs           :: !(MB.Mailbox (IO ()))
+    -- ^ Work other threads want done on the loop.
+  , rtSeqNo          :: !(IORef Int)
+  , rtSent           :: !(IORef Int)
+    -- ^ 'planSerial' of the last plan transmitted in a manage sequence.
+  , rtAsked          :: !(IORef Int)
+    -- ^ 'planSerial' a @manage_dirty@ has already been sent for.
+  , rtBindings       :: !(IORef (M.Map ObjectId (X ())))
+    -- ^ The config's key bindings, by binding object.
+  , rtPointerBind    :: !(IORef (M.Map ObjectId (Window -> X ())))
+  , rtBoundSeats     :: !(IORef (S.Set ObjectId))
+  , rtGrabbed        :: !(IORef [ObjectId])
+    -- ^ Bindings 'XMonad.River.grabKeys' asked for.
+  , rtArmed          :: !(IORef [ObjectId])
+    -- ^ Bindings an open capture installed.
+  , rtDisarm         :: !(IORef Bool)
+    -- ^ A capture ended and its bindings are still installed; torn down in
+    -- the next manage sequence, the only place @enable@ is legal.
+  , rtHovered        :: !(IORef (Maybe Window))
+  , rtLayerDefault   :: !(IORef (Maybe ObjectId))
+    -- ^ The output last nominated for layer surfaces that name none.
+  , rtStartupSent    :: !(IORef Bool)
+  , rtModWatcher     :: !(IORef (Maybe (Word32 -> Word32 -> IO ())))
+    -- ^ What to run when the watched modifiers change.  One slot:
+    -- @modifiers_watch@ is one mask per seat.  Taken as it fires, so a
+    -- release concluding an interaction is delivered once.
+  , rtGlobals        :: !(IORef (M.Map Word32 Global))
+    -- ^ The registry, kept current, so an output's @wl_output@ can be bound
+    -- by the name @river_output_v1.wl_output@ carries.
+    -- what the last transmission said, so the next sends only what changed
+  , rtLastManage     :: !(IORef (M.Map Window (Dimension, Dimension, Bool)))
+    -- ^ Proposed dimensions and tiled-ness, per placed window.
+  , rtLastRender     :: !(IORef (M.Map Window (Rectangle, (Dimension, BorderColor))))
+    -- ^ Position and border, per shown window.
+  , rtLastStack      :: !(IORef [ObjectId])
+    -- ^ The node order last placed, bottom to top.
+  , rtLastOverlayPos :: !(IORef (M.Map ObjectId (Position, Position)))
+    -- ^ Where each listed overlay was last put.
+    -- worker only
+  , rtAdopted        :: !(IORef (S.Set Window))
+    -- ^ Windows the manage hook has run for.
+  , rtRestored       :: !(IORef Bool)
+  , rtLayoutMoved    :: !(IORef Bool)
+    -- ^ The last layout pass moved a window.  Worker writes, loop takes; the
+    -- next @pointer_enter@ is then the layout's doing, not the pointer's.
+  }
+
+-- | Queue an action for the next manage sequence, and ask river for one.
+-- Loop thread only.
+queueAction :: Runtime -> X () -> IO ()
+queueAction rt act = queueActions rt [act]
+
+queueActions :: Runtime -> [X ()] -> IO ()
+queueActions _ [] = pure ()
+queueActions rt acts = do
+  modifyIORef' (rtPending rt) (reverse acts ++)
+  riverWindowManagerV1ManageDirty (rtConn rt) (rtManager rt)
+
+adjust :: IORef (M.Map ObjectId a) -> ObjectId -> (a -> a) -> IO ()
+adjust ref k f = modifyIORef' ref (M.adjust f k)
+
+broadcastEvent :: Event -> X All
+broadcastEvent ev = do
+  hook <- asks (handleEventHook . config)
+  userCodeDef (All True) (hook ev)
+
+-- | The screens a 'WindowSet' currently has, current first.
+screensOf :: WindowSet -> [W.Screen WorkspaceId (Layout Window) Window ScreenId ScreenDetail]
+screensOf ws = W.current ws : W.visible ws
+
+allEdges :: Word32
+allEdges = riverWindowV1EdgesTop + riverWindowV1EdgesBottom
+         + riverWindowV1EdgesLeft + riverWindowV1EdgesRight
+
+-- | A dimension bound river reports as zero or less was not stated.
+sizeBound :: Int32 -> Int32 -> Maybe (Dimension, Dimension)
+sizeBound w h
+  | w > 0 && h > 0 = Just (fromIntegral w, fromIntegral h)
+  | otherwise      = Nothing
+
+-- | X11 button numbers to Linux input event codes.
+linuxButton :: Button -> Word32
+linuxButton = \case
+  1 -> 0x110  -- BTN_LEFT
+  2 -> 0x112  -- BTN_MIDDLE
+  3 -> 0x111  -- BTN_RIGHT
+  4 -> 0x113  -- BTN_SIDE
+  5 -> 0x114  -- BTN_EXTRA
+  n -> 0x110 + fromIntegral n
