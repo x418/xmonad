@@ -14,6 +14,7 @@ module XMonad.River.Protocol.Core
   , wlCompositorListen
   , wlCompositorCreateSurface
   , wlCompositorCreateRegion
+  , wlCompositorRelease
   , WlShmPoolEvent(..)
   , wlShmPoolInterface
   , wlShmPoolVersion
@@ -21,6 +22,8 @@ module XMonad.River.Protocol.Core
   , wlShmPoolCreateBuffer
   , wlShmPoolDestroy
   , wlShmPoolResize
+  , wlShmPoolErrorInvalidFormat
+  , wlShmPoolErrorInvalidStride
   , WlShmEvent(..)
   , wlShmInterface
   , wlShmVersion
@@ -153,6 +156,31 @@ module XMonad.River.Protocol.Core
   , wlShmFormatAvuy8888
   , wlShmFormatXvuy8888
   , wlShmFormatP030
+  , wlShmFormatRgb161616
+  , wlShmFormatBgr161616
+  , wlShmFormatR16f
+  , wlShmFormatGr1616f
+  , wlShmFormatBgr161616f
+  , wlShmFormatR32f
+  , wlShmFormatGr3232f
+  , wlShmFormatBgr323232f
+  , wlShmFormatAbgr32323232f
+  , wlShmFormatNv20
+  , wlShmFormatNv30
+  , wlShmFormatS010
+  , wlShmFormatS210
+  , wlShmFormatS410
+  , wlShmFormatS012
+  , wlShmFormatS212
+  , wlShmFormatS412
+  , wlShmFormatS016
+  , wlShmFormatS216
+  , wlShmFormatS416
+  , wlShmFormatXvuy2101010
+  , wlShmFormatP230
+  , wlShmFormatT430
+  , wlShmFormatY8
+  , wlShmFormatXyyy2101010
   , WlBufferEvent(..)
   , wlBufferInterface
   , wlBufferVersion
@@ -173,11 +201,13 @@ module XMonad.River.Protocol.Core
   , wlSurfaceSetBufferScale
   , wlSurfaceDamageBuffer
   , wlSurfaceOffset
+  , wlSurfaceGetRelease
   , wlSurfaceErrorInvalidScale
   , wlSurfaceErrorInvalidTransform
   , wlSurfaceErrorInvalidSize
   , wlSurfaceErrorInvalidOffset
   , wlSurfaceErrorDefunctRoleObject
+  , wlSurfaceErrorNoBuffer
   , WlSeatEvent(..)
   , wlSeatInterface
   , wlSeatVersion
@@ -268,7 +298,7 @@ wlCallbackListen conn self handler =
     _ -> handler (WlCallbackUnknown opcode body)
 
 --------------------------------------------------------------------------------
--- wl_compositor (version 6)
+-- wl_compositor (version 7)
 --------------------------------------------------------------------------------
 
 -- | The interface name, as advertised by @wl_registry@.
@@ -277,7 +307,7 @@ wlCompositorInterface = "wl_compositor"
 
 -- | The highest version these bindings were generated against.
 wlCompositorVersion :: Word32
-wlCompositorVersion = 6
+wlCompositorVersion = 7
 
 -- | @wl_compositor.create_surface@
 wlCompositorCreateSurface :: Connection -> ObjectId -> IO ObjectId
@@ -295,6 +325,13 @@ wlCompositorCreateRegion conn self =
     request conn self 1 (argObject id_)
     pure id_
 
+-- | @wl_compositor.release@
+-- Since version 7.
+wlCompositorRelease :: Connection -> ObjectId -> IO ()
+wlCompositorRelease conn self =
+  request conn self 2 (mempty)
+    >> freeObject conn self
+
 -- | Events delivered to a @wl_compositor@.
 data WlCompositorEvent
   = WlCompositorUnknown !Word16 !ByteString
@@ -310,7 +347,7 @@ wlCompositorListen conn self handler =
     _ -> handler (WlCompositorUnknown opcode body)
 
 --------------------------------------------------------------------------------
--- wl_shm_pool (version 2)
+-- wl_shm_pool (version 3)
 --------------------------------------------------------------------------------
 
 -- | The interface name, as advertised by @wl_registry@.
@@ -319,7 +356,15 @@ wlShmPoolInterface = "wl_shm_pool"
 
 -- | The highest version these bindings were generated against.
 wlShmPoolVersion :: Word32
-wlShmPoolVersion = 2
+wlShmPoolVersion = 3
+
+-- | @wl_shm_pool.error.invalid_format@
+wlShmPoolErrorInvalidFormat :: Word32
+wlShmPoolErrorInvalidFormat = 0
+
+-- | @wl_shm_pool.error.invalid_stride@
+wlShmPoolErrorInvalidStride :: Word32
+wlShmPoolErrorInvalidStride = 1
 
 -- | @wl_shm_pool.create_buffer@
 wlShmPoolCreateBuffer :: Connection -> ObjectId -> Int32 -> Int32 -> Int32 -> Int32 -> Word32 -> IO ObjectId
@@ -355,7 +400,7 @@ wlShmPoolListen conn self handler =
     _ -> handler (WlShmPoolUnknown opcode body)
 
 --------------------------------------------------------------------------------
--- wl_shm (version 2)
+-- wl_shm (version 3)
 --------------------------------------------------------------------------------
 
 -- | The interface name, as advertised by @wl_registry@.
@@ -364,7 +409,7 @@ wlShmInterface = "wl_shm"
 
 -- | The highest version these bindings were generated against.
 wlShmVersion :: Word32
-wlShmVersion = 2
+wlShmVersion = 3
 
 -- | @wl_shm.error.invalid_format@
 wlShmErrorInvalidFormat :: Word32
@@ -870,6 +915,106 @@ wlShmFormatXvuy8888 = 1498764888
 wlShmFormatP030 :: Word32
 wlShmFormatP030 = 808661072
 
+-- | @wl_shm.format.rgb161616@
+wlShmFormatRgb161616 :: Word32
+wlShmFormatRgb161616 = 942950226
+
+-- | @wl_shm.format.bgr161616@
+wlShmFormatBgr161616 :: Word32
+wlShmFormatBgr161616 = 942950210
+
+-- | @wl_shm.format.r16f@
+wlShmFormatR16f :: Word32
+wlShmFormatR16f = 1210064978
+
+-- | @wl_shm.format.gr1616f@
+wlShmFormatGr1616f :: Word32
+wlShmFormatGr1616f = 1210077767
+
+-- | @wl_shm.format.bgr161616f@
+wlShmFormatBgr161616f :: Word32
+wlShmFormatBgr161616f = 1213351746
+
+-- | @wl_shm.format.r32f@
+wlShmFormatR32f :: Word32
+wlShmFormatR32f = 1176510546
+
+-- | @wl_shm.format.gr3232f@
+wlShmFormatGr3232f :: Word32
+wlShmFormatGr3232f = 1176523335
+
+-- | @wl_shm.format.bgr323232f@
+wlShmFormatBgr323232f :: Word32
+wlShmFormatBgr323232f = 1179797314
+
+-- | @wl_shm.format.abgr32323232f@
+wlShmFormatAbgr32323232f :: Word32
+wlShmFormatAbgr32323232f = 1178092097
+
+-- | @wl_shm.format.nv20@
+wlShmFormatNv20 :: Word32
+wlShmFormatNv20 = 808605262
+
+-- | @wl_shm.format.nv30@
+wlShmFormatNv30 :: Word32
+wlShmFormatNv30 = 808670798
+
+-- | @wl_shm.format.s010@
+wlShmFormatS010 :: Word32
+wlShmFormatS010 = 808530003
+
+-- | @wl_shm.format.s210@
+wlShmFormatS210 :: Word32
+wlShmFormatS210 = 808530515
+
+-- | @wl_shm.format.s410@
+wlShmFormatS410 :: Word32
+wlShmFormatS410 = 808531027
+
+-- | @wl_shm.format.s012@
+wlShmFormatS012 :: Word32
+wlShmFormatS012 = 842084435
+
+-- | @wl_shm.format.s212@
+wlShmFormatS212 :: Word32
+wlShmFormatS212 = 842084947
+
+-- | @wl_shm.format.s412@
+wlShmFormatS412 :: Word32
+wlShmFormatS412 = 842085459
+
+-- | @wl_shm.format.s016@
+wlShmFormatS016 :: Word32
+wlShmFormatS016 = 909193299
+
+-- | @wl_shm.format.s216@
+wlShmFormatS216 :: Word32
+wlShmFormatS216 = 909193811
+
+-- | @wl_shm.format.s416@
+wlShmFormatS416 :: Word32
+wlShmFormatS416 = 909194323
+
+-- | @wl_shm.format.xvuy2101010@
+wlShmFormatXvuy2101010 :: Word32
+wlShmFormatXvuy2101010 = 808671576
+
+-- | @wl_shm.format.p230@
+wlShmFormatP230 :: Word32
+wlShmFormatP230 = 808661584
+
+-- | @wl_shm.format.t430@
+wlShmFormatT430 :: Word32
+wlShmFormatT430 = 808662100
+
+-- | @wl_shm.format.y8@
+wlShmFormatY8 :: Word32
+wlShmFormatY8 = 1497715271
+
+-- | @wl_shm.format.xyyy2101010@
+wlShmFormatXyyy2101010 :: Word32
+wlShmFormatXyyy2101010 = 876695641
+
 -- | @wl_shm.create_pool@
 wlShmCreatePool :: Connection -> ObjectId -> Fd -> Int32 -> IO ObjectId
 wlShmCreatePool conn self fd size =
@@ -937,7 +1082,7 @@ wlBufferListen conn self handler =
     _ -> handler (WlBufferUnknown opcode body)
 
 --------------------------------------------------------------------------------
--- wl_surface (version 6)
+-- wl_surface (version 7)
 --------------------------------------------------------------------------------
 
 -- | The interface name, as advertised by @wl_registry@.
@@ -946,7 +1091,7 @@ wlSurfaceInterface = "wl_surface"
 
 -- | The highest version these bindings were generated against.
 wlSurfaceVersion :: Word32
-wlSurfaceVersion = 6
+wlSurfaceVersion = 7
 
 -- | @wl_surface.error.invalid_scale@
 wlSurfaceErrorInvalidScale :: Word32
@@ -967,6 +1112,10 @@ wlSurfaceErrorInvalidOffset = 3
 -- | @wl_surface.error.defunct_role_object@
 wlSurfaceErrorDefunctRoleObject :: Word32
 wlSurfaceErrorDefunctRoleObject = 4
+
+-- | @wl_surface.error.no_buffer@
+wlSurfaceErrorNoBuffer :: Word32
+wlSurfaceErrorNoBuffer = 5
 
 -- | @wl_surface.destroy@
 wlSurfaceDestroy :: Connection -> ObjectId -> IO ()
@@ -1031,6 +1180,15 @@ wlSurfaceOffset :: Connection -> ObjectId -> Int32 -> Int32 -> IO ()
 wlSurfaceOffset conn self x y =
   request conn self 10 (argInt x <> argInt y)
 
+-- | @wl_surface.get_release@
+-- Since version 7.
+wlSurfaceGetRelease :: Connection -> ObjectId -> IO ObjectId
+wlSurfaceGetRelease conn self =
+  do
+    callback <- newObject conn
+    request conn self 11 (argObject callback)
+    pure callback
+
 -- | Events delivered to a @wl_surface@.
 data WlSurfaceEvent
   = WlSurfaceEnter !ObjectId
@@ -1058,7 +1216,7 @@ wlSurfaceListen conn self handler =
     _ -> handler (WlSurfaceUnknown opcode body)
 
 --------------------------------------------------------------------------------
--- wl_seat (version 10)
+-- wl_seat (version 11)
 --------------------------------------------------------------------------------
 
 -- | The interface name, as advertised by @wl_registry@.
@@ -1067,7 +1225,7 @@ wlSeatInterface = "wl_seat"
 
 -- | The highest version these bindings were generated against.
 wlSeatVersion :: Word32
-wlSeatVersion = 10
+wlSeatVersion = 11
 
 -- | @wl_seat.capability.pointer@
 wlSeatCapabilityPointer :: Word32
@@ -1137,7 +1295,7 @@ wlSeatListen conn self handler =
     _ -> handler (WlSeatUnknown opcode body)
 
 --------------------------------------------------------------------------------
--- wl_keyboard (version 10)
+-- wl_keyboard (version 11)
 --------------------------------------------------------------------------------
 
 -- | The interface name, as advertised by @wl_registry@.
@@ -1146,7 +1304,7 @@ wlKeyboardInterface = "wl_keyboard"
 
 -- | The highest version these bindings were generated against.
 wlKeyboardVersion :: Word32
-wlKeyboardVersion = 10
+wlKeyboardVersion = 11
 
 -- | @wl_keyboard.keymap_format.no_keymap@
 wlKeyboardKeymapFormatNoKeymap :: Word32
@@ -1323,7 +1481,7 @@ wlOutputListen conn self handler =
     _ -> handler (WlOutputUnknown opcode body)
 
 --------------------------------------------------------------------------------
--- wl_region (version 1)
+-- wl_region (version 7)
 --------------------------------------------------------------------------------
 
 -- | The interface name, as advertised by @wl_registry@.
@@ -1332,7 +1490,7 @@ wlRegionInterface = "wl_region"
 
 -- | The highest version these bindings were generated against.
 wlRegionVersion :: Word32
-wlRegionVersion = 1
+wlRegionVersion = 7
 
 -- | @wl_region.destroy@
 wlRegionDestroy :: Connection -> ObjectId -> IO ()

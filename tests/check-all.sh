@@ -38,5 +38,19 @@ step "keysyms current"
 git diff --quiet -- src/XMonad/River/Keysym.hs src/XMonad/River/Keysym/Table.hs
 ok
 
+# The generated protocol modules match the pinned XML.  The XML is not checked
+# in, so this fetches it; with no network the step is skipped rather than
+# failed, because the pin is the property under test and nothing about it can
+# be learned offline.
+step "protocol current"
+if curl -fsSI --max-time 10 https://codeberg.org/ >/dev/null 2>&1; then
+    rm -rf protocol
+    ./util/generate-protocol.hs >/dev/null
+    git diff --quiet -- src/XMonad/River/Protocol
+    ok
+else
+    echo "SKIPPED (offline)"
+fi
+
 echo
 echo "all checks passed"

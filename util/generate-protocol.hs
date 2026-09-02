@@ -24,12 +24,16 @@ import qualified Text.XML as X
 
 -- | The wayland release @wayland.xml@ is taken from.
 waylandCommit :: String
-waylandCommit = "1.24.0"
+waylandCommit = "1.26.0"
 
--- | The river commit the river protocols are taken from. A version tag would be
--- preferred, but these are not yet tagged.
+-- | The river commit the river protocols are taken from: the head of @main@,
+-- not a release tag, because protocol text is fixed on @main@ between
+-- releases and the tags lag it (v0.4.8 still carries the wording @main@
+-- corrected on 2026-09-01).  The generator strips descriptions, so a bump
+-- that changes only text regenerates identical modules; @tests/check-all.sh@
+-- checks that.
 riverCommit :: String
-riverCommit = "bfab9ea75985e048ca31b919ccd6dfc676da6dd5"
+riverCommit = "100fd9557e2ff993cc98628b99d53cfe2c56b2d4"
 
 -- | Where the wayland XML is downloaded to.
 protocolDir :: FilePath
