@@ -3,12 +3,7 @@ resolver: lts-24.53
 packages:
 - ./
 
-# What stack's nix integration (on by default on NixOS) puts in the shell:
-# the cabal file's pkgconfig-depends and c-sources need libxkbcommon and
-# pkg-config, and util/gen-keysyms.sh reads libxkbcommon's keysym header
-# through pkg-config too.  No X11: nothing here links or builds it.
+# Stack's nix integration is on by default on NixOS; stack-shell.nix says
+# what goes in the shell, and why it is a file rather than a package list.
 nix:
-  packages:
-    - zlib
-    - pkg-config
-    - libxkbcommon
+  shell-file: stack-shell.nix
