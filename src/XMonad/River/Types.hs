@@ -258,6 +258,8 @@ data RiverWindow = RiverWindow
   , rwIdentifier :: !(Maybe ByteString)
   , rwParent     :: !(Maybe ObjectId)
   , rwDimensions :: !(Int32, Int32)
+    -- ^ From @river_window_v1.dimensions@, which river sends only once the
+    -- window has mapped; @(0, 0)@ until then, and never afterwards.
   , rwSizeHints  :: !SizeHints
     -- ^ From @river_window_v1.dimensions_hint@.  A zero or negative bound
     -- means the window did not state one, and becomes 'Nothing'.

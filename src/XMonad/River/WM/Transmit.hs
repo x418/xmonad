@@ -204,11 +204,20 @@ transmitManage rt plan = do
   -- Keyboard focus.  A seat whose keyboard has gone to a layer surface is left
   -- alone: river discards the request under an exclusive grab and, under a
   -- non-exclusive one, would silently steal the keyboard back.
+  --
+  -- A window without dimensions has not mapped.  river would give it the
+  -- keyboard at once, and a client that gets @wl_keyboard.enter@ before its
+  -- first buffer may have nothing to attach it to: JBR drops it, and IDEA
+  -- then dispatches no shortcut until focus leaves and returns.  Every other
+  -- compositor focuses on map, so that is the only order clients have met.
+  -- The keyboard stays where it is; the first dimensions event asks for the
+  -- sequence that sends this ('XMonad.River.WM.Events.addWindow').
   forM_ (M.elems seats) $ \s ->
     unless (layerHasFocus (rsLayerFocus s)) $
       case planFocus plan of
-        FocusWindow win | M.member win known ->
-          riverSeatV1FocusWindow conn (rsObject s) win
+        FocusWindow win | Just rw <- M.lookup win known ->
+          when (rwDimensions rw /= (0, 0)) $
+            riverSeatV1FocusWindow conn (rsObject s) win
         _ -> riverSeatV1ClearFocus conn (rsObject s)
   where
     conn = rtConn rt

@@ -18,7 +18,8 @@ import qualified Data.Set as S
 import XMonad.River.Types (Dimension, KeyMask, KeySym, Position, Rectangle, Window)
 import XMonad.River.Wire (ObjectId)
 
--- | Where a seat's keyboard should go.
+-- | Where a seat's keyboard should go.  A 'FocusWindow' is sent only once
+-- the window has mapped; until then the keyboard stays where it was.
 data FocusTarget
   = FocusWindow !Window
   | ClearFocus

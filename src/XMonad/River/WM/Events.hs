@@ -11,6 +11,7 @@ module XMonad.River.WM.Events
   , reapObjects
   ) where
 
+import Control.Concurrent.STM (atomically, writeTVar)
 import Control.Monad (forM, forM_, void, when)
 import Control.Monad.Reader (asks)
 import Control.Monad.State (gets)
@@ -61,8 +62,13 @@ addWindow rt win = do
     RiverWindowV1Identifier i  -> adjust ref win $ \w -> w { rwIdentifier = Just i }
     RiverWindowV1Parent p      -> adjust ref win $ \w ->
       w { rwParent = if isNullObject p then Nothing else Just p }
-    RiverWindowV1Dimensions width height ->
+    -- The first of these is the map (river sends none before it).  Keyboard
+    -- focus was held back until now, see 'transmitManage'; ask for the
+    -- sequence that sends it.
+    RiverWindowV1Dimensions width height -> do
+      first <- (== Just (0, 0)) . fmap rwDimensions . M.lookup win <$> readIORef ref
       adjust ref win $ \w -> w { rwDimensions = (width, height) }
+      when first $ atomically (writeTVar (riverDirty (rtState rt)) True)
     -- A bound of zero or less means the window did not state one.
     RiverWindowV1DimensionsHint minW minH maxW maxH ->
       adjust ref win $ \w -> w { rwSizeHints = SizeHints

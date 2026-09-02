@@ -108,7 +108,11 @@ until the `manage_start` arrives (`rtDirtySent`).
 3. The loop waits up to `planGraceMicros` for *that* sequence number.  If it
    landed, closed objects are destroyed.  Either way the plan in hand is
    transmitted -- bindings for new seats, the one-shot ops, dimensions,
-   focus -- and `manage_finish` is sent.
+   focus -- and `manage_finish` is sent.  Focus goes only to a window that
+   has mapped (reported dimensions); a newly adopted window gets it one
+   sequence later, which its first `dimensions` event asks for.  river would
+   otherwise send `wl_keyboard.enter` before the client's first buffer,
+   which JBR drops.
 4. A plan that lands after its sequence was answered wakes the loop, which
    sends one `manage_dirty` for it.  Nothing is lost; it is one sequence late.
 
