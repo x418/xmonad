@@ -11,10 +11,12 @@
 { ghc, ghcVersion ? null }:
 with (import <nixpkgs> { });
 let
-  # What the cabal file's pkgconfig-depends and c-sources need, and what
-  # util/gen-keysyms.sh reads libxkbcommon's keysym header through.  No X11:
-  # nothing here links or builds it.  The rest is what stack always adds.
-  inputs = [ zlib pkg-config libxkbcommon ghc git gcc gmp cacert ];
+  # What the cabal file's pkgconfig-depends and c-sources need; what
+  # util/gen-keysyms.sh reads libxkbcommon's keysym header through; and curl,
+  # which util/generate-protocol.hs fetches the protocol XML with -- the
+  # shell is pure, so the system's curl is not on its PATH.  No X11: nothing
+  # here links or builds it.  The rest is what stack always adds.
+  inputs = [ zlib pkg-config libxkbcommon curl ghc git gcc gmp cacert ];
 in
 runCommand "xmonad-river-stack-shell" {
   # glibcLocales, so GHC can set a locale.
