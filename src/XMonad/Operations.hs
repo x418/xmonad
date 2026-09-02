@@ -804,7 +804,10 @@ mouseResizeWindow :: Window -> X ()
 mouseResizeWindow w = whenX (isClient w) $ do
     placements <- io . readIORef =<< asks (riverPlacements . riverState)
     known <- io . readIORef =<< asks (riverWindows . riverState)
-    forM_ ((,) <$> lookup w placements <*> M.lookup w known) $ \(r, rw) ->
+    forM_ ((,) <$> lookup w placements <*> M.lookup w known) $ \(r, rw) -> do
+        -- Told to the client, which may draw a resize cursor or skip
+        -- intermediate relayouts.
+        emitOp (OpInformResize w True)
         mouseDrag
             (\ex ey -> do
                 (ox, oy) <- dragOrigin
@@ -814,7 +817,7 @@ mouseResizeWindow w = whenX (isClient w) $ do
                             , fromIntegral (rect_height r) + (ey - oy) )
                 dragWindowTo w r { rect_width = width, rect_height = height }
                 float w)
-            (float w)
+            (emitOp (OpInformResize w False) >> float w)
 
 
 -- | A type to help serialize xmonad's state to a file.

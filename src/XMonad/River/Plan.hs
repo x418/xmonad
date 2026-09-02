@@ -103,6 +103,15 @@ data Op
     -- ^ @river_seat_v1.op_end@.  Manage-sequence only, like the start.
   | OpUseDecorations !Window !Bool
     -- ^ @use_ssd@ when 'True', @use_csd@ when 'False'.
+  | OpSetCapabilities !Window !Word32
+    -- ^ @set_capabilities@: which of maximize, minimize, fullscreen and the
+    -- window menu the client should offer.
+  | OpInformFullscreen !Window !Bool
+    -- ^ @inform_fullscreen@ or @inform_not_fullscreen@: tell the client its
+    -- state, without river touching its geometry.
+  | OpInformResize !Window !Bool
+    -- ^ @inform_resize_start@ or @inform_resize_end@, around an interactive
+    -- resize.
   | OpSetPosition !Window !Position !Position
     -- ^ Where an interactive drag has put a window.  Rendering state, so legal
     -- in either sequence, but it arrives from user code and so takes the same

@@ -41,7 +41,9 @@ module XMonad.River.Connection
     -- * Registry
   , Global(..)
   , getRegistry
+  , listenRegistry
   , bindGlobal
+  , bindNamed
     -- * Errors
   , WaylandError(..)
   ) where
@@ -375,6 +377,27 @@ getRegistry conn = do
   roundtrip conn
   globals <- reverse <$> readIORef acc
   pure (reg, globals)
+
+-- | Keep following the registry after 'getRegistry': a global that appears
+-- later (an output plugged in) goes to the first handler, one that goes to
+-- the second.  Replaces the listener 'getRegistry' installed.
+listenRegistry :: Connection -> ObjectId -> (Global -> IO ()) -> (Word32 -> IO ()) -> IO ()
+listenRegistry conn reg added removed =
+  setListener conn reg $ \opcode body -> case opcode of
+    0 -> do
+      (name, iface, ver) <-
+        decode ((,,) <$> getWord32 <*> getString <*> getWord32) body
+      added (Global name iface ver)
+    1 -> decode getWord32 body >>= removed
+    _ -> pure ()
+
+-- | Bind one specific global, at the lower of its version and the given one.
+bindNamed :: Connection -> ObjectId -> Global -> Word32 -> IO ObjectId
+bindNamed conn reg g maxVersion = do
+  let ver = min maxVersion (globalVersion g)
+  oid <- newObject conn
+  request conn reg 0 (argUInt (globalName g) <> argNewIdAny (globalInterface g) ver oid)
+  pure oid
 
 -- | Bind a global, clamping to the version the server offers. Returns
 -- 'Nothing' if the interface is absent or older than @minVersion@.

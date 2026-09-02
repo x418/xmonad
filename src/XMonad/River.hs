@@ -90,6 +90,16 @@ module XMonad.River (
     -- how a manage hook overrides that.
     useServerDecorations, useClientDecorations,
 
+    -- * Fullscreen
+    --
+    -- | Geometry stays the layout's; this tells the client what it is.
+    informFullscreen,
+
+    -- * Outputs
+    --
+    -- | Connector names, for a bar that wants to know which screen is which.
+    outputName, outputNames,
+
     -- * Holding a modifier
     --
     -- | What Alt-Tab is built on: capture some keys for as long as a modifier
@@ -148,7 +158,7 @@ import qualified Data.ByteString.Char8 as BC
 import qualified Data.Map.Strict as M
 
 import XMonad.Core
-import Data.List (find)
+import Data.List (find, sortOn)
 import XMonad.Operations (applySizeHintsContents, pointWithin)
 import XMonad.River.Keysym.Table (keysymTable, reverseKeysymTable)
 import qualified XMonad.River.Mailbox as MB
@@ -458,6 +468,29 @@ useServerDecorations w = emitOp (OpUseDecorations w True)
 -- Only legal during a manage sequence.
 useClientDecorations :: Window -> X ()
 useClientDecorations w = emitOp (OpUseDecorations w False)
+
+-- | Tell a window it is fullscreen, or that it no longer is.
+--
+-- @inform_fullscreen@ changes what the client draws -- a browser hides its
+-- toolbars -- and nothing about where river puts it; the layout still owns
+-- that, which is how "XMonad.Layout.Fullscreen" has always worked.  Called
+-- from its event hook.  Only legal during a manage sequence.
+informFullscreen :: Window -> Bool -> X ()
+informFullscreen w full = emitOp (OpInformFullscreen w full)
+
+-- | The connector name of a screen (@eDP-1@, @DP-3@), if the compositor
+-- offers @wl_output@ version 4.  Screen ids follow the outputs sorted by
+-- position, as "XMonad.River.WM" assigns them.
+outputName :: ScreenId -> X (Maybe String)
+outputName sid = lookup sid <$> outputNames
+
+-- | Every screen's connector name, by screen id.
+outputNames :: X [(ScreenId, String)]
+outputNames = do
+    outs <- io . readIORef =<< asks (riverOutputs . riverState)
+    let live = [ o | o <- sortOn roPosition (M.elems outs), not (roRemoved o)
+                   , let (w, h) = roSize o, w > 0 && h > 0 ]
+    pure [ (S i, BC.unpack n) | (i, o) <- zip [0 ..] live, Just n <- [roName o] ]
 
 -- | Close every prompt, releasing any keyboard grab one is holding.
 --

@@ -379,6 +379,11 @@ data RiverOutput = RiverOutput
     -- ^ The area left over once layer surfaces have claimed their exclusive
     -- zones.  Preferring this to the raw output rectangle is what stops a bar
     -- or dock being tiled over.
+  , roWlOutput    :: !(Maybe ObjectId)
+    -- ^ The bound @wl_output@, from @river_output_v1.wl_output@.
+  , roName        :: !(Maybe ByteString)
+    -- ^ The connector name (@eDP-1@, @DP-3@), from @wl_output.name@; needs
+    -- @wl_output@ version 4.
   } deriving (Eq, Show)
 
 data RiverSeat = RiverSeat

@@ -47,7 +47,7 @@ import System.Posix.Process (executeFile)
 import System.Timeout (timeout)
 
 import XMonad.Core
-import XMonad.Operations (StateFile (..), broadcastMessage, floatLocation, focus, isFixedSizeOrTransient, readStateFile, scaleRationalRect, writeStateToFile)
+import XMonad.Operations (StateFile (..), broadcastMessage, floatLocation, focus, isFixedSizeOrTransient, mouseMoveWindow, mouseResizeWindow, readStateFile, scaleRationalRect, writeStateToFile)
 import XMonad.River.Client (closeAllClients)
 import XMonad.River.Connection
 import qualified XMonad.River.Control as Ctl
@@ -80,6 +80,7 @@ data Shared = Shared
 data Runtime = Runtime
   { -- constants
     rtConn           :: !Connection
+  , rtRegistry       :: !ObjectId
   , rtManager        :: !ObjectId
   , rtBindingsGlobal :: !ObjectId
   , rtXkbVersion     :: !Word32
@@ -123,6 +124,18 @@ data Runtime = Runtime
     -- ^ What to run when the watched modifiers change.  One slot:
     -- @modifiers_watch@ is one mask per seat.  Taken as it fires, so a
     -- release concluding an interaction is delivered once.
+  , rtGlobals        :: !(IORef (M.Map Word32 Global))
+    -- ^ The registry, kept current, so an output's @wl_output@ can be bound
+    -- by the name @river_output_v1.wl_output@ carries.
+    -- what the last transmission said, so the next sends only what changed
+  , rtLastManage     :: !(IORef (M.Map Window (Dimension, Dimension, Bool)))
+    -- ^ Proposed dimensions and tiled-ness, per placed window.
+  , rtLastRender     :: !(IORef (M.Map Window (Rectangle, (Dimension, BorderColor))))
+    -- ^ Position and border, per shown window.
+  , rtLastStack      :: !(IORef [ObjectId])
+    -- ^ The node order last placed, bottom to top.
+  , rtLastOverlayPos :: !(IORef (M.Map ObjectId (Position, Position)))
+    -- ^ Where each listed overlay was last put.
     -- worker only
   , rtAdopted        :: !(IORef (S.Set Window))
     -- ^ Windows the manage hook has run for.
@@ -140,6 +153,7 @@ riverMain :: XConfig Layout -> Directories -> IO ()
 riverMain userConfig dirs = do
   conn <- connect
   (registry, globals) <- getRegistry conn
+  let named = M.fromList [ (globalName g, g) | g <- globals ]
   mManager <- bindGlobal conn registry globals
                 riverWindowManagerV1Interface 4 riverWindowManagerV1Version
   mBindings <- bindGlobal conn registry globals
@@ -163,7 +177,7 @@ riverMain userConfig dirs = do
       when (bindingsVer < 2) $ hPutStrLn stderr
         "xmonad-river: river_xkb_bindings_v1 is version 1; submaps cannot \
         \detect an unbound key and will wait for one of their own"
-      run conn manager bindings bindingsVer (fmap fst mLayerShell)
+      run conn registry named manager bindings bindingsVer (fmap fst mLayerShell)
           (fmap fst mCompositor) (fmap fst mShm) userConfig dirs
     _ -> do
       hPutStrLn stderr
@@ -171,10 +185,10 @@ riverMain userConfig dirs = do
         \river_xkb_bindings_v1 not supported by the compositor"
       exitFailure
 
-run :: Connection -> ObjectId -> ObjectId -> Word32 -> Maybe ObjectId
-    -> Maybe ObjectId -> Maybe ObjectId -> XConfig Layout
+run :: Connection -> ObjectId -> M.Map Word32 Global -> ObjectId -> ObjectId -> Word32
+    -> Maybe ObjectId -> Maybe ObjectId -> Maybe ObjectId -> XConfig Layout
     -> Directories -> IO ()
-run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs = do
+run conn registry named manager bindings bindingsVer layerShell compositor shm userConfig dirs = do
   rs <- do
     windowsRef  <- newIORef M.empty
     outputsRef  <- newIORef M.empty
@@ -303,11 +317,17 @@ run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs 
     layerDef   <- newIORef Nothing
     startup    <- newIORef False
     modWatcher <- newIORef Nothing
+    globalsRef <- newIORef named
+    lastManage <- newIORef M.empty
+    lastRender <- newIORef M.empty
+    lastStack  <- newIORef []
+    lastOvPos  <- newIORef M.empty
     adopted    <- newIORef S.empty
     restored   <- newIORef False
     moved      <- newIORef False
     pure Runtime
       { rtConn = conn
+      , rtRegistry = registry
       , rtManager = manager
       , rtBindingsGlobal = bindings
       , rtXkbVersion = bindingsVer
@@ -333,12 +353,20 @@ run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs 
       , rtLayerDefault = layerDef
       , rtStartupSent = startup
       , rtModWatcher = modWatcher
+      , rtGlobals = globalsRef
+      , rtLastManage = lastManage
+      , rtLastRender = lastRender
+      , rtLastStack = lastStack
+      , rtLastOverlayPos = lastOvPos
       , rtAdopted = adopted
       , rtRestored = restored
       , rtLayoutMoved = moved
       }
 
   riverWindowManagerV1Listen conn manager (onManagerEvent rt)
+  listenRegistry conn registry
+    (\g -> modifyIORef' (rtGlobals rt) (M.insert (globalName g) g))
+    (\n -> modifyIORef' (rtGlobals rt) (M.delete n))
   riverWindowManagerV1ManageDirty conn manager
 
   setMainThread
@@ -580,6 +608,11 @@ addWindow rt win = do
     RiverWindowV1ExitFullscreenRequested -> do
       adjust ref win $ \w -> w { rwFullscreen = False }
       queueAction rt $ void $ broadcastEvent (WindowFullscreenChanged win False)
+    -- A client-side title bar being dragged: the same interactive operation
+    -- the mod-drag bindings start.  Edges are ignored; xmonad resizes from
+    -- the bottom-right corner.
+    RiverWindowV1PointerMoveRequested _ -> queueAction rt (mouseMoveWindow win)
+    RiverWindowV1PointerResizeRequested _ _ -> queueAction rt (mouseResizeWindow win)
     _ -> pure ()
   where conn = rtConn rt
 
@@ -599,12 +632,23 @@ addOutput rt out = do
     pure lo
   modifyIORef' ref $ M.insert out RiverOutput
     { roObject = out, roPosition = (0, 0), roSize = (0, 0), roRemoved = False
-    , roLayerObject = mLayer, roLayerArea = Nothing }
+    , roLayerObject = mLayer, roLayerArea = Nothing
+    , roWlOutput = Nothing, roName = Nothing }
   riverOutputV1Listen conn out $ \case
     RiverOutputV1Removed -> adjust ref out $ \o -> o { roRemoved = True }
     RiverOutputV1Position x y -> adjust ref out $ \o -> o { roPosition = (x, y) }
     RiverOutputV1Dimensions width height ->
       adjust ref out $ \o -> o { roSize = (width, height) }
+    -- The wl_output behind this output, for its connector name.  Bound by
+    -- registry name; the name event needs version 4.
+    RiverOutputV1WlOutput name -> do
+      globals <- readIORef (rtGlobals rt)
+      forM_ (M.lookup name globals) $ \g -> when (globalVersion g >= 4) $ do
+        wl <- bindNamed conn (rtRegistry rt) g wlOutputVersion
+        adjust ref out $ \o -> o { roWlOutput = Just wl }
+        wlOutputListen conn wl $ \case
+          WlOutputName n -> adjust ref out $ \o -> o { roName = Just n }
+          _ -> pure ()
     _ -> pure ()
   where conn = rtConn rt
 
@@ -666,6 +710,9 @@ addSeat rt seat = do
                             . screensOf . windowset)
         when (stillThere && isNothing drag && onScreen) (focus win)
     RiverSeatV1PointerLeave -> writeIORef (rtHovered rt) Nothing
+    -- A click, or a touch or tablet tool, on a window: X11's ButtonPress on an
+    -- unfocused client.  Focus follows it whatever 'focusFollowsMouse' says.
+    RiverSeatV1WindowInteraction win -> queueAction rt (focus win)
     RiverSeatV1PointerPosition x y ->
       adjust ref seat $ \s -> s { rsPointer = (x, y) }
     -- A surface this window manager drew was pressed: X11's ButtonPress on a
@@ -708,6 +755,7 @@ reapObjects rt = do
   outs <- readIORef outRef
   forM_ [ o | o <- M.elems outs, roRemoved o ] $ \o -> do
     forM_ (roLayerObject o) (riverLayerShellOutputV1Destroy conn)
+    forM_ (roWlOutput o) (wlOutputRelease conn)
     riverOutputV1Destroy conn (roObject o)
     modifyIORef' outRef (M.delete (roObject o))
 
@@ -919,6 +967,10 @@ adoptNewWindows rt = do
     -- river's default is CSD.  Asked before the manage hook, so a hook can
     -- override it; a CSD-only client ignores it, which river documents.
     emitOp (OpUseDecorations (rwObject w) True)
+    -- What the client may ask for and expect an answer to.  Maximize,
+    -- minimize and a window menu mean nothing to a tiling layout; river's
+    -- default would tell the client all four are supported.
+    emitOp (OpSetCapabilities (rwObject w) riverWindowV1CapabilitiesFullscreen)
     -- A window restored from the state file is already managed -- by the
     -- process that wrote the file -- and gets the setup above only.
     managed <- gets (W.allWindows . windowset)
@@ -1158,6 +1210,12 @@ transmitManage rt plan = do
     OpPointerOpEnd s -> when (M.member s seats) $ riverSeatV1OpEnd conn s
     OpUseDecorations w ssd -> when (M.member w known) $
       (if ssd then riverWindowV1UseSsd else riverWindowV1UseCsd) conn w
+    OpSetCapabilities w caps -> when (M.member w known) $
+      riverWindowV1SetCapabilities conn w caps
+    OpInformFullscreen w full -> when (M.member w known) $
+      (if full then riverWindowV1InformFullscreen else riverWindowV1InformNotFullscreen) conn w
+    OpInformResize w start -> when (M.member w known) $
+      (if start then riverWindowV1InformResizeStart else riverWindowV1InformResizeEnd) conn w
     OpSetPosition w x y -> forM_ (M.lookup w known) $ \rw ->
       riverNodeV1SetPosition conn (rwNode rw) x y
     OpProposeDimensions w dw dh -> when (M.member w known) $
@@ -1192,11 +1250,22 @@ transmitManage rt plan = do
 
   -- Dimensions are window management state.  A window not told it is tiled
   -- draws itself as floating: its own decorations, shadows outside its size.
-  forM_ (planPlacements plan) $ \(win, r) -> when (M.member win known) $ do
-    riverWindowV1ProposeDimensions conn win
-      (fromIntegral (rect_width r)) (fromIntegral (rect_height r))
-    riverWindowV1SetTiled conn win
-      (if S.member win (planFloating plan) then 0 else allEdges)
+  -- Sent when the answer changed since last time, or when the client has not
+  -- taken the size it was given -- re-proposing is how a tiled window is kept
+  -- from resizing itself, as X11's ConfigureRequest refusal did.
+  lastM <- readIORef (rtLastManage rt)
+  current <- fmap M.fromList $ forM
+    [ (win, r, rw) | (win, r) <- planPlacements plan, Just rw <- [M.lookup win known] ] $
+    \(win, r, rw) -> do
+      let tiled = not (S.member win (planFloating plan))
+          want = (rect_width r, rect_height r, tiled)
+          taken = rwDimensions rw == (fromIntegral (rect_width r), fromIntegral (rect_height r))
+      unless (M.lookup win lastM == Just want && taken) $ do
+        riverWindowV1ProposeDimensions conn win
+          (fromIntegral (rect_width r)) (fromIntegral (rect_height r))
+        riverWindowV1SetTiled conn win (if tiled then allEdges else 0)
+      pure (win, want)
+  writeIORef (rtLastManage rt) current
 
   -- Keyboard focus.  A seat whose keyboard has gone to a layer surface is left
   -- alone: river discards the request under an exclusive grab and, under a
@@ -1289,16 +1358,25 @@ transmitRender rt = do
   let winRef = riverWindows rs
   known <- readIORef winRef
 
-  forM_ (planPlacements plan) $ \(win, r) -> forM_ (M.lookup win known) $ \w -> do
-    riverNodeV1SetPosition conn (rwNode w) (rect_x r) (rect_y r)
-    -- Width 0 is how NoBorders removes a border; river reads it as none.
-    let (width, (red, green, blue, alpha)) =
-          M.findWithDefault (0, (0, 0, 0, 0)) win (planBorders plan)
-    riverWindowV1SetBorders conn win allEdges (fromIntegral width)
-      red green blue alpha
-    when (rwHidden w) $ do
-      riverWindowV1Show conn win
-      adjust winRef win $ \x -> x { rwHidden = False }
+  -- Rendering state persists between frames, so only what changed is sent:
+  -- a window that was hidden, or is new, gets everything.
+  lastR <- readIORef (rtLastRender rt)
+  shown <- fmap M.fromList $ forM
+    [ (win, r, w) | (win, r) <- planPlacements plan, Just w <- [M.lookup win known] ] $
+    \(win, r, w) -> do
+      -- Width 0 is how NoBorders removes a border; river reads it as none.
+      let border@(width, (red, green, blue, alpha)) =
+            M.findWithDefault (0, (0, 0, 0, 0)) win (planBorders plan)
+          entry = (r, border)
+      when (rwHidden w) $ do
+        riverWindowV1Show conn win
+        adjust winRef win $ \x -> x { rwHidden = False }
+      unless (M.lookup win lastR == Just entry) $ do
+        riverNodeV1SetPosition conn (rwNode w) (rect_x r) (rect_y r)
+        riverWindowV1SetBorders conn win allEdges (fromIntegral width)
+          red green blue alpha
+      pure (win, entry)
+  writeIORef (rtLastRender rt) shown
 
   -- What the layout did not place is on a workspace that is off screen.
   -- river has no workspaces; this is what implements them.
@@ -1307,21 +1385,26 @@ transmitRender rt = do
       riverWindowV1Hide conn (rwObject w)
       adjust winRef (rwObject w) $ \x -> x { rwHidden = True }
 
-  -- Stacking, bottom to top.  The placement list is topmost-first (upstream's
-  -- convention, and what 'windowUnderPointer' relies on), hence the reverse;
-  -- Magnifier is the layout that can tell.
-  forM_ (reverse (planPlacements plan)) $ \(win, _) ->
-    forM_ (M.lookup win known) $ \w -> riverNodeV1PlaceTop conn (rwNode w)
-  forM_ (planRaised plan) $ \win ->
-    forM_ (M.lookup win known) $ \w -> riverNodeV1PlaceTop conn (rwNode w)
-
-  -- Surfaces this window manager draws (decorations, overlays) are not
-  -- windows and not in the plan; contrib records them and their positions.
+  -- Stacking, bottom to top, restated whenever the order differs from the
+  -- last one sent -- a new node's position in the render list is undefined.
+  -- The placement list is topmost-first (upstream's convention, and what
+  -- 'windowUnderPointer' relies on), hence the reverse; Magnifier is the
+  -- layout that can tell.  The window manager's own surfaces (decorations,
+  -- overlays), which contrib records, go above the windows.
   overlays <- readIORef (riverOverlays rs)
   positions <- readIORef (riverOverlayPos rs)
-  forM_ overlays $ \n -> do
-    forM_ (M.lookup n positions) $ \(x, y) -> riverNodeV1SetPosition conn n x y
-    riverNodeV1PlaceTop conn n
+  let nodeOf win = rwNode <$> M.lookup win known
+      order = concat
+        [ [ n | (win, _) <- reverse (planPlacements plan), Just n <- [nodeOf win] ]
+        , [ n | win <- planRaised plan, Just n <- [nodeOf win] ]
+        , overlays ]
+  lastOrder <- readIORef (rtLastStack rt)
+  lastPos <- readIORef (rtLastOverlayPos rt)
+  forM_ overlays $ \n -> forM_ (M.lookup n positions) $ \p ->
+    unless (M.lookup n lastPos == Just p) $ uncurry (riverNodeV1SetPosition conn n) p
+  unless (order == lastOrder) $ mapM_ (riverNodeV1PlaceTop conn) order
+  writeIORef (rtLastStack rt) order
+  writeIORef (rtLastOverlayPos rt) (M.restrictKeys positions (S.fromList overlays))
   where
     conn = rtConn rt
     rs = rtState rt
