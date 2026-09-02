@@ -31,7 +31,7 @@ import qualified Data.Map as M
 import XMonad.River.Connection (Connection)
 import XMonad.River.Mailbox (Mailbox)
 import XMonad.River.Plan (Op)
-import XMonad.River.Types (BorderColor, Dimension, KeyMask, KeySym, Position, Rectangle, RiverOutput, RiverSeat, RiverWindow, SizeHints, Window, WindowAttributes)
+import XMonad.River.Types (BorderColor, Dimension, KeyMask, KeySym, Position, Rectangle, RiverOutput, RiverSeat, RiverWindow, Window)
 import XMonad.River.Wire (ObjectId)
 
 -- | An interaction that has taken the keyboard: a submap or a hold-to-cycle.
@@ -66,6 +66,8 @@ data RiverState m = RiverState
       -- ^ The @river_xkb_bindings_v1@ version negotiated.  @modifiers_watch@
       -- arrived in 3; sending it to an older object is a protocol error, so
       -- whatever wants a modifier release has to check first.
+    , riverBorderWidth :: !Dimension
+      -- ^ The config's border width, which is what @wa_border_width@ answers.
     , riverCompositor :: !(Maybe ObjectId)
       -- ^ the @wl_compositor@ global, for surfaces the window manager draws
       -- itself.  'Nothing' on a compositor that does not advertise one, which
@@ -118,12 +120,12 @@ data RiverState m = RiverState
     , riverAfterLayout :: !(IORef [m ()])
       -- ^ Actions waiting for the layout, newest first; see
       -- 'XMonad.River.afterLayout'.
-    , riverGeometry :: !(IORef (M.Map Window WindowAttributes))
-      -- ^ What the last layout decided, for 'XMonad.Core.getWindowAttributes'.
-      -- Every window river knows; one the layout did not place is unmapped
-      -- at the origin, as X11 would have said.
-    , riverSizeHints :: !(IORef (M.Map Window SizeHints))
-      -- ^ Likewise for 'XMonad.Core.getWMNormalHints'.
+    , riverGeometry :: !(IORef (M.Map Window Rectangle))
+      -- ^ Where the last layout put each placed window, as a map: what
+      -- 'XMonad.Core.getWindowAttributes' answers from.  A window river knows
+      -- and this does not hold is unmapped at the origin, as X11 would have
+      -- said; the attributes are built when asked, not for every window on
+      -- every pass.
     , riverLogDue :: !(IORef Bool)
       -- ^ 'XMonad.Operations.windows' ran since the last sequence's log hook.
       -- X11 ran the log hook on every @windows@; here it runs once, at the end

@@ -44,6 +44,7 @@ addWindow :: Runtime -> ObjectId -> IO ()
 addWindow rt win = do
   node <- riverWindowV1GetNode conn win
   let ref = riverWindows (rtState rt)
+  modifyIORef' (rtWindowsGen rt) (+ 1)
   modifyIORef' ref $ M.insert win RiverWindow
     { rwObject = win, rwNode = node
     , rwAppId = Nothing, rwTitle = Nothing, rwPid = Nothing

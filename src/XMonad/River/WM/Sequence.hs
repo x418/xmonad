@@ -22,7 +22,6 @@ import Data.IORef
 import Data.List (sortOn)
 import Data.Maybe (fromMaybe)
 import Data.Monoid (appEndo)
-import qualified Data.Map.Lazy as ML
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import System.Directory (doesFileExist)
@@ -34,7 +33,7 @@ import XMonad.Operations (StateFile (..), floatLocation, isFixedSizeOrTransient,
 import XMonad.River.Ops (emitOp)
 import XMonad.River.Plan
 import XMonad.River.Protocol.WindowManagement (riverWindowV1CapabilitiesFullscreen)
-import XMonad.River.State (RiverState(..), borderOverride, forgetBorderOverride)
+import XMonad.River.State (RiverState(..), forgetBorderOverride)
 import XMonad.River.Types
 import XMonad.River.WM.Runtime
 import qualified XMonad.StackSet as W
@@ -232,6 +231,8 @@ adoptNewWindows rt = do
   adopted <- io (readIORef (rtAdopted rt))
   let fresh = [ w | w <- M.elems ws, not (rwClosed w)
                   , not (S.member (rwObject w) adopted) ]
+  -- Once, not per window: a restart brings every window at once.
+  managed <- gets (S.fromList . W.allWindows . windowset)
   forM_ fresh $ \w -> do
     io $ modifyIORef' (rtAdopted rt) (S.insert (rwObject w))
     -- river's default is CSD.  Asked before the manage hook, so a hook can
@@ -243,8 +244,7 @@ adoptNewWindows rt = do
     emitOp (OpSetCapabilities (rwObject w) riverWindowV1CapabilitiesFullscreen)
     -- A window restored from the state file is already managed -- by the
     -- process that wrote the file -- and gets the setup above only.
-    managed <- gets (W.allWindows . windowset)
-    unless (rwObject w `elem` managed) $ do
+    unless (S.member (rwObject w) managed) $ do
       mh <- asks (manageHook . config)
       g <- userCodeDef mempty (runQuery mh (rwObject w))
       -- As upstream's 'manage': a fixed-size or transient window floats.
@@ -295,7 +295,8 @@ applyLayout rt = do
 
   let placements = concatMap fst perScreen
       floating = S.fromList (concatMap snd perScreen)
-      placed = S.fromList (map fst placements)
+      placedMap = M.fromList placements
+      placed = M.keysSet placedMap
       mFocus = W.peek ws
 
   -- Borders are decided here.  The focused window takes the focused colour
@@ -304,12 +305,15 @@ applyLayout rt = do
   bw <- asks (borderWidth . config)
   focusedCol <- asks focusedBorder
   normalCol <- asks normalBorder
-  borders <- fmap M.fromList $ forM placements $ \(win, _) -> do
-    (mWidth, mColor) <- io (borderOverride (riverBorders (rtState rt)) win)
-    let rgba = case mColor of
-          Just c | Just win /= mFocus -> c
-          _ -> pixelColor (if Just win == mFocus then focusedCol else normalCol)
-    pure (win, (fromMaybe bw mWidth, rgba))
+  overrides <- io (readIORef (riverBorders (rtState rt)))
+  let borders = M.fromList
+        [ (win, (fromMaybe bw mWidth, rgba))
+        | (win, _) <- placements
+        , let (mWidth, mColor) = M.findWithDefault (Nothing, Nothing) win overrides
+        , let rgba = case mColor of
+                Just c | Just win /= mFocus -> c
+                _ -> pixelColor (if Just win == mFocus then focusedCol else normalCol)
+        ]
 
   restackRef <- asks (riverRestack . riverState)
   raised <- io (readIORef restackRef)
@@ -323,7 +327,11 @@ applyLayout rt = do
   placeRef <- asks (riverPlacements . riverState)
   old <- io (readIORef placeRef)
   io (atomicWriteIORef (rtLayoutMoved rt) (old /= placements))
-  io (writeIORef placeRef placements)
+  io (atomicWriteIORef placeRef placements)
+  -- What 'getWindowAttributes' answers from; the attributes themselves are
+  -- built when asked, in "XMonad.Core".  Forced: a map left as a thunk
+  -- keeps the previous pass alive until somebody reads it.
+  io (atomicWriteIORef (riverGeometry (rtState rt)) $! placedMap)
 
   io $ atomically $ modifyTVar' (shPlan (rtShared rt)) $ \p -> p
     { planSerial     = planSerial p + 1
@@ -334,25 +342,6 @@ applyLayout rt = do
     , planRaised     = stillUp
     , planFocus      = maybe ClearFocus FocusWindow mFocus
     }
-
-  -- What 'getWindowAttributes' and 'getWMNormalHints' answer with.  Every
-  -- known window, as X11 did: one off screen is unmapped at the origin.
-  allKnown <- io (readIORef (riverWindows (rtState rt)))
-  let placedMap = M.fromList placements
-      attrs w rw = case M.lookup w placedMap of
-        Just r -> WindowAttributes
-          { wa_x = rect_x r, wa_y = rect_y r
-          , wa_width = rect_width r, wa_height = rect_height r
-          , wa_border_width = bw, wa_map_state = waIsViewable
-          , wa_override_redirect = False }
-        Nothing -> let (dw, dh) = rwDimensions rw in WindowAttributes
-          { wa_x = 0, wa_y = 0
-          , wa_width = fromIntegral dw, wa_height = fromIntegral dh
-          , wa_border_width = bw, wa_map_state = waIsUnmapped
-          , wa_override_redirect = False }
-  -- Lazily: only a window somebody asks about has its attributes built.
-  io $ writeIORef (riverGeometry (rtState rt)) (ML.mapWithKey attrs allKnown)
-  io $ writeIORef (riverSizeHints (rtState rt)) (ML.map rwSizeHints allKnown)
 
   -- Last, so 'XMonad.River.afterLayout' sees everything above.  Drained once:
   -- an action these queue waits for the next layout.

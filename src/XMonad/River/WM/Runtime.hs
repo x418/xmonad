@@ -72,6 +72,10 @@ data Runtime = Runtime
     -- loop only
   , rtPending        :: !(IORef [X ()])
     -- ^ Binding actions awaiting the next manage sequence, newest first.
+  , rtDirtySent      :: !(IORef Bool)
+    -- ^ A @manage_dirty@ has gone out and its @manage_start@ has not yet
+    -- arrived.  One request per wait: river starts one sequence for any
+    -- number of them, and a second only adds a round trip.
   , rtJobs           :: !(MB.Mailbox (IO ()))
     -- ^ Work other threads want done on the loop.
   , rtSeqNo          :: !(IORef Int)
@@ -110,15 +114,24 @@ data Runtime = Runtime
   , rtGlobals        :: !(IORef (M.Map Word32 Global))
     -- ^ The registry, kept current, so an output's @wl_output@ can be bound
     -- by the name @river_output_v1.wl_output@ carries.
+  , rtWindowsGen     :: !(IORef Int)
+    -- ^ Counts the windows river has announced; part of what decides whether
+    -- a render sequence has anything new to send.
     -- what the last transmission said, so the next sends only what changed
-  , rtLastManage     :: !(IORef (M.Map Window (Dimension, Dimension, Bool)))
-    -- ^ Proposed dimensions and tiled-ness, per placed window.
+  , rtLastManage     :: !(IORef (M.Map Window ((Dimension, Dimension, Bool), (Int32, Int32))))
+    -- ^ Per placed window: the dimensions and tiled-ness last proposed, and
+    -- the size the client had when that was decided.
   , rtLastRender     :: !(IORef (M.Map Window (Rectangle, (Dimension, BorderColor))))
     -- ^ Position and border, per shown window.
   , rtLastStack      :: !(IORef [ObjectId])
     -- ^ The node order last placed, bottom to top.
   , rtLastOverlayPos :: !(IORef (M.Map ObjectId (Position, Position)))
     -- ^ Where each listed overlay was last put.
+  , rtLastRendered   :: !(IORef (Int, Int, [ObjectId], M.Map ObjectId (Position, Position)))
+    -- ^ What the last render sequence was given: plan serial, window count,
+    -- overlays and their positions.  A render sequence given the same again
+    -- -- river starts one whenever a client changes its own size -- sends
+    -- nothing.
     -- worker only
   , rtAdopted        :: !(IORef (S.Set Window))
     -- ^ Windows the manage hook has run for.
@@ -128,16 +141,21 @@ data Runtime = Runtime
     -- next @pointer_enter@ is then the layout's doing, not the pointer's.
   }
 
--- | Queue an action for the next manage sequence, and ask river for one.
--- Loop thread only.
+-- | Queue an action for the next manage sequence.  Loop thread only.
+--
+-- Nothing is asked of river here.  Every event that queues an action -- a
+-- binding's press, a click, the pointer entering a window, a drag's motion --
+-- is one river sends in the batch that precedes a @manage_start@, and that
+-- @manage_start@ drains the queue in the same pass.  Asking for a sequence
+-- as well would buy an empty one after every key press.  What survives a pass
+-- undrained -- posted from another thread, or a batch split across two reads
+-- -- the loop asks for at the end of the pass.
 queueAction :: Runtime -> X () -> IO ()
 queueAction rt act = queueActions rt [act]
 
 queueActions :: Runtime -> [X ()] -> IO ()
 queueActions _ [] = pure ()
-queueActions rt acts = do
-  modifyIORef' (rtPending rt) (reverse acts ++)
-  riverWindowManagerV1ManageDirty (rtConn rt) (rtManager rt)
+queueActions rt acts = modifyIORef' (rtPending rt) (reverse acts ++)
 
 -- | Take the open capture if it is the one of the given generation, leaving
 -- it otherwise.  Whoever takes it owns its teardown.  Loop thread only.

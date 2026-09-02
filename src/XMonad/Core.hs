@@ -292,7 +292,7 @@ withWindowSet f = gets windowset >>= f
 -- mentioned.
 withWindowAttributes :: Display -> Window -> (WindowAttributes -> X ()) -> X ()
 withWindowAttributes dpy win f = do
-    wa <- io (M.lookup win <$> readIORef (riverGeometry (dpyState dpy)))
+    wa <- io (lookupWindowAttributes dpy win)
     catchX (whenJust wa f) (return ())
 
 -- | A window's attributes: where the last layout put it.  Throws for a window
@@ -300,16 +300,41 @@ withWindowAttributes dpy win f = do
 -- 'withWindowAttributes'.
 getWindowAttributes :: Display -> Window -> IO WindowAttributes
 getWindowAttributes dpy win = do
-    geo <- readIORef (riverGeometry (dpyState dpy))
-    case M.lookup win geo of
-        Just wa -> pure wa
+    wa <- lookupWindowAttributes dpy win
+    case wa of
+        Just a  -> pure a
         Nothing -> ioError . userError $
             "getWindowAttributes: no such window: " ++ show win
+
+-- | Built when asked, from the last layout's placement if there is one and
+-- from what river reported otherwise: a window the layout did not place is
+-- unmapped at the origin, at the size the client took, as X11 would have
+-- said.  'Nothing' for a window river has never mentioned.
+lookupWindowAttributes :: Display -> Window -> IO (Maybe WindowAttributes)
+lookupWindowAttributes dpy win = do
+    let rs = dpyState dpy
+        bw = riverBorderWidth rs
+    placed <- M.lookup win <$> readIORef (riverGeometry rs)
+    case placed of
+        Just r -> pure $ Just WindowAttributes
+            { wa_x = rect_x r, wa_y = rect_y r
+            , wa_width = rect_width r, wa_height = rect_height r
+            , wa_border_width = bw, wa_map_state = waIsViewable
+            , wa_override_redirect = False }
+        Nothing -> do
+            known <- M.lookup win <$> readIORef (riverWindows rs)
+            pure $ flip fmap known $ \rw ->
+                let (dw, dh) = rwDimensions rw in WindowAttributes
+                    { wa_x = 0, wa_y = 0
+                    , wa_width = fromIntegral dw, wa_height = fromIntegral dh
+                    , wa_border_width = bw, wa_map_state = waIsUnmapped
+                    , wa_override_redirect = False }
 
 -- | A window's size hints: river reports a minimum and a maximum and nothing
 -- else.  Total, as X11's was: a window with none gets an empty structure.
 getWMNormalHints :: Display -> Window -> IO SizeHints
-getWMNormalHints dpy w = M.findWithDefault noSizeHints w <$> readIORef (riverSizeHints (dpyState dpy))
+getWMNormalHints dpy w =
+    maybe noSizeHints rwSizeHints . M.lookup w <$> readIORef (riverWindows (dpyState dpy))
 
 -- | Geometry in the tuple shape X11's @getGeometry@ returned:
 -- @(root, x, y, width, height, border width, depth)@.  There is no root

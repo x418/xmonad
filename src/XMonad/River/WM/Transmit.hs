@@ -186,22 +186,30 @@ transmitManage rt plan = do
 
   -- Dimensions are window management state.  A window not told it is tiled
   -- draws itself as floating: its own decorations, shadows outside its size.
-  -- Sent when the answer changed since last time, or when the client has not
-  -- taken the size it was given -- re-proposing is how a tiled window is kept
-  -- from resizing itself, as X11's ConfigureRequest refusal did.
+  -- Proposed when the answer changed since last time, and again when the
+  -- client's size has moved since the last proposal to something other than
+  -- what was asked -- re-proposing is how a tiled window that resizes itself
+  -- is put back, as X11's ConfigureRequest refusal did.  A client that
+  -- settles on a size of its own, a terminal rounding to its cell, is left
+  -- there rather than re-proposed every sequence forever, which would cost it
+  -- a configure per sequence and river a render sequence for each.
   lastM <- readIORef (rtLastManage rt)
   current <- fmap M.fromList $ forM
     [ (win, r, rw) | (win, r) <- planPlacements plan, Just rw <- [M.lookup win known] ] $
     \(win, r, rw) -> do
       let tiled = not (S.member win (planFloating plan))
           want = (rect_width r, rect_height r, tiled)
-          taken = rwDimensions rw == (fromIntegral (rect_width r), fromIntegral (rect_height r))
-      unless (M.lookup win lastM == Just want && taken) $ do
+          asked = (fromIntegral (rect_width r), fromIntegral (rect_height r))
+          dims = rwDimensions rw
+          resend = case M.lookup win lastM of
+            Just (want', seen) -> want' /= want || (dims /= asked && dims /= seen)
+            Nothing -> True
+      when resend $ do
         riverWindowV1ProposeDimensions conn win
           (fromIntegral (rect_width r)) (fromIntegral (rect_height r))
         riverWindowV1SetTiled conn win (if tiled then allEdges else 0)
-      pure (win, want)
-  writeIORef (rtLastManage rt) current
+      pure (win, (want, dims))
+  atomicWriteIORef (rtLastManage rt) $! current
 
   -- Keyboard focus.  A seat whose keyboard has gone to a layer surface is left
   -- alone: river discards the request under an exclusive grab and, under a
@@ -298,7 +306,27 @@ transmitRender rt = do
   plan <- readTVarIO (shPlan (rtShared rt))
   let winRef = riverWindows rs
   known <- readIORef winRef
+  overlays <- readIORef (riverOverlays rs)
+  positions <- readIORef (riverOverlayPos rs)
+  windowsGen <- readIORef (rtWindowsGen rt)
 
+  -- river starts a render sequence of its own whenever a client changes its
+  -- size, with nothing new for this side to say.  Given the same plan, the
+  -- same windows and the same overlays as last time, there is nothing to
+  -- diff and nothing is sent.
+  let given = (planSerial plan, windowsGen, overlays,
+               M.restrictKeys positions (S.fromList overlays))
+  lastGiven <- readIORef (rtLastRendered rt)
+  unless (given == lastGiven) $ do
+    atomicWriteIORef (rtLastRendered rt) $! given
+    renderPlan rt plan known overlays positions
+  where
+    rs = rtState rt
+
+-- | The rendering half of a plan, against the windows river has.
+renderPlan :: Runtime -> Plan -> M.Map ObjectId RiverWindow -> [ObjectId]
+           -> M.Map ObjectId (Position, Position) -> IO ()
+renderPlan rt plan known overlays positions = do
   -- Rendering state persists between frames, so only what changed is sent:
   -- a window that was hidden, or is new, gets everything.
   lastR <- readIORef (rtLastRender rt)
@@ -317,14 +345,15 @@ transmitRender rt = do
         riverWindowV1SetBorders conn win allEdges (fromIntegral width)
           red green blue alpha
       pure (win, entry)
-  writeIORef (rtLastRender rt) shown
+  atomicWriteIORef (rtLastRender rt) $! shown
 
   -- What the layout did not place is on a workspace that is off screen.
   -- river has no workspaces; this is what implements them.
-  forM_ (M.elems known) $ \w ->
-    unless (S.member (rwObject w) (planVisible plan) || rwHidden w) $ do
-      riverWindowV1Hide conn (rwObject w)
-      adjust winRef (rwObject w) $ \x -> x { rwHidden = True }
+  let toHide = [ w | w <- M.elems known
+                   , not (S.member (rwObject w) (planVisible plan)), not (rwHidden w) ]
+  forM_ toHide $ \w -> riverWindowV1Hide conn (rwObject w)
+  unless (null toHide) $ modifyIORef' winRef $ \m ->
+    foldr (\w -> M.adjust (\x -> x { rwHidden = True }) (rwObject w)) m toHide
 
   -- Stacking, bottom to top, restated whenever the order differs from the
   -- last one sent -- a new node's position in the render list is undefined.
@@ -332,8 +361,6 @@ transmitRender rt = do
   -- 'windowUnderPointer' relies on), hence the reverse; Magnifier is the
   -- layout that can tell.  The window manager's own surfaces (decorations,
   -- overlays), which contrib records, go above the windows.
-  overlays <- readIORef (riverOverlays rs)
-  positions <- readIORef (riverOverlayPos rs)
   let nodeOf win = rwNode <$> M.lookup win known
       order = concat
         [ [ n | (win, _) <- reverse (planPlacements plan), Just n <- [nodeOf win] ]
@@ -344,8 +371,8 @@ transmitRender rt = do
   forM_ overlays $ \n -> forM_ (M.lookup n positions) $ \p ->
     unless (M.lookup n lastPos == Just p) $ uncurry (riverNodeV1SetPosition conn n) p
   unless (order == lastOrder) $ mapM_ (riverNodeV1PlaceTop conn) order
-  writeIORef (rtLastStack rt) order
-  writeIORef (rtLastOverlayPos rt) (M.restrictKeys positions (S.fromList overlays))
+  length order `seq` atomicWriteIORef (rtLastStack rt) order
+  atomicWriteIORef (rtLastOverlayPos rt) $! M.restrictKeys positions (S.fromList overlays)
   where
     conn = rtConn rt
-    rs = rtState rt
+    winRef = riverWindows (rtState rt)

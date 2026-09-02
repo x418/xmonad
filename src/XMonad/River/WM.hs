@@ -120,7 +120,6 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm u
     dragOrigin  <- newIORef (0, 0)
     afterLayout <- newIORef []
     geometry    <- newIORef M.empty
-    sizeHints   <- newIORef M.empty
     logDue      <- newIORef False
     borders     <- newIORef M.empty
     submapGen   <- newIORef 0
@@ -130,6 +129,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm u
       { riverManager     = manager
       , riverBindings    = bindings
       , riverXkbVersion  = bindingsVer
+      , riverBorderWidth = borderWidth userConfig
       , riverCompositor  = compositor
       , riverShm         = shm
       , riverWindows     = windowsRef
@@ -148,7 +148,6 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm u
       , riverDragOrigin  = dragOrigin
       , riverAfterLayout = afterLayout
       , riverGeometry    = geometry
-      , riverSizeHints   = sizeHints
       , riverLogDue      = logDue
       , riverBorders     = borders
       , riverSubmapGen   = submapGen
@@ -200,7 +199,9 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm u
       runX' act = do
         st <- readIORef stateRef
         (a, st') <- runX xconf st act
-        writeIORef stateRef st'
+        -- Forced: the state is otherwise a thunk over the previous one for
+        -- as long as nothing reads it, one per action.
+        writeIORef stateRef $! st'
         pure a
 
   -- The worker.  One handler per action, so that an action which throws costs
@@ -221,6 +222,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm u
   sh <- Shared <$> newTVarIO emptyPlan <*> newTVarIO 0
   rt <- do
     pending    <- newIORef []
+    dirtySent  <- newIORef False
     jobs       <- MB.newMailbox
     seqNo      <- newIORef 0
     sent       <- newIORef 0
@@ -238,10 +240,12 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm u
     modWatcher <- newIORef Nothing
     modWatched <- newIORef False
     globalsRef <- newIORef named
+    windowsGen <- newIORef 0
     lastManage <- newIORef M.empty
     lastRender <- newIORef M.empty
     lastStack  <- newIORef []
     lastOvPos  <- newIORef M.empty
+    lastGiven  <- newIORef (-1, -1, [], M.empty)
     adopted    <- newIORef S.empty
     restored   <- newIORef False
     moved      <- newIORef False
@@ -259,6 +263,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm u
       , rtState = rs
       , rtShared = sh
       , rtPending = pending
+      , rtDirtySent = dirtySent
       , rtJobs = jobs
       , rtSeqNo = seqNo
       , rtSent = sent
@@ -276,10 +281,12 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm u
       , rtModWatcher = modWatcher
       , rtModWatched = modWatched
       , rtGlobals = globalsRef
+      , rtWindowsGen = windowsGen
       , rtLastManage = lastManage
       , rtLastRender = lastRender
       , rtLastStack = lastStack
       , rtLastOverlayPos = lastOvPos
+      , rtLastRendered = lastGiven
       , rtAdopted = adopted
       , rtRestored = restored
       , rtLayoutMoved = moved
@@ -290,6 +297,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm u
     (\g -> modifyIORef' (rtGlobals rt) (M.insert (globalName g) g))
     (\n -> modifyIORef' (rtGlobals rt) (M.delete n))
   riverWindowManagerV1ManageDirty conn manager
+  writeIORef (rtDirtySent rt) True
 
   setMainThread
   -- @xmonad --restart@ arrives over a unix socket, on a thread of its own so
@@ -327,7 +335,19 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm u
         -- A plan published after its sequence was answered is transmitted in
         -- a sequence of its own; one request per serial.
         let stranded = serial > max sent asked
-        when (dirty || stranded) $ riverWindowManagerV1ManageDirty conn manager
+        -- Actions and a disarm still queued have no manage_start behind
+        -- them: river sends a binding's press in the batch that precedes one,
+        -- and that manage_start drains the queue.  What is left was posted
+        -- from another thread, or arrived in a batch split across two reads,
+        -- and needs a sequence asked for.  One request until it arrives:
+        -- river starts one sequence for any number of them.
+        pendingLeft <- not . null <$> readIORef (rtPending rt)
+        disarmLeft <- readIORef (rtDisarm rt)
+        outstanding <- readIORef (rtDirtySent rt)
+        let want = dirty || stranded || pendingLeft || disarmLeft
+        when (want && not outstanding) $ do
+          riverWindowManagerV1ManageDirty conn manager
+          writeIORef (rtDirtySent rt) True
         when stranded $ writeIORef (rtAsked rt) serial
         takeNowOps rs >>= mapM_ (sendNow rt)
         -- Flush before waiting, or a request queued on this pass never
@@ -438,6 +458,7 @@ onManagerEvent rt = \case
     Nothing  -> exitSuccess
     Just (prog, as) -> executeFile prog True as Nothing
   RiverWindowManagerV1ManageStart -> do
+    writeIORef (rtDirtySent rt) False
     n <- atomicModifyIORef' (rtSeqNo rt) (\k -> (k + 1, k + 1))
     acts <- atomicModifyIORef' (rtPending rt) (\as -> ([], reverse as))
     rtSubmit rt (manageSequence rt n acts)
@@ -482,10 +503,13 @@ onManagerEvent rt = \case
 -- event for the seat until the sequence is answered.
 awaitPlan :: Shared -> Int -> Int -> IO Bool
 awaitPlan sh wanted micros = do
-  expired <- registerDelay micros
-  atomically $
-        (True  <$ (readTVar (shSeqDone sh) >>= check . (>= wanted)))
-    `orElse` (False <$ (readTVar expired >>= check))
+  -- The common case, a worker already done, registers no timer.
+  done <- readTVarIO (shSeqDone sh)
+  if done >= wanted then pure True else do
+    expired <- registerDelay micros
+    atomically $
+          (True  <$ (readTVar (shSeqDone sh) >>= check . (>= wanted)))
+      `orElse` (False <$ (readTVar expired >>= check))
 
 -- | How long the loop waits for a sequence before answering with the plan it
 -- has.  Long enough that anything not doing I/O lands in its own sequence;
