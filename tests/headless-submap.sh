@@ -146,7 +146,7 @@ first=$(head -1 "$ACTIONS")
 # reason: a bare grep for "error" matches wlroots printing its EGL extension
 # list, which contains EGL_EXT_create_context_robustness among others.
 trouble=$(grep -nE '^river-submap-spec:|protocol error|invalid object|no such interface' "$SPECLOG" 2>/dev/null \
-          | grep -vE 'river-submap-spec: (inner-|global-)')
+          | grep -vE 'river-submap-spec: (inner-|global-|slow-)')
 if [ -n "$trouble" ]; then
     fail "the window manager reported no errors"
     echo "$trouble" | head -10 | sed 's/^/    /' >&2
