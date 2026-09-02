@@ -5,7 +5,18 @@
 --
 -- The source XML is not checked in. It is downloaded on demand into
 -- @protocol/@, which is gitignored, from the pinned upstream revisions in
--- 'waylandCommit' and 'riverCommit'.
+-- 'waylandCommit' and 'riverCommit'.  Run from the repository root.
+--
+-- On NixOS run it in the project's context, which is what tests/check-all.sh
+-- does:
+--
+-- > stack exec --package xml-conduit --package text -- runghc util/generate-protocol.hs
+--
+-- Script mode (the @stack script@ line above, for @./util/generate-protocol.hs@
+-- elsewhere) ignores the project's stack.yaml and so its nix shell: the
+-- default shell stack builds has no zlib, and xml-conduit's dependency does
+-- not build in it.  The options line cannot name a shell either -- stack has
+-- entered the shell before it reads the line.
 
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}

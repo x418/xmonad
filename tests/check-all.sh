@@ -45,7 +45,9 @@ ok
 step "protocol current"
 if curl -fsSI --max-time 10 https://codeberg.org/ >/dev/null 2>&1; then
     rm -rf protocol
-    ./util/generate-protocol.hs >/dev/null
+    # In the project's context rather than script mode, so that stack's nix
+    # shell is the one stack.yaml names; see the script's header.
+    stack exec --package xml-conduit --package text -- runghc util/generate-protocol.hs >/dev/null
     git diff --quiet -- src/XMonad/River/Protocol
     ok
 else
