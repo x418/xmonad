@@ -74,9 +74,9 @@ module XMonad.Operations (
     ) where
 
 import XMonad.Core
+import XMonad.River.Ops (emitNow, emitOp)
 import XMonad.River.Plan (Op(..))
-import XMonad.River.Runtime (emitNow, emitOp, setBorderColor)
-import XMonad.River.State (RiverState(..), updatePlacement)
+import XMonad.River.State (RiverState(..), overrideBorderColor, updatePlacement)
 import XMonad.River.Types
 import XMonad.River.Protocol.WindowManagement
 import qualified XMonad.StackSet as W
@@ -220,8 +220,9 @@ scaleRationalRect (Rectangle sx sy sw sh) (W.RationalRect rx ry rw rh)
 -- | Return workspace visible on screen @sc@, or 'Nothing'.
 
 setWindowBorderWithFallback :: Display -> Window -> String -> Pixel -> X ()
-setWindowBorderWithFallback _ w color fallback =
-    io (setBorderColor w (pixelColor (fromMaybe fallback (parseColorMaybe color))))
+setWindowBorderWithFallback _ w color fallback = do
+    ref <- asks (riverBorders . riverState)
+    io (overrideBorderColor ref w (pixelColor (fromMaybe fallback (parseColorMaybe color))))
 
 -- | Is the window is under management by xmonad?
 

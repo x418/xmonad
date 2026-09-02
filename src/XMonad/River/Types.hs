@@ -22,6 +22,7 @@ module XMonad.River.Types
   , shiftMask, lockMask, controlMask, mod1Mask, mod2Mask, mod3Mask, mod4Mask
   , mod5Mask, noModMask
   , button1, button2, button3, button4, button5
+  , riverModifiers
   , EventType, keyPress, keyRelease
     -- * Windows
   , Window
@@ -41,10 +42,14 @@ module XMonad.River.Types
   , layerHasFocus
   ) where
 
+import Data.Bits ((.&.))
 import Data.ByteString (ByteString)
 import Data.Int (Int32)
 import Data.Word (Word32)
 
+import XMonad.River.Protocol.WindowManagement
+  ( riverSeatV1ModifiersCtrl, riverSeatV1ModifiersMod1, riverSeatV1ModifiersMod3
+  , riverSeatV1ModifiersMod4, riverSeatV1ModifiersMod5, riverSeatV1ModifiersShift )
 import XMonad.River.Wire (ObjectId)
 
 --------------------------------------------------------------------------------
@@ -438,6 +443,18 @@ mod3Mask    = 32
 mod4Mask    = 64
 mod5Mask    = 128
 noModMask   = 0
+
+-- | The part of a 'KeyMask' river can bind on: lock and mod2 (caps and num
+-- lock) have no bit in @river_seat_v1.modifiers@.
+riverModifiers :: KeyMask -> Word32
+riverModifiers mask = mask .&. supported
+  where
+    supported = riverSeatV1ModifiersShift
+            + riverSeatV1ModifiersCtrl
+            + riverSeatV1ModifiersMod1
+            + riverSeatV1ModifiersMod3
+            + riverSeatV1ModifiersMod4
+            + riverSeatV1ModifiersMod5
 
 -- | X11 button numbers.
 --

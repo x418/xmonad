@@ -122,14 +122,17 @@ import Data.Monoid (Ap(..))
 import qualified Data.Map as M
 import qualified Data.Set as S
 
-import XMonad.River.Connection (Connection, Display)
+import XMonad.River.Connection (Connection)
 import XMonad.River.Keysym
 import XMonad.River.Mailbox (Mailbox)
-import XMonad.River.State (RiverState(..))
-import XMonad.River.Runtime (getGeometry, getWMNormalHints, getWindowAttributes, lookupGeometry,
-                             sendRestart, setWindowBorder, setWindowBorderWidth)
+import XMonad.River.State (RiverState(..), Display'(..), overrideBorderColor, overrideBorderWidth)
+import XMonad.River.Runtime (sendRestart)
 import XMonad.River.Types
 import XMonad.River.Wire (ObjectId, nullObject)
+
+-- | The compositor connection and the state behind the queries made on it.
+-- X11's was the connection alone; see 'XMonad.River.State.Display''.
+type Display = Display' X
 
 
 -- | XState, the (mutable) window manager state.
@@ -283,9 +286,47 @@ withWindowSet f = gets windowset >>= f
 -- answered @BadWindow@; here it is skipped for a window river has never
 -- mentioned.
 withWindowAttributes :: Display -> Window -> (WindowAttributes -> X ()) -> X ()
-withWindowAttributes _ win f = do
-    wa <- io (lookupGeometry win)
+withWindowAttributes dpy win f = do
+    wa <- io (M.lookup win <$> readIORef (riverGeometry (dpyState dpy)))
     catchX (whenJust wa f) (return ())
+
+-- | A window's attributes: where the last layout put it.  Throws for a window
+-- river has never mentioned, as @XGetWindowAttributes@ did; most callers want
+-- 'withWindowAttributes'.
+getWindowAttributes :: Display -> Window -> IO WindowAttributes
+getWindowAttributes dpy win = do
+    geo <- readIORef (riverGeometry (dpyState dpy))
+    case M.lookup win geo of
+        Just wa -> pure wa
+        Nothing -> ioError . userError $
+            "getWindowAttributes: no such window: " ++ show win
+
+-- | A window's size hints: river reports a minimum and a maximum and nothing
+-- else.  Total, as X11's was: a window with none gets an empty structure.
+getWMNormalHints :: Display -> Window -> IO SizeHints
+getWMNormalHints dpy w = M.findWithDefault noSizeHints w <$> readIORef (riverSizeHints (dpyState dpy))
+
+-- | Geometry in the tuple shape X11's @getGeometry@ returned:
+-- @(root, x, y, width, height, border width, depth)@.  There is no root
+-- window and no depth; callers in xmonad-contrib discard both.
+getGeometry :: Display -> Window
+            -> IO (Window, Position, Position, Dimension, Dimension, Dimension, Int)
+getGeometry dpy win = do
+    wa <- getWindowAttributes dpy win
+    pure ( nullObject
+         , wa_x wa, wa_y wa, wa_width wa, wa_height wa, wa_border_width wa, 0 )
+
+-- | Override how wide a border the window manager draws around one window.
+-- Zero removes it, which is what "XMonad.Layout.NoBorders" is built on.
+-- Sticky: river keeps no border state, so the override is restated every
+-- frame until the window goes.
+setWindowBorderWidth :: Display -> Window -> Dimension -> IO ()
+setWindowBorderWidth dpy = overrideBorderWidth (riverBorders (dpyState dpy))
+
+-- | Override the colour of one window's border.  A 'Pixel' is the packed
+-- colour here rather than a colormap index; the signature is X11's.
+setWindowBorder :: Display -> Window -> Pixel -> IO ()
+setWindowBorder dpy w = overrideBorderColor (riverBorders (dpyState dpy)) w . pixelColor
 
 -- | True if the given window is the root window
 --

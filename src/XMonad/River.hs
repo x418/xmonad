@@ -117,6 +117,12 @@ module XMonad.River (
     -- anywhere.  This is the way out, and it is worth binding.
     closeAllPrompts,
 
+    -- * The display
+    --
+    -- | What 'XMonad.Core.withDisplay' hands out: the connection, and the
+    -- state the queries on it are answered from.
+    Display'(..),
+
     -- * Lifecycle
     RestartRequested(..), setMainThread, exitSession,
 
@@ -130,7 +136,7 @@ module XMonad.River (
 import Data.Bits ((.&.))
 import System.IO (hPutStrLn, stderr)
 import Control.Concurrent.STM (atomically, writeTVar)
-import Data.IORef (atomicWriteIORef, modifyIORef', readIORef)
+import Data.IORef (IORef, atomicModifyIORef', atomicWriteIORef, modifyIORef', readIORef)
 import Data.Maybe (fromMaybe, isJust)
 import Data.Word (Word32)
 import Control.Concurrent (forkIO, threadDelay)
@@ -144,17 +150,17 @@ import qualified Data.Map.Strict as M
 import XMonad.Core
 import Data.List (find)
 import XMonad.Operations (applySizeHintsContents, pointWithin)
-import XMonad.River.Keyboard (riverModifiers)
 import XMonad.River.Keysym.Table (keysymTable, reverseKeysymTable)
 import qualified XMonad.River.Mailbox as MB
 import XMonad.River.Client (closeAllClients)
 import qualified XMonad.River.Connection as C
 import XMonad.River.Protocol.WindowManagement
 import XMonad.River.Protocol.XkbBindings
+import XMonad.River.Ops (emitNow, emitOp)
 import XMonad.River.Plan (Op(..))
-import XMonad.River.Runtime (emitNow, emitOp, RestartRequested(..), currentSubmapGeneration, nextSubmapGeneration, setMainThread, setModifierWatcher, warnUnimplemented)
+import XMonad.River.Runtime (RestartRequested(..), setMainThread, warnUnimplemented)
 import XMonad.River.Types
-import XMonad.River.State (InputCapture(..), RiverState(..), updatePlacement)
+import XMonad.River.State (Display'(..), InputCapture(..), RiverState(..), updatePlacement)
 
 -- | Run an action on the event loop, from any thread.
 --
@@ -513,7 +519,7 @@ whileModifiersHeld
     -> X ()
 whileModifiersHeld mods captures onKey onDone = do
     conf <- ask
-    gen <- io nextSubmapGeneration
+    gen <- io (nextGeneration (riverSubmapGen (riverState conf)))
     seats <- io (readIORef (riverSeats (riverState conf)))
     -- @modifiers_watch@ arrived in version 3 of river_xkb_bindings_v1, and
     -- without it there is no way to learn that a modifier was released.  Doing
@@ -570,7 +576,7 @@ submapNextKey
     -> X ()
 submapNextKey subKeys onUnbound = do
     conf <- ask
-    gen <- io nextSubmapGeneration
+    gen <- io (nextGeneration (riverSubmapGen (riverState conf)))
     let entries = M.toList subKeys
         keys' = map fst entries
         acts = map snd entries
@@ -589,3 +595,6 @@ submapNextKey subKeys onUnbound = do
         }
     emitOp (OpCaptureInput keys' 0 True gen)
 
+-- | Claim the next capture generation.
+nextGeneration :: IORef Int -> IO Int
+nextGeneration ref = atomicModifyIORef' ref (\n -> (n + 1, n + 1))

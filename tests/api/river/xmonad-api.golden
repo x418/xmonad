@@ -31,7 +31,7 @@ XMonad | Directories | type Directories = Directories' FilePath
 XMonad | Directories' | data Directories' a = Directories {dataDir :: a, cfgDir :: a, cacheDir :: a}
 XMonad | Directories' | type Directories' :: * -> *
 XMonad | Display | type Display :: *
-XMonad | Display | type Display = Connection
+XMonad | Display | type Display = Display' X
 XMonad | Event | data Event = DestroyWindowEvent {ev_window :: Window} | WindowAdded {ev_window :: Window} | WindowTitleChanged {ev_window :: Window, ev_text :: (Maybe ByteString)} | WindowAppIdChanged {ev_window :: Window, ev_text :: (Maybe ByteString)} | OutputAdded {ev_output :: ObjectId} | OutputRemoved {ev_output :: ObjectId} | SeatAdded {ev_seat :: ObjectId} | SeatRemoved {ev_seat :: ObjectId} | ScreenLayoutChanged | SessionLocked | SessionUnlocked | KeyPressed {ev_state :: KeyMask, ev_keysym :: KeySym} | TimerFired Int | WindowFullscreenChanged {ev_window :: Window, ev_fullscreen :: Bool} | SurfaceClicked {ev_window :: Window, ev_x :: Position, ev_y :: Position}
 XMonad | Event | type Event :: *
 XMonad | EventType | type EventType :: *
@@ -612,7 +612,7 @@ XMonad.Core | Directories | type Directories = Directories' FilePath
 XMonad.Core | Directories' | data Directories' a = Directories {dataDir :: a, cfgDir :: a, cacheDir :: a}
 XMonad.Core | Directories' | type Directories' :: * -> *
 XMonad.Core | Display | type Display :: *
-XMonad.Core | Display | type Display = Connection
+XMonad.Core | Display | type Display = Display' X
 XMonad.Core | Event | data Event = DestroyWindowEvent {ev_window :: Window} | WindowAdded {ev_window :: Window} | WindowTitleChanged {ev_window :: Window, ev_text :: (Maybe ByteString)} | WindowAppIdChanged {ev_window :: Window, ev_text :: (Maybe ByteString)} | OutputAdded {ev_output :: ObjectId} | OutputRemoved {ev_output :: ObjectId} | SeatAdded {ev_seat :: ObjectId} | SeatRemoved {ev_seat :: ObjectId} | ScreenLayoutChanged | SessionLocked | SessionUnlocked | KeyPressed {ev_state :: KeyMask, ev_keysym :: KeySym} | TimerFired Int | WindowFullscreenChanged {ev_window :: Window, ev_fullscreen :: Bool} | SurfaceClicked {ev_window :: Window, ev_x :: Position, ev_y :: Position}
 XMonad.Core | Event | type Event :: *
 XMonad.Core | EventType | type EventType :: *

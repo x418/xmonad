@@ -23,15 +23,26 @@
 --
 -----------------------------------------------------------------------------
 
-module XMonad.River.State (RiverState(..), InputCapture(..), updatePlacement) where
+module XMonad.River.State
+  ( RiverState(..)
+  , InputCapture(..)
+  , Display'(..)
+  , updatePlacement
+    -- * One-shot requests
+  , queueOp, queueNow, takeOps, takeNowOps, nowOpsPending
+    -- * Border overrides
+  , borderOverride, overrideBorderWidth, overrideBorderColor, forgetBorderOverride
+  ) where
 
-import Control.Concurrent.STM (TVar)
+import Control.Concurrent.STM (STM, TVar, atomically, check, modifyTVar', readTVar, stateTVar)
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Data.IORef (IORef, modifyIORef')
+import Data.IORef (IORef, atomicModifyIORef', modifyIORef', readIORef)
 import qualified Data.Map as M
 
+import XMonad.River.Connection (Connection)
 import XMonad.River.Mailbox (Mailbox)
-import XMonad.River.Types (KeyMask, KeySym, Position, Rectangle, RiverOutput, RiverSeat, RiverWindow, Window)
+import XMonad.River.Plan (Op)
+import XMonad.River.Types (BorderColor, Dimension, KeyMask, KeySym, Position, Rectangle, RiverOutput, RiverSeat, RiverWindow, SizeHints, Window, WindowAttributes)
 import XMonad.River.Wire (ObjectId)
 
 -- | Everything the window manager knows about its connection to river.
@@ -154,7 +165,79 @@ data RiverState m = RiverState
       -- same code reads the geometry from before its own change.  This is
       -- where an action that needs the answer waits for it.  See
       -- 'XMonad.River.afterLayout'.
+    , riverGeometry :: !(IORef (M.Map Window WindowAttributes))
+      -- ^ What the last layout decided, for 'XMonad.Core.getWindowAttributes'.
+      -- Every window river knows; one the layout did not place is unmapped
+      -- at the origin, as X11 would have said.
+    , riverSizeHints :: !(IORef (M.Map Window SizeHints))
+      -- ^ Likewise for 'XMonad.Core.getWMNormalHints'.
+    , riverBorders :: !(IORef (M.Map Window (Maybe Dimension, Maybe BorderColor)))
+      -- ^ Per-window overrides of border width and colour.  Sticky until the
+      -- window goes: river keeps no border state, so the render sequence
+      -- restates borders from the plan and an override has to be remembered.
+    , riverSubmapGen :: !(IORef Int)
+      -- ^ Numbers each keyboard capture, so a deadline for an earlier one
+      -- cannot close the current one.
+    , riverOps :: !(IORef [Op])
+      -- ^ One-shot requests awaiting the next manage sequence, newest first.
+      -- Drained as transmitted: each is an effect river performs once.
+    , riverNowOps :: !(TVar [Op])
+      -- ^ Requests that need no sequence and must not wait for one.  A
+      -- 'TVar' so the loop, which waits on it, wakes.
     }
+
+-- | What 'XMonad.Core.withDisplay' hands out.  X11's was the server
+-- connection; the queries contrib makes on it -- 'XMonad.Core.getWindowAttributes',
+-- 'XMonad.Core.setWindowBorder' -- are answered from the window manager's own
+-- state here, so it carries that too.  "XMonad.Core" instantiates it as
+-- @Display' X@ under the name @Display@.
+data Display' m = Display'
+    { dpyConn  :: !Connection
+    , dpyState :: !(RiverState m)
+    }
+
+--------------------------------------------------------------------------------
+-- One-shot requests
+
+-- | Ask for a request to go out with the next manage sequence.
+queueOp :: MonadIO m => RiverState n -> Op -> m ()
+queueOp rs op = liftIO (atomicModifyIORef' (riverOps rs) (\ops -> (op : ops, ())))
+
+-- | Ask for a request to go out on the event loop's next pass.
+queueNow :: MonadIO m => RiverState n -> Op -> m ()
+queueNow rs op = liftIO (atomically (modifyTVar' (riverNowOps rs) (op :)))
+
+-- | Take everything queued, oldest first, leaving none.
+takeOps :: RiverState n -> IO [Op]
+takeOps rs = atomicModifyIORef' (riverOps rs) (\ops -> ([], reverse ops))
+
+takeNowOps :: RiverState n -> IO [Op]
+takeNowOps rs = atomically (stateTVar (riverNowOps rs) (\ops -> (reverse ops, [])))
+
+-- | Retries until a now-op is queued; for the loop's wait.
+nowOpsPending :: RiverState n -> STM ()
+nowOpsPending rs = readTVar (riverNowOps rs) >>= check . not . null
+
+--------------------------------------------------------------------------------
+-- Border overrides
+
+type Borders = IORef (M.Map Window (Maybe Dimension, Maybe BorderColor))
+
+-- | What has been overridden for one window; no override is @(Nothing, Nothing)@.
+borderOverride :: Borders -> Window -> IO (Maybe Dimension, Maybe BorderColor)
+borderOverride ref w = M.findWithDefault (Nothing, Nothing) w <$> readIORef ref
+
+overrideBorderWidth :: Borders -> Window -> Dimension -> IO ()
+overrideBorderWidth ref w n = atomicModifyIORef' ref $ \m ->
+    (M.alter (\o -> Just (Just n, maybe Nothing snd o)) w m, ())
+
+overrideBorderColor :: Borders -> Window -> BorderColor -> IO ()
+overrideBorderColor ref w c = atomicModifyIORef' ref $ \m ->
+    (M.alter (\o -> Just (maybe Nothing fst o, Just c)) w m, ())
+
+-- | Drop a window's overrides once it is gone: river recycles object ids.
+forgetBorderOverride :: Borders -> Window -> IO ()
+forgetBorderOverride ref w = atomicModifyIORef' ref (\m -> (M.delete w m, ()))
 
 -- | Correct the recorded geometry of a window that something has just moved or
 -- resized outside a layout run.

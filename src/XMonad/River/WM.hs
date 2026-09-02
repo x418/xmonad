@@ -36,6 +36,7 @@ import Data.List (isSuffixOf, sortOn)
 import Data.Maybe (fromMaybe, isNothing)
 import Data.Monoid (All(..), appEndo)
 import Data.Word (Word32)
+import qualified Data.Map.Lazy as ML
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import System.Directory (doesFileExist)
@@ -50,15 +51,15 @@ import XMonad.Operations (StateFile (..), broadcastMessage, floatLocation, focus
 import XMonad.River.Client (closeAllClients)
 import XMonad.River.Connection
 import qualified XMonad.River.Control as Ctl
-import XMonad.River.Keyboard (riverModifiers)
 import qualified XMonad.River.Mailbox as MB
+import XMonad.River.Ops (emitOp)
 import XMonad.River.Plan
 import XMonad.River.Protocol.Core
 import XMonad.River.Protocol.LayerShell
 import XMonad.River.Protocol.WindowManagement
 import XMonad.River.Protocol.XkbBindings
-import XMonad.River.Runtime (RestartRequested(..), emitOp, exitLoopWith, forgetBorderOverride, lookupBorderOverride, nowOpsPending, publishGeometry, publishSizeHints, sendRestart, setMainThread, setModifierWatcher, takeModifierWatcher, takeNowOps, takeOps)
-import XMonad.River.State (InputCapture(..), RiverState(..))
+import XMonad.River.Runtime (RestartRequested(..), exitLoopWith, sendRestart, setMainThread)
+import XMonad.River.State (Display'(..), InputCapture(..), RiverState(..), borderOverride, forgetBorderOverride, nowOpsPending, takeNowOps, takeOps)
 import XMonad.River.Types
 import XMonad.River.Wire (ObjectId, isNullObject)
 import qualified XMonad.StackSet as W
@@ -118,6 +119,10 @@ data Runtime = Runtime
   , rtLayerDefault   :: !(IORef (Maybe ObjectId))
     -- ^ The output last nominated for layer surfaces that name none.
   , rtStartupSent    :: !(IORef Bool)
+  , rtModWatcher     :: !(IORef (Maybe (Word32 -> Word32 -> IO ())))
+    -- ^ What to run when the watched modifiers change.  One slot:
+    -- @modifiers_watch@ is one mask per seat.  Taken as it fires, so a
+    -- release concluding an interaction is delivered once.
     -- worker only
   , rtAdopted        :: !(IORef (S.Set Window))
     -- ^ Windows the manage hook has run for.
@@ -186,6 +191,12 @@ run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs 
     captureRef  <- newIORef Nothing
     dragOrigin  <- newIORef (0, 0)
     afterLayout <- newIORef []
+    geometry    <- newIORef M.empty
+    sizeHints   <- newIORef M.empty
+    borders     <- newIORef M.empty
+    submapGen   <- newIORef 0
+    ops         <- newIORef []
+    nowOps      <- newTVarIO []
     pure RiverState
       { riverManager     = manager
       , riverBindings    = bindings
@@ -206,6 +217,12 @@ run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs 
       , riverCapture     = captureRef
       , riverDragOrigin  = dragOrigin
       , riverAfterLayout = afterLayout
+      , riverGeometry    = geometry
+      , riverSizeHints   = sizeHints
+      , riverBorders     = borders
+      , riverSubmapGen   = submapGen
+      , riverOps         = ops
+      , riverNowOps      = nowOps
       }
 
   when (null (workspaces userConfig)) $ hPutStrLn stderr
@@ -227,7 +244,7 @@ run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs 
 
       xconf = XConf
         { config = userConfig
-        , display = conn
+        , display = Display' conn rs
         , riverState = rs
         , normalBorder = parseColor (normalBorderColor userConfig)
         , focusedBorder = parseColor (focusedBorderColor userConfig)
@@ -285,6 +302,7 @@ run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs 
     hovered    <- newIORef Nothing
     layerDef   <- newIORef Nothing
     startup    <- newIORef False
+    modWatcher <- newIORef Nothing
     adopted    <- newIORef S.empty
     restored   <- newIORef False
     moved      <- newIORef False
@@ -314,6 +332,7 @@ run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs 
       , rtHovered = hovered
       , rtLayerDefault = layerDef
       , rtStartupSent = startup
+      , rtModWatcher = modWatcher
       , rtAdopted = adopted
       , rtRestored = restored
       , rtLayoutMoved = moved
@@ -346,7 +365,7 @@ run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs 
                 MB.awaitMail mailbox
         `orElse` MB.awaitMail (rtJobs rt)
         `orElse` (readTVar (riverDirty rs) >>= check)
-        `orElse` nowOpsPending
+        `orElse` nowOpsPending rs
         `orElse` (readTVar (shPlan sh) >>= \p -> check (planSerial p > max sent asked))
       loop = do
         MB.drain mailbox >>= queueActions rt
@@ -360,7 +379,7 @@ run conn manager bindings bindingsVer layerShell compositor shm userConfig dirs 
         let stranded = serial > max sent asked
         when (dirty || stranded) $ riverWindowManagerV1ManageDirty conn manager
         when stranded $ writeIORef (rtAsked rt) serial
-        takeNowOps >>= mapM_ (sendNow rt)
+        takeNowOps rs >>= mapM_ (sendNow rt)
         -- Flush before waiting, or a request queued on this pass never
         -- reaches the compositor and nothing comes back to wake us.
         flush conn
@@ -617,7 +636,7 @@ addSeat rt seat = do
           queueAction rt (icOnEnd cap)
       -- Only sent for modifiers something asked to watch.
       RiverXkbBindingsSeatV1ModifiersUpdate old new ->
-        takeModifierWatcher >>= mapM_ (\f -> f old new)
+        atomicModifyIORef' (rtModWatcher rt) (\w -> (Nothing, w)) >>= mapM_ (\f -> f old new)
       _ -> pure ()
     pure (Just xs)
 
@@ -795,7 +814,7 @@ reapClosed rt = do
     io $ modifyIORef' (rtAdopted rt) (S.delete (rwObject w))
     -- river recycles ids; an override left behind would land on an
     -- unrelated window.
-    io $ forgetBorderOverride (rwObject w)
+    io $ forgetBorderOverride (riverBorders rs) (rwObject w)
 
   outs <- io (readIORef (riverOutputs rs))
   forM_ [ o | o <- M.elems outs, roRemoved o ] $ \o ->
@@ -1033,7 +1052,7 @@ applyLayout rt = do
   focusedCol <- asks focusedBorder
   normalCol <- asks normalBorder
   borders <- fmap M.fromList $ forM placements $ \(win, _) -> do
-    (mWidth, mColor) <- io (lookupBorderOverride win)
+    (mWidth, mColor) <- io (borderOverride (riverBorders (rtState rt)) win)
     let rgba = case mColor of
           Just c | Just win /= mFocus -> c
           _ -> pixelColor (if Just win == mFocus then focusedCol else normalCol)
@@ -1078,8 +1097,9 @@ applyLayout rt = do
           , wa_width = fromIntegral dw, wa_height = fromIntegral dh
           , wa_border_width = bw, wa_map_state = waIsUnmapped
           , wa_override_redirect = False }
-  io $ publishGeometry (M.mapWithKey attrs allKnown)
-  io $ publishSizeHints (M.map rwSizeHints allKnown)
+  -- Lazily: only a window somebody asks about has its attributes built.
+  io $ writeIORef (riverGeometry (rtState rt)) (ML.mapWithKey attrs allKnown)
+  io $ writeIORef (riverSizeHints (rtState rt)) (ML.map rwSizeHints allKnown)
 
   -- Last, so 'XMonad.River.afterLayout' sees everything above.  Drained once:
   -- an action these queue waits for the next layout.
@@ -1130,7 +1150,7 @@ transmitManage rt plan = do
       writeIORef (rtLayerDefault rt) (Just out)
 
   -- One-shot requests, drained: each is an effect river performs once.
-  ops <- takeOps
+  ops <- takeOps rs
   forM_ ops $ \case
     OpClose w -> when (M.member w known) $ riverWindowV1Close conn w
     OpWarpPointer s x y -> when (M.member s seats) $ riverSeatV1PointerWarp conn s x y
@@ -1230,7 +1250,7 @@ armCapture rt seats ks mods oneShot gen = do
 
   -- A hold-to-cycle ends when the modifier goes up.
   when (mods /= 0) $ do
-    setModifierWatcher $ Just $ \old new ->
+    writeIORef (rtModWatcher rt) $ Just $ \old new ->
       when (old .&. mods /= 0 && new .&. mods /= old .&. mods) $ do
         taken <- claim
         forM_ taken $ \cap -> do
