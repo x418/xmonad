@@ -3,20 +3,12 @@ resolver: lts-24.53
 packages:
 - ./
 
-# What stack's nix integration (on by default on NixOS) puts in the shell.
-#
-# zlib, pkg-config and libxkbcommon are what the cabal file's pkgconfig-depends
-# and c-sources need.  The X11 libraries are not for this package -- it does
-# not link X11 -- but for util/gen-keysyms.sh, which builds the X11 Haskell
-# package with `stack exec --package X11` to read the keysym values out of it,
-# and X11's configure looks for libX11, libXrandr, libXScrnSaver and libXext.
-# tests/check-all.sh runs that script, so they have to be here.
+# What stack's nix integration (on by default on NixOS) puts in the shell:
+# the cabal file's pkgconfig-depends and c-sources need libxkbcommon and
+# pkg-config, and util/gen-keysyms.sh reads libxkbcommon's keysym header
+# through pkg-config too.  No X11: nothing here links or builds it.
 nix:
   packages:
     - zlib
     - pkg-config
     - libxkbcommon
-    - xorg.libX11
-    - xorg.libXrandr
-    - xorg.libXScrnSaver
-    - xorg.libXext

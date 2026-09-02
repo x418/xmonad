@@ -1,21 +1,32 @@
 #!/usr/bin/env bash
 #
-# Regenerate src/XMonad/River/Keysym.hs from the X11 package's own values.
+# Regenerate src/XMonad/River/Keysym.hs and src/XMonad/River/Keysym/Table.hs
+# from libxkbcommon's xkbcommon-keysyms.h.
 #
 # Usage: util/gen-keysyms.sh
 #
-# Only needed when the set of keysyms changes, which in practice means bumping
-# the X11 dependency.  The output is checked in.
+# Only needed when the set of keysyms changes.  The output is checked in, and
+# tests/check-all.sh regenerates it and diffs.
 #
-# The values are read out of a real X11 build rather than transcribed, and that
-# is the whole point: xkbcommon reuses X11's keysym numbering wholesale, so the
-# numbers have to be *right*, and inventing 347 of them from memory is how you
-# ship a config where one key silently stops working.  Reading them from the
-# package that already has them makes the correspondence true by construction.
+# The values are read out of the header river hands the keysyms to, rather
+# than transcribed: inventing 347 constants from memory is how you ship a
+# config where one key silently stops working.  They used to be read out of a
+# build of the X11 Haskell package, on the grounds that xkbcommon reuses X11's
+# numbering wholesale; reading xkbcommon's own header makes that a fact this
+# checks rather than one it relies on, and drops the X11 build from the test
+# path.  river_xkb_bindings_v1.get_xkb_binding takes an xkbcommon keysym, so
+# XKB_KEY_* is the number that has to be right.
 #
-# The name list comes from upstream xmonad's recorded API, so a keysym upstream
-# re-exports but this script missed would show up as a golden diff rather than
-# as a key that mysteriously does nothing.
+# The xK_* name list comes from upstream xmonad's recorded API, so a keysym
+# upstream re-exports but this script missed would show up as a golden diff
+# rather than as a key that mysteriously does nothing.  The XF86 multimedia
+# names are every XKB_KEY_XF86* in the header: upstream does not re-export
+# Graphics.X11.ExtraTypes.XF86, so they have no xK_ binding, but
+# xmonad-contrib's multimediaKeys looks them up by name through
+# stringToKeysym, and a name missing from the table is a key that does
+# nothing.
+#
+# The header is found through pkg-config, or XKBCOMMON_KEYSYMS_H names it.
 
 set -euo pipefail
 
@@ -29,22 +40,51 @@ golden=tests/api/upstream/xmonad-reexports.golden
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-grep -E '^XMonad \| xK_' "$golden" | cut -d'|' -f2 | tr -d ' ' | sort -u > "$tmp/names"
+grep -E '^XMonad \| xK_' "$golden" | cut -d'|' -f2 | tr -d ' ' > "$tmp/names"
 
-{
-    echo 'module Main (main) where'
-    echo 'import Graphics.X11'
-    echo 'main :: IO ()'
-    echo 'main = do'
-    sed 's/.*/  putStrLn ("&" ++ " " ++ show (toInteger &))/' "$tmp/names"
-} > "$tmp/probe.hs"
+# Through pkg-config, from the shell this runs in or, failing that, from
+# stack's nix shell (stack.yaml lists libxkbcommon there), which is where
+# tests/check-all.sh finds it on NixOS.
+header=${XKBCOMMON_KEYSYMS_H:-}
+if [ -z "$header" ]; then
+    inc=$(pkg-config --variable=includedir xkbcommon 2>/dev/null \
+          || stack exec -- pkg-config --variable=includedir xkbcommon 2>/dev/null \
+          || echo /usr/include)
+    header=$inc/xkbcommon/xkbcommon-keysyms.h
+fi
+[ -f "$header" ] || { echo "gen-keysyms: $header not found; install libxkbcommon's headers or set XKBCOMMON_KEYSYMS_H" >&2; exit 1; }
 
-stack exec --package X11 -- ghc -v0 -ignore-dot-ghci -o "$tmp/probe" "$tmp/probe.hs"
-"$tmp/probe" > "$tmp/values"
+python3 - "$header" "$tmp/names" > "$tmp/values" <<'PY'
+import re, sys
+defs = {}
+for line in open(sys.argv[1]):
+    m = re.match(r'#define\s+XKB_KEY_(\w+)\s+(0[xX][0-9a-fA-F]+)', line)
+    if m and m.group(1) not in defs:
+        defs[m.group(1)] = int(m.group(2), 16)
+# Sorted here rather than by sort(1), whose order is the locale's: the
+# output is checked in and diffed, so it has to come out the same everywhere.
+names = sorted({l.strip() for l in open(sys.argv[2]) if l.strip()})
+missing = [n for n in names if n[3:] not in defs]
+if missing:
+    sys.exit("gen-keysyms: not in xkbcommon-keysyms.h: " + ", ".join(missing))
+for n in names:
+    print(n, defs[n[3:]])
+# The XF86 set, after the xK_ names, by value.  The XFree86 special keysyms
+# (0x1008FE00-0x1008FEFF: VT switching, grab control, video modes) are spelt
+# XF86Switch_VT_1 by xkbcommon and XF86_Switch_VT_1 by X11 and by contrib's
+# multimediaKeys, so those get both spellings; xkbcommon's goes last, so it
+# is the one keysymToString answers with.
+for n, v in sorted(defs.items(), key=lambda kv: (kv[1], kv[0])):
+    if n.startswith("XF86"):
+        if 0x1008FE00 <= v <= 0x1008FEFF:
+            print("xK_XF86_" + n[4:], v)
+        print("xK_" + n, v)
+PY
 
 python3 - "$tmp/values" "$out" <<'PY'
 import sys
-vals = [l.split() for l in open(sys.argv[1])]
+allvals = [l.split() for l in open(sys.argv[1])]
+vals = [nv for nv in allvals if not nv[0].startswith("xK_XF86")]
 names = [n for n, _ in vals]
 
 header = '''-- | Keysyms, with X11's values.
@@ -58,7 +98,8 @@ header = '''-- | Keysyms, with X11's values.
 -- two coincidences this port rests on; the other is that
 -- @river_seat_v1.modifiers@ reuses X11's modifier mask values.
 --
--- The values are read out of the X11 package rather than transcribed, because
+-- The values are read out of libxkbcommon\'s xkbcommon-keysyms.h -- the
+-- numbers river hands to xkbcommon -- rather than transcribed, because
 -- inventing this many constants by hand is how you ship a config where one key
 -- silently stops working.
 module XMonad.River.Keysym (
@@ -142,7 +183,13 @@ import XMonad.River.Types (KeySym)
 -- | Every keysym, keyed by the name X11 gives it.
 keysymTable :: M.Map String KeySym
 keysymTable = M.fromList''']
+vals = allvals
 for i, (n, v) in enumerate(vals):
+    if n.startswith("xK_XF86") and not vals[i - 1][0].startswith("xK_XF86"):
+        tbl.append("  -- The XF86 multimedia keys: every XKB_KEY_XF86* in the header.  Not")
+        tbl.append("  -- exported as xK_ names, since upstream does not re-export")
+        tbl.append("  -- Graphics.X11.ExtraTypes.XF86; xmonad-contrib's multimediaKeys finds")
+        tbl.append("  -- them here by name, and one missing is a key that silently does nothing.")
     tbl.append(("  [ " if i == 0 else "  , ") + f'("{n[3:]}", {v})')
 tbl.append("  ]")
 tbl.append("")
@@ -151,5 +198,5 @@ tbl.append("reverseKeysymTable :: M.Map KeySym String")
 tbl.append("reverseKeysymTable = M.fromList [ (v, k) | (k, v) <- M.toList keysymTable ]")
 import os
 open(os.path.join(os.path.dirname(sys.argv[2]), "Keysym", "Table.hs"), "w").write("\n".join(tbl) + "\n")
-print(f"gen-keysyms: wrote {len(vals)} keysyms to {sys.argv[2]} and its Table")
+print(f"gen-keysyms: wrote {len(names)} keysyms to {sys.argv[2]} and {len(vals)} names to its Table")
 PY
