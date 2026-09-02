@@ -108,7 +108,12 @@ import System.FilePath
 import System.IO
 import System.Info
 import System.Posix.Env (getEnv)
-import System.Posix.Process (executeFile, forkProcess, getAnyProcessStatus, createSession)
+import System.Posix.Process (executeFile, forkProcess, getAnyProcessStatus, getProcessStatus, createSession)
+import Foreign.Marshal.Alloc (allocaBytes)
+import Foreign.Ptr (castPtr, plusPtr)
+import qualified Foreign.Storable as Storable
+import qualified System.Posix.IO as PosixIO (createPipe)
+import Data.Int (Int64)
 import System.Posix.Signals
 import System.Posix.IO
 import System.Posix.Types (ProcessID)
@@ -537,13 +542,42 @@ spawn x = void $ spawnPID x
 spawnPID :: MonadIO m => String -> m ProcessID
 spawnPID x = xfork $ executeFile "/bin/sh" False ["-c", x] Nothing
 
--- | A replacement for 'forkProcess' which resets default signal handlers.
+-- | A replacement for 'forkProcess' which resets default signal handlers and
+-- leaves no zombie behind.
+--
+-- Upstream ignores SIGCHLD so the kernel reaps its children; that also makes
+-- 'System.Process.waitForProcess' fail, and contrib waits on processes.  So
+-- SIGCHLD keeps its default disposition and this forks twice: the child forks
+-- the grandchild, writes its pid down a pipe and exits, and is reaped here;
+-- the grandchild is init's.  'spawnPID' still returns the pid of what was
+-- spawned.
 xfork :: MonadIO m => IO () -> m ProcessID
-xfork x = io . forkProcess . finally nullStdin $ do
-                uninstallSignalHandlers
-                createSession
-                x
+xfork x = io $ do
+    (r, w) <- PosixIO.createPipe
+    mid <- forkProcess $ do
+        closeFd r
+        pid <- forkProcess . finally nullStdin $ do
+            closeFd w
+            uninstallSignalHandlers
+            createSession
+            x
+        allocaBytes pidSize $ \buf -> do
+            Storable.poke buf (fromIntegral pid :: Int64)
+            void (fdWriteBuf w (castPtr buf) (fromIntegral pidSize))
+    closeFd w
+    pid <- allocaBytes pidSize $ \buf -> do
+        Storable.poke buf (0 :: Int64)
+        let go n | n >= pidSize = pure ()
+                 | otherwise = do
+                     got <- fdReadBuf r (castPtr buf `plusPtr` n) (fromIntegral (pidSize - n))
+                     if got <= 0 then pure () else go (n + fromIntegral got)
+        go 0
+        Storable.peek buf
+    closeFd r
+    void (getProcessStatus True False mid)
+    pure (fromIntegral (pid :: Int64))
  where
+    pidSize = 8 :: Int
     nullStdin = do
 #if MIN_VERSION_unix(2,8,0)
         fd <- openFd "/dev/null" ReadOnly defaultFileFlags
@@ -960,8 +994,8 @@ trace = io . hPutStrLn stderr
 installSignalHandlers :: MonadIO m => m ()
 installSignalHandlers = io $ do
     installHandler openEndedPipe Ignore Nothing
-    -- Note: mgsloan modification to allow for waiting for processes
-    -- installHandler sigCHLD Ignore Nothing
+    -- SIGCHLD stays at its default, unlike upstream: 'xfork' reaps for
+    -- itself, and contrib's waitForProcess needs the signal not ignored.
     (try :: IO a -> IO (Either SomeException a))
       $ fix $ \more -> do
         x <- getAnyProcessStatus False False
@@ -971,8 +1005,6 @@ installSignalHandlers = io $ do
 uninstallSignalHandlers :: MonadIO m => m ()
 uninstallSignalHandlers = io $ do
     installHandler openEndedPipe Default Nothing
-    -- Note: mgsloan modification to allow for waiting for processes
-    -- installHandler sigCHLD Default Nothing
     return ()
 
 trim :: String -> String
