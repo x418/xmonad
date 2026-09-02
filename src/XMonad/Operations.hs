@@ -11,26 +11,14 @@
 -- Copyright   :  (c) Spencer Janssen 2007
 -- License     :  BSD3-style (see LICENSE)
 --
--- Operations, a rewrite of upstream's @src\/XMonad\/Operations.hs@.
+-- Operations, on the river backend.  Everything upstream did through Xlib is
+-- either absent -- each omission is justified in tests/api/unportable.txt --
+-- or answered from the window manager's own state.
 --
--- This is where the two backends diverge most, and the divergence is not a
--- matter of a few differing lines: upstream's file is 899 lines of Xlib calls,
--- this one is a fraction of that, because river does the work.  They are not
--- two implementations of the same code -- they are different programs that
--- agree on an interface.
---
--- The interface they agree on is smaller here, deliberately.  Everything X11
--- reached for through the display and cannot be reproduced over Wayland is
--- absent rather than present and inert.  Each omission is justified in
--- tests/api/unportable.txt, and tests/api/check-api.sh fails if one appears
--- that is not.
---
--- The single structural difference to understand: __'windows' does not run the
--- layout.__  river only permits window management state to change during a
--- manage sequence, so the layout runs once at the end of the current sequence,
--- after every queued action has had its say.  Called from outside a sequence
--- -- a timer, a @dbus@ callback, a key binding -- 'windows' asks river to
--- start one.  Upstream's @windows@ tiles immediately because X11 let it.
+-- The one structural difference: 'windows' does not run the layout.  river
+-- permits window management state to change only during a manage sequence,
+-- so the layout runs once at the end of the current one, after every queued
+-- action; called from outside a sequence, 'windows' asks river for one.
 --
 -----------------------------------------------------------------------------
 
@@ -98,9 +86,10 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Control.Monad (forM_, guard, join, unless, void, when)
 
--- ---------------------------------------------------------------------
--- Window manager operations
-
+-- | Whether a window should float on adoption: fixed size (equal minimum and
+-- maximum in @dimensions_hint@) or transient (@river_window_v1.parent@, the
+-- Wayland spelling of @WM_TRANSIENT_FOR@).  The 'Display' is unused; the
+-- signature is upstream's.
 isFixedSizeOrTransient :: Display -> Window -> X Bool
 isFixedSizeOrTransient _ w = do
     known <- io . readIORef =<< asks (riverWindows . riverState)
@@ -112,16 +101,14 @@ isFixedSizeOrTransient _ w = do
                 isTransient = isJust (rwParent rw)
             in isFixedSize || isTransient
 
--- | Given a window, build an adjuster function that will reduce the given
--- dimensions according to the window's border width and size hints.
-
+-- | A window no longer exists; remove it from the window list, on whatever
+-- workspace it is.
 unmanage :: Window -> X ()
 unmanage = windows . W.delete
 
--- | Close the given window.  Politely -- this is @xdg_toplevel.close@, which
--- the client may ignore or prompt about, exactly as an X11 @WM_DELETE_WINDOW@
--- could be.
-
+-- | Ask the window to close: @river_window_v1.close@, which the client may
+-- ignore or prompt about, as @WM_DELETE_WINDOW@ could be.  Queued: @close@ is
+-- legal only inside a manage sequence.
 killWindow :: Window -> X ()
 killWindow w = do
     known <- io . readIORef =<< asks (riverWindows . riverState)
@@ -130,25 +117,16 @@ killWindow w = do
     when (M.member w known) $ emitOp (OpClose w)
 
 -- | Kill the currently focused client.
-
 kill :: X ()
 kill = withFocused killWindow
-
--- | Hide a window, by removing it from the visible set.
---
--- The compositor call happens in the render sequence -- river only applies
--- rendering state at @render_finish@ -- so this records the intent and lets
--- 'XMonad.River.WM.renderSequence' carry it out.
-
--- ---------------------------------------------------------------------
--- Managing windows
 
 -- | Modify the current window list with a pure function, and arrange for the
 -- result to be applied.
 --
--- Unlike the X11 version this does not itself run the layout.  See the module
--- header: layout belongs to the manage sequence, and this function's job is to
--- make sure one happens.
+-- Unlike upstream this does not run the layout: river permits window
+-- management state to change only inside a manage sequence, so the layout
+-- runs once at the end of the current one, after every queued action.
+-- Called outside a sequence, this asks river for one.
 windows :: (WindowSet -> WindowSet) -> X ()
 windows f = do
     old <- gets windowset
@@ -171,27 +149,20 @@ windows f = do
     unless inSeq requestManageSequence
     asks (logHook . config) >>= userCodeDef ()
 
--- | Ask river to start a manage sequence, because state it cannot observe has
--- changed.
-
--- Recorded rather than sent.  The event loop owns the connection, and this
--- runs wherever an X action does -- which after the thread split is not the
--- loop.  The loop sends @manage_dirty@ for whatever is flagged before it waits
--- again, so the request costs one pass through the loop and no round trip.
+-- | Ask river for a manage sequence.  A flag the loop drains, because the
+-- loop owns the connection and this runs wherever an 'X' action does; the
+-- flag is a 'TVar' so the loop wakes.
 requestManageSequence :: X ()
 requestManageSequence = do
     ref <- asks (riverDirty . riverState)
     io (atomically (writeTVar ref True))
 
--- | Re-run the layout.  Under river this is a request for another manage
--- sequence; the layout runs there.
-
+-- | Modify the @WindowSet@ in state with no special handling.
 modifyWindowSet :: (WindowSet -> WindowSet) -> X ()
 modifyWindowSet f = modify $ \xst -> xst { windowset = f (windowset xst) }
 
 -- | Perform an @X@ action and check its return value against a predicate p.
 -- If p holds, unwind changes to the @WindowSet@ and replay them using @windows@.
-
 windowBracket :: (a -> Bool) -> X a -> X a
 windowBracket p action = withWindowSet $ \old -> do
   a <- action
@@ -204,57 +175,40 @@ windowBracket p action = withWindowSet $ \old -> do
 -- changes to the @WindowSet@ and replay them using @windows@. This is
 -- a version of @windowBracket@ that discards the return value and
 -- handles an @X@ action that reports its need for refresh via @Any@.
-
 windowBracket_ :: X Any -> X ()
 windowBracket_ = void . windowBracket getAny
 
--- | A window no longer exists; remove it from the window
--- list, on whatever workspace it is.
---
-
+-- | Produce the actual rectangle from a screen and a ratio on that screen.
 scaleRationalRect :: Rectangle -> W.RationalRect -> Rectangle
 scaleRationalRect (Rectangle sx sy sw sh) (W.RationalRect rx ry rw rh)
  = Rectangle (sx + scale sw rx) (sy + scale sh ry) (scale sw rw) (scale sh rh)
  where scale s r = floor (toRational s * r)
 
--- | Return workspace visible on screen @sc@, or 'Nothing'.
-
+-- | Set a window's border colour from a colour string, falling back to the
+-- 'Pixel' if it does not parse.  X11's fallback covered a full colormap; here
+-- the only failure is a string that is not @\"#rrggbb\"@.
 setWindowBorderWithFallback :: Display -> Window -> String -> Pixel -> X ()
 setWindowBorderWithFallback _ w color fallback = do
     ref <- asks (riverBorders . riverState)
     io (overrideBorderColor ref w (pixelColor (fromMaybe fallback (parseColorMaybe color))))
 
--- | Is the window is under management by xmonad?
-
+-- | Hide a window: drop it from the mapped set.  The compositor request is
+-- the render sequence's, from the plan.
 hide :: Window -> X ()
 hide w = whenX (gets (S.member w . mapped)) $
     modify (\s -> s { mapped = S.delete w (mapped s) })
 
--- | Show a window.
--- This is harmless if the window was already visible.
-
+-- | Show a window.  Harmless if the window was already visible.
 reveal :: Window -> X ()
 reveal w = whenX (isClient w) $
     modify (\s -> s { mapped = S.insert w (mapped s) })
 
--- | Set the border colour of a window from a colour name, falling back to a
--- 'Pixel' if the name does not parse.
---
--- X11's fallback existed because @initColor@ asked the server to allocate the
--- colour and that could fail for reasons a config could not predict -- a full
--- colormap, an unknown name from @rgb.txt@.  Here the only way to fail is a
--- string that is not @\"#rrggbb\"@, since nothing is allocated and there is no
--- server to ask.  The fallback is still used, just for a narrower reason.
---
--- The signature is X11's exactly, 'Pixel' and all.
-
+-- | Re-run the layout: under river, a request for another manage sequence.
 refresh :: X ()
 refresh = windows id
 
--- | Modify the @WindowSet@ in state with no special handling.
-
--- ---------------------------------------------------------------------
-
+-- | Returns 'True' if the first rectangle is contained within, but not equal
+-- to the second.
 containedIn :: Rectangle -> Rectangle -> Bool
 containedIn r1@(Rectangle x1 y1 w1 h1) r2@(Rectangle x2 y2 w2 h2)
  = and [ r1 /= r2
@@ -265,23 +219,13 @@ containedIn r1@(Rectangle x1 y1 w1 h1) r2@(Rectangle x2 y2 w2 h2)
 
 -- | Given a list of screens, remove all duplicated screens and screens that
 -- are entirely contained within another.
-
 nubScreens :: [Rectangle] -> [Rectangle]
 nubScreens xs = nub . filter (\x -> not $ any (x `containedIn`) xs) $ xs
 
--- | The screen rectangles, cleaned according to the rules for 'nubScreens'.
---
--- Under X11 this queried xinerama through the display.  Here the outputs are
--- accumulated in 'XConf', so the 'Display' is accepted and unused, as for
--- 'isFixedSizeOrTransient'.  Removed outputs and
--- zero-sized ones are skipped, and an output's layer-shell area is preferred
--- to its raw rectangle where one has been reported, so that a bar or dock
--- claiming an exclusive zone shrinks the tiling area rather than being tiled
--- over.
---
--- Ordering is by position, which is what keeps screen ids stable across a
--- monitor being unplugged and replugged.
-
+-- | The screen rectangles, cleaned according to the rules for 'nubScreens':
+-- river's live outputs, sorted by position (which keeps screen ids stable
+-- across a replug), each preferring its layer-shell usable area so a bar's
+-- exclusive zone is not tiled over.  The 'Display' is unused.
 getCleanedScreenInfo :: Display -> X [Rectangle]
 getCleanedScreenInfo _ = do
     outs <- io . readIORef =<< asks (riverOutputs . riverState)
@@ -296,33 +240,25 @@ getCleanedScreenInfo _ = do
                 _ -> Rectangle x y (fromIntegral width) (fromIntegral height)
         ]
 
--- | Given a point, determine the screen (if any) that contains it.
-
+-- | The screen configuration may have changed; update the state and refresh.
+-- The reconciliation against river's outputs happens at the start of every
+-- manage sequence, so this only asks for one.
 rescreen :: X ()
 rescreen = refresh
 
--- | Returns 'True' if the first rectangle is contained within, but not equal
--- to the second.
-
--- ---------------------------------------------------------------------
--- Setting keyboard focus
-
+-- | Set focus explicitly to window @w@ if it is managed by us.
 focus :: Window -> X ()
 focus w = local (\c -> c { mouseFocused = True }) $ withWindowSet $ \s ->
     when (W.member w s && W.peek s /= Just w) $ windows (W.focusWindow w)
 
--- | Apply an 'X' operation to the currently focused window, if there is one.
-
+-- | Find the numlock modifier and remember it.  There is no keymap to
+-- inspect: river resolves lock modifiers before a binding fires, so the mask
+-- is zero, which is what 'cleanMask' and 'extraModifiers' assume.
 cacheNumlockMask :: X ()
 cacheNumlockMask = modify $ \s -> s { numberlockMask = 0 }
 
-
--- | The screen configuration may have changed; update the state and refresh.
---
--- Under X11 this queried xinerama.  Here the reconciliation against river's
--- outputs happens at the start of every manage sequence anyway, so this only
--- has to ask for one.
-
+-- | Throw a message to the current 'LayoutClass' possibly modifying how we
+-- layout the windows, in which case changes are handled through a refresh.
 sendMessage :: Message a => a -> X ()
 sendMessage a = windowBracket_ $ do
     w <- gets $ W.workspace . W.current . windowset
@@ -334,7 +270,6 @@ sendMessage a = windowBracket_ $ do
     return (Any $ isJust ml')
 
 -- | Send a message to all layouts, without refreshing.
-
 broadcastMessage :: Message a => a -> X ()
 broadcastMessage a = withWindowSet $ \ws -> do
     let c = W.workspace . W.current $ ws
@@ -343,101 +278,57 @@ broadcastMessage a = withWindowSet $ \ws -> do
     mapM_ (sendMessageWithNoRefresh a) (c : v ++ h)
 
 -- | Send a message to a layout, without refreshing.
-
 sendMessageWithNoRefresh :: Message a => a -> WindowSpace -> X ()
 sendMessageWithNoRefresh a w =
     handleMessage (W.layout w) (SomeMessage a) `catchX` return Nothing >>=
     updateLayout  (W.tag w)
 
 -- | Update the layout field of a workspace.
-
 updateLayout :: WorkspaceId -> Maybe (Layout Window) -> X ()
 updateLayout i ml = whenJust ml $ \l ->
     runOnWorkspaces $ \ww -> return $ if W.tag ww == i then ww { W.layout = l} else ww
 
 -- | Set the layout of the currently viewed workspace.
-
 setLayout :: Layout Window -> X ()
 setLayout l = do
     ss@W.StackSet{ W.current = c@W.Screen{ W.workspace = ws }} <- gets windowset
     handleMessage (W.layout ws) (SomeMessage ReleaseResources)
     windows $ const $ ss{ W.current = c{ W.workspace = ws{ W.layout = l } } }
 
-------------------------------------------------------------------------
--- Floating layer support
-
--- | Given a window, find the screen it is located on, and compute
--- the geometry of that window WRT that screen.
---
--- X11 read this from the window's attributes and size hints.  River reports a
--- window's current dimensions directly, and nothing else: there is no position
--- to read, because under Wayland the compositor owns placement and a client
--- never had one to report.  So the fraction is computed from the dimensions
--- against the current screen, and the window is centred.
-
+-- | Return workspace visible on screen @sc@, or 'Nothing'.
 screenWorkspace :: ScreenId -> X (Maybe WorkspaceId)
 screenWorkspace sc = withWindowSet $ return . W.lookupWorkspace sc
 
-------------------------------------------------------------------------
--- Message handling
-
--- | Throw a message to the current 'LayoutClass' possibly modifying how we
--- layout the windows, in which case changes are handled through a refresh.
-
+-- | Apply an 'X' operation to the currently focused window, if there is one.
 withFocused :: (Window -> X ()) -> X ()
 withFocused f = withWindowSet $ \w -> whenJust (W.peek w) f
 
 -- | Apply an 'X' operation to all unfocused windows on the current workspace, if there are any.
-
 withUnfocused :: (Window -> X ()) -> X ()
 withUnfocused f = withWindowSet $ \ws ->
     whenJust (W.peek ws) $ \w ->
         let unfocusedWindows = filter (/= w) $ W.index ws
         in mapM_ f unfocusedWindows
 
-
--- | Strip numlock\/capslock from a mask.
---
--- The identity, because river delivers modifiers already resolved: the bits
--- this was written to remove are never set.  Stripping nothing is the correct
--- strip, not a skipped one.
-
+-- | Is the window is under management by xmonad?
 isClient :: Window -> X Bool
 isClient w = withWindowSet $ return . W.member w
 
--- | Set focus explicitly to window @w@ if it is managed by us.
-
--- These three -- 'cleanMask', 'extraModifiers' and 'cacheNumlockMask' -- have a
--- correct total implementation under river rather than an unavailable one,
--- because the situation each guards against cannot arise.  They are not stubs:
--- each establishes exactly the postcondition its caller is entitled to.
---
--- Their neighbours in upstream's export list -- unGrab, setButtonGrab and
--- clearEvents -- are deliberately *not* here, even though `pure ()` would be
--- equally vacuous.  Those two are advice-shaped: unGrab's caller writes
--- @unGrab >> spawn "slock"@ believing it has handed the keyboard over, and
--- under river it has not.  The locker gets input by a different route
--- entirely, so a silent success would be true about grabs and misleading
--- about the thing the caller cares about.  See tests/api/unportable.txt.
-
+-- | Combinations of extra modifier masks we need to grab keys\/buttons for.
+-- Exactly one, the empty one: river bindings are matched against resolved
+-- modifiers, so there is no numlock or capslock variant to grab.
 extraModifiers :: X [KeyMask]
 extraModifiers = return [0]
 
--- | Find the numlock modifier and remember it.
---
--- There is no keymap to inspect and no mask to find.  The field is set to
--- zero, which is what 'cleanMask' and 'extraModifiers' above already assume,
--- so this establishes its postcondition rather than skipping it.
-
+-- | Strip numlock\/capslock from a mask.  The identity: river never sets
+-- those bits.
 cleanMask :: KeyMask -> X KeyMask
 cleanMask = return
 
--- | Combinations of extra modifier masks we need to grab keys\/buttons for.
---
--- Exactly one, the empty one.  This existed so that a binding could be
--- grabbed once per numlock\/capslock combination; river's bindings are
--- protocol objects matched against resolved modifiers, so one is all there is.
-
+-- | Write the current window state (and extensible state) to a file so that
+-- xmonad can resume with that state intact.  Windows are keyed by
+-- @river_window_v1.identifier@, which outlives the connection; one river has
+-- not given an identifier is left out and comes back through the manage hook.
 writeStateToFile :: X ()
 writeStateToFile = do
     known <- io . readIORef =<< asks (riverWindows . riverState)
@@ -454,22 +345,9 @@ writeStateToFile = do
     stateData <- gets (\s -> StateFile (wsData s) (extState s))
     catchIO (writeFile path $ show stateData)
 
--- | Read the state of a previous xmonad instance from a file and
--- return that state.  The state file is removed after reading it.
---
--- Unlike the X11 version this must not be called before the compositor has
--- advertised its windows, because that is what the identifiers in the file are
--- resolved against.  river sends a @window@ event, and the @identifier@ with
--- it, for every window it already has before the first @manage_start@, so the
--- first manage sequence is both the earliest and the right place.  See
--- @restoreState@ in "XMonad.River.WM".
---
--- The layout witness comes from the config's own 'Layout' rather than from a
--- @Read (l Window)@ constraint on the caller: 'Layout' carries that dictionary
--- itself, and by the time this runs the concrete layout type has already been
--- wrapped.  X11's signature takes the unwrapped config because it is called
--- from @launch@, where the type is still concrete.
-
+-- | Re-key a 'W.StackSet', dropping anything the function has no answer for.
+-- A dropped focus is replaced by the nearest survivor below it, then above,
+-- which is what closing the focused window does.
 retagWindows :: Ord b => (a -> Maybe b) -> W.StackSet i l a s sd -> W.StackSet i l b s sd
 retagWindows f (W.StackSet cur vis hid flt) = W.StackSet
     (onScreen cur)
@@ -487,13 +365,12 @@ retagWindows f (W.StackSet cur vis hid flt) = W.StackSet
       (Nothing, x : u', []) -> Just (W.Stack x u' [])
       (Nothing, [], [])     -> Nothing
 
--- | Write the current window state (and extensible state) to a file
--- so that xmonad can resume with that state intact.
+-- | Read the state of a previous xmonad instance from a file and return that
+-- state.  The state file is removed after reading it.
 --
--- A window river has not given an identifier for is left out, and so comes
--- back as a new window through the manage hook.  On river 4 and later there
--- are none: the event is sent to every window as it is created.
-
+-- Must run once river has advertised its windows, because the identifiers
+-- in the file are resolved against them: the first manage sequence, see
+-- @restoreState@ in "XMonad.River.WM.Sequence".
 readStateFile :: XConfig Layout -> X (Maybe XState)
 readStateFile xmc = do
     path <- asks $ stateFileName . directories
@@ -538,21 +415,9 @@ readStateFile xmc = do
 
 -- | @restart name resume@ restarts the window manager by executing @name@.
 --
--- This is the river analogue of xmonad's @restart@, and the reason @M-q@
--- survives the move to Wayland.  The compositor owns the windows, not the
--- window manager, so tearing the window manager down disturbs nothing: river
--- supports hot-swapping window managers without restarting itself or any
--- client.
---
--- The sequence is @stop@, wait for @finished@, then exec.  Overlapping the two
--- is not allowed -- river answers the second connection with @unavailable@ --
--- so the handover has to be ordered this way.
---
--- @resume@ means what it does under X11: write the window state out so that
--- the successor picks it up.  What is serialised is keyed on
--- @river_window_v1.identifier@ rather than on object ids, which are
--- per-connection; see 'StateFile'.
-
+-- river hot-swaps window managers without restarting itself or any client:
+-- @stop@, wait for @finished@, exec.  @resume@ writes the state file for the
+-- successor, keyed on @river_window_v1.identifier@.
 restart :: String -> Bool -> X ()
 restart cmd resume = do
     ref <- asks (riverRestart . riverState)
@@ -564,46 +429,17 @@ restart cmd resume = do
     -- written before river is asked to let go.
     emitNow OpStop
 
-
-
 -- | An alias for a (width, height) pair
 type D = (Dimension, Dimension)
 
--- | Detect whether a window has fixed size or is transient. This check
--- can be used to determine whether the window should be floating or not
+-- | Where a window should go when it becomes floating: the screen it is on
+-- and its rectangle as a fraction of that screen.
 --
--- The 'Display' is accepted and unused: there is only one, 'XConf' already has
--- it, and what river reports about a window is accumulated there rather than
--- queried over the wire.  Keeping the parameter costs nothing and lets a call
--- site written for X11 compile unchanged.
---
--- Fixed size is @dimensions_hint@ reporting an equal minimum and maximum;
--- transient is @river_window_v1.parent@, which is @xdg_toplevel.set_parent@ --
--- the faithful translation of X11's @WM_TRANSIENT_FOR@.
-
--- | Where a window should go when it becomes floating.
---
--- Upstream asks the server: @getWindowAttributes@ says where the window is,
--- and the float leaves it there.  There is no server here, so the answer comes
--- from 'riverPlacements' -- what the last layout run decided, and what both
--- 'XMonad.River.windowRect' and the published @getWindowAttributes@ report.
--- That is this port's stand-in for server geometry, and reading it back is
--- what makes floating a window keep it where it is instead of moving it.
---
--- Answering without consulting it is not a small inaccuracy.  The rectangle
--- returned here is the /only/ durable record of a float's geometry:
--- 'XMonad.River.WM.applyLayout' recomputes every placement from
--- 'XMonad.StackSet.floating' on each manage sequence, and the render sequence
--- restates node positions from that.  So a 'floatLocation' that disregards
--- where a window is does not merely misplace it once -- it makes every mouse
--- drag undo itself, because each motion step calls 'float' and has its work
--- thrown away.
---
--- A window with no placement has no position to keep, which is the case a
--- @doFloat@ manage hook hits: a window being managed for the first time has
--- been through no layout run.  It is centred on the current screen at the size
--- river reports, which is what upstream does when it likewise has nothing
--- usable to go on.
+-- river never reports where a window is, so the answer is the last layout's
+-- placement ('riverPlacements'), which is also what a drag has just written
+-- there -- a float that ignored it would be undone by the next sequence.  A
+-- window with no placement (one being floated by a manage hook, before any
+-- layout) is centred at its own size, its minimum, or half the screen.
 floatLocation :: Window -> X (ScreenId, W.RationalRect)
 floatLocation w = do
     ws <- gets windowset
@@ -654,13 +490,9 @@ floatLocation w = do
                        , W.RationalRect (0.5 - rwidth / 2) (0.5 - rheight / 2)
                                         rwidth rheight )
 
--- | A rectangle as a fraction of a screen, which is how the 'WindowSet'
--- records a float.
---
--- 'scaleRationalRect' is the inverse, exactly: it floors an exact rational, so
--- a rectangle that came out of a layout run survives the round trip unchanged.
--- That matters more than it looks -- it is why floating an already-placed
--- window is a no-op on screen rather than a one-pixel twitch per drag step.
+-- | A rectangle as a fraction of a screen: the exact inverse of
+-- 'scaleRationalRect', so a placed window survives the round trip unchanged
+-- and floating it is a no-op on screen.
 relativeRect :: Rectangle -> Rectangle -> W.RationalRect
 relativeRect sr r = W.RationalRect
     (fromIntegral (rect_x r - rect_x sr) % sw)
@@ -671,8 +503,7 @@ relativeRect sr r = W.RationalRect
     sw = max 1 (fromIntegral (rect_width sr))
     sh = max 1 (fromIntegral (rect_height sr))
 
--- | Make a tiled window floating, using its suggested rectangle
-
+-- | Given a point, determine the screen (if any) that contains it.
 pointScreen :: Position -> Position
             -> X (Maybe (W.Screen WorkspaceId (Layout Window) Window ScreenId ScreenDetail))
 pointScreen x y = withWindowSet $ return . find p . W.screens
@@ -680,15 +511,13 @@ pointScreen x y = withWindowSet $ return . find p . W.screens
 
 -- | @pointWithin x y r@ returns 'True' if the @(x, y)@ co-ordinate is within
 -- @r@.
-
 pointWithin :: Position -> Position -> Rectangle -> Bool
 pointWithin x y r = x >= rect_x r &&
                     x <  rect_x r + fromIntegral (rect_width r) &&
                     y >= rect_y r &&
                     y <  rect_y r + fromIntegral (rect_height r)
 
--- | Produce the actual rectangle from a screen and a ratio on that screen.
-
+-- | Make a tiled window floating, using its suggested rectangle
 float :: Window -> X ()
 float w = do
     (sc, rr) <- floatLocation w
@@ -699,16 +528,12 @@ float w = do
         sw <- W.lookupWorkspace sc ws
         return (W.focusWindow f . W.shiftWin sw w $ ws)
 
-
--- | Move the pointer, in river's global coordinate space.
+-- | Accumulate mouse motion events.
 --
--- Wayland forbids ordinary clients from warping the pointer, but the window
--- manager is not an ordinary client: @river_seat_v1.pointer_warp@ exists
--- precisely for this.
-
--- ---------------------------------------------------------------------
--- Mouse handling
-
+-- river drives interactive operations through the seat: @op_start_pointer@
+-- begins one, @op_delta@ reports the total offset since it began, and
+-- @op_release@ fires when the button goes up; "XMonad.River.WM.Events"
+-- routes those back here, so the @(motion, cleanup)@ contract is upstream's.
 mouseDrag :: (Position -> Position -> X ()) -> X () -> X ()
 mouseDrag f done = do
     drag <- gets dragging
@@ -728,43 +553,22 @@ mouseDrag f done = do
         modify $ \st -> st { dragging = Nothing }
         done
 
--- | Drag the window under the cursor with the mouse while it is dragged.
-
+-- | Move the pointer, in river's global coordinate space:
+-- @river_seat_v1.pointer_warp@, which exists because a window manager is not
+-- an ordinary client.
 warpPointer :: Position -> Position -> X ()
 warpPointer x y = do
     seats <- io . readIORef =<< asks (riverSeats . riverState)
     forM_ (M.keys seats) $ \seat -> emitOp (OpWarpPointer seat x y)
 
--- | Accumulate mouse motion events.
---
--- river drives interactive operations through the seat rather than by letting
--- the window manager grab the pointer: @op_start_pointer@ begins one,
--- @op_delta@ reports the total offset since it began, and @op_release@ fires
--- when the button goes up.  "XMonad.River.WM" routes those two events back
--- here, so the @(motion, cleanup)@ contract is the one xmonad has always had.
---
--- The offset is turned back into an absolute position by adding the pointer
--- position recorded when the operation started, so the callback still receives
--- root coordinates.
-
--- | Where the pointer was when the drag began.
---
--- Read from inside the motion callback and nowhere else.  'mouseDrag' is what
--- writes this, so a caller reading it beforehand -- as both drags below once
--- did -- gets the previous drag's origin, or @(0, 0)@ on the first drag of the
--- session.  The callback runs only on @op_delta@, which cannot arrive before
--- the operation it belongs to has started, so by then the value is the right
--- one.
+-- | Where the pointer was when the drag began.  Read from inside the motion
+-- callback only; 'mouseDrag' writes it.
 dragOrigin :: X (Position, Position)
 dragOrigin = io . readIORef =<< asks (riverDragOrigin . riverState)
 
 -- | Put a window where a drag has decided it goes, and keep the recorded
--- geometry in step so that 'float' can read the result back.
---
--- The twin of 'XMonad.River.moveResizeWindow', which cannot be called from
--- here because "XMonad.River" imports this module.  It differs in one respect:
--- size hints are the caller's business, because both drags below have already
--- had to apply them to work out the rectangle they want.
+-- geometry in step so that 'float' can read the result back.  Size hints are
+-- the caller's business.
 dragWindowTo :: Window -> Rectangle -> X ()
 dragWindowTo w r = do
     emitOp (OpSetPosition w (rect_x r) (rect_y r))
@@ -772,6 +576,7 @@ dragWindowTo w r = do
     ref <- asks (riverPlacements . riverState)
     updatePlacement ref w r
 
+-- | Drag the window under the cursor with the mouse while it is dragged.
 mouseMoveWindow :: Window -> X ()
 mouseMoveWindow w = whenX (isClient w) $ do
     placements <- io . readIORef =<< asks (riverPlacements . riverState)
@@ -789,17 +594,8 @@ mouseMoveWindow w = whenX (isClient w) $ do
             (float w)
 
 -- | Resize the window under the cursor with the mouse while it is dragged.
---
--- The size follows the pointer's displacement from where the drag began, which
--- is a deliberate difference from upstream: X11 warped the pointer to the
--- window's bottom-right corner first and then treated the pointer as that
--- corner.  River can warp -- 'warpPointer' does -- but a drag that begins by
--- yanking the pointer somewhere else is worth avoiding when the alternative is
--- this, and the two agree once the drag is under way.
---
--- Sizes are clamped by 'applySizeHintsContents', which takes @max 1@ before
--- widening, so dragging back past the window's own origin bottoms out at one
--- pixel rather than wrapping around.
+-- The size follows the pointer's displacement from where the drag began,
+-- rather than warping the pointer to the corner first as X11 did.
 mouseResizeWindow :: Window -> X ()
 mouseResizeWindow w = whenX (isClient w) $ do
     placements <- io . readIORef =<< asks (riverPlacements . riverState)
@@ -819,41 +615,18 @@ mouseResizeWindow w = whenX (isClient w) $ do
                 float w)
             (emitOp (OpInformResize w False) >> float w)
 
-
 -- | A type to help serialize xmonad's state to a file.
 --
--- The window type is a river @identifier@ rather than a 'Window'.  That is the
--- whole reason this can exist at all: a river object id is per-connection and
--- recycled after @wl_display.delete_id@, so an id written by one window
--- manager names nothing to its successor.  @river_window_v1.identifier@ is a
--- string river promises is unique and never reused, and -- crucially -- it is
--- derived from the window's @ext_foreign_toplevel_handle_v1@, which belongs to
--- the window rather than to the window manager's connection.  river creates
--- one only if the window has none already, precisely so that it survives a
--- window manager restart.
+-- Windows are river @identifier@s rather than object ids, which are
+-- per-connection and recycled: the identifier belongs to the window and
+-- survives a window manager restart.
 data StateFile = StateFile
   { sfWins :: W.StackSet WorkspaceId String String ScreenId ScreenDetail
   , sfExt  :: [(String, String)]
   } deriving (Show, Read)
 
--- | Re-key a 'W.StackSet', dropping anything the function has no answer for.
---
--- Used in both directions: 'Window' to identifier when writing, identifier
--- back to 'Window' when reading.  Dropping is the normal case on the way back
--- in -- a window that was closed while the successor was starting, or one
--- opened by a client river has not re-advertised -- so a dropped focus has to
--- be replaced rather than lost.  The nearest survivor below it is preferred,
--- then the nearest above, which is what closing the focused window does.
-
--- ---------------------------------------------------------------------
--- Support for window size hints
---
--- The arithmetic below is exactly upstream's, unchanged, and that is the
--- point: it is pure, it already treats every hint as optional, and river's
--- 'SizeHints' simply has fewer of them populated.  A hint river cannot report
--- leaves the corresponding function as the identity, which is what it always
--- did for a window that declared no such hint under X11 either.
-
+-- | Given a window, build an adjuster function that will reduce the given
+-- dimensions according to the window's border width and size hints.
 mkAdjust :: Window -> X (D -> D)
 mkAdjust w = do
     known <- io . readIORef =<< asks (riverWindows . riverState)
@@ -864,7 +637,6 @@ mkAdjust w = do
 
 -- | Reduce the dimensions if needed to comply to the given SizeHints, taking
 -- window borders into account.
-
 applySizeHints :: Integral a => Dimension -> SizeHints -> (a, a) -> D
 applySizeHints bw sh =
     tmap (+ 2 * bw) . applySizeHintsContents sh . tmap (subtract $ 2 * fromIntegral bw)
@@ -872,13 +644,13 @@ applySizeHints bw sh =
     tmap f (x, y) = (f x, f y)
 
 -- | Reduce the dimensions if needed to comply to the given SizeHints.
-
 applySizeHintsContents :: Integral a => SizeHints -> (a, a) -> D
 applySizeHintsContents sh (w, h) =
     applySizeHints' sh (fromIntegral $ max 1 w, fromIntegral $ max 1 h)
 
--- | Use size hints to scale a pair of dimensions.
-
+-- | Use size hints to scale a pair of dimensions.  Upstream's arithmetic,
+-- unchanged: every hint is optional, and river reports only a minimum and a
+-- maximum.
 applySizeHints' :: SizeHints -> D -> D
 applySizeHints' sh =
       maybe id applyMaxSizeHint                   (sh_max_size   sh)
@@ -888,10 +660,6 @@ applySizeHints' sh =
     . maybe id (\(bw,bh) (w,h)   -> (w-bw, h-bh)) (sh_base_size  sh)
 
 -- | Reduce the dimensions so their aspect ratio falls between the two given aspect ratios.
---
--- Correct as written, and under river it never fires: Wayland has no aspect
--- ratio hint, so 'sh_aspect' is always 'Nothing'.
-
 applyAspectHint :: (D, D) -> D -> D
 applyAspectHint ((minx, miny), (maxx, maxy)) x@(w,h)
     | or [minx < 1, miny < 1, maxx < 1, maxy < 1] = x
@@ -900,16 +668,9 @@ applyAspectHint ((minx, miny), (maxx, maxy)) x@(w,h)
     | otherwise                                   = x
 
 -- | Reduce the dimensions so they are a multiple of the size increments.
---
--- As 'applyAspectHint': correct, and never fires under river.
-
 applyResizeIncHint :: D -> D -> D
 applyResizeIncHint (iw,ih) x@(w,h) =
     if iw > 0 && ih > 0 then (w - w `mod` iw, h - h `mod` ih) else x
-
--- | Reduce the dimensions if they exceed the given maximum dimensions.
---
--- This one does fire: @dimensions_hint@ carries a maximum.
 
 applyMaxSizeHint  :: D -> D -> D
 applyMaxSizeHint (mw,mh) x@(w,h) =
