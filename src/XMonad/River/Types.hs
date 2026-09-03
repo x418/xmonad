@@ -9,6 +9,7 @@
 module XMonad.River.Types
   ( -- * Geometry
     Rectangle(..)
+  , centredRect
   , BorderColor
   , Pixel, pixelColor
   , parseColor, parseColorMaybe
@@ -45,12 +46,14 @@ module XMonad.River.Types
 import Data.Bits ((.&.))
 import Data.ByteString (ByteString)
 import Data.Int (Int32)
+import Data.Ratio ((%))
 import Data.Word (Word32)
 
 import XMonad.River.Protocol.WindowManagement
   ( riverSeatV1ModifiersCtrl, riverSeatV1ModifiersMod1, riverSeatV1ModifiersMod3
   , riverSeatV1ModifiersMod4, riverSeatV1ModifiersMod5, riverSeatV1ModifiersShift )
 import XMonad.River.Wire (ObjectId)
+import qualified XMonad.StackSet as W
 
 --------------------------------------------------------------------------------
 -- Geometry
@@ -68,6 +71,20 @@ data Rectangle = Rectangle
   , rect_width  :: !Dimension
   , rect_height :: !Dimension
   } deriving (Eq, Show, Read)
+
+-- | A rectangle of the given size in logical pixels, centred on the screen
+-- and expressed as a fraction of it, the form 'XMonad.StackSet.floating'
+-- holds.  Never under a pixel a side.  The origin is never negative: a window
+-- larger than the screen keeps its size and starts at the top left, so its
+-- top edge stays reachable.
+centredRect :: Rectangle -> Integer -> Integer -> W.RationalRect
+centredRect sr width height =
+  W.RationalRect (max 0 (1 % 2 - rw / 2)) (max 0 (1 % 2 - rh / 2)) rw rh
+  where
+    sw = max 1 (toInteger (rect_width sr))
+    sh = max 1 (toInteger (rect_height sr))
+    rw = max 1 width  % sw
+    rh = max 1 height % sh
 
 -- | An RGBA border colour, in the 32-bit-per-channel form
 -- @river_window_v1.set_borders@ takes.

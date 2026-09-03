@@ -183,20 +183,30 @@ transmitManage rt plan = do
   -- settles on a size of its own, a terminal rounding to its cell, is left
   -- there rather than re-proposed every sequence forever, which would cost it
   -- a configure per sequence and river a render sequence for each.
+  --
+  -- A float is only ever proposed a change of the ask, never put back: it
+  -- owns its size, as X11's granted ConfigureRequest let it.  A configure
+  -- the client did not ask for, while its own resize is pending, is one JBR
+  -- ignores without committing, and river then waits out its transaction
+  -- timeout showing stale buffers for the whole output.  One proposed 0x0
+  -- ('planUnsized') decides for itself; the worker settles it at what it
+  -- decided.
   lastM <- readIORef (rtLastManage rt)
   current <- fmap M.fromList $ forM
     [ (win, r, rw) | (win, r) <- planPlacements plan, Just rw <- [M.lookup win known] ] $
     \(win, r, rw) -> do
       let tiled = not (S.member win (planFloating plan))
-          want = (rect_width r, rect_height r, tiled)
-          asked = (fromIntegral (rect_width r), fromIntegral (rect_height r))
+          (pw, ph) | S.member win (planUnsized plan) = (0, 0)
+                   | otherwise = (rect_width r, rect_height r)
+          want = (pw, ph, tiled)
+          asked = (fromIntegral pw, fromIntegral ph)
           dims = rwDimensions rw
           resend = case M.lookup win lastM of
-            Just (want', seen) -> want' /= want || (dims /= asked && dims /= seen)
+            Just (want', seen) ->
+              want' /= want || (tiled && dims /= asked && dims /= seen)
             Nothing -> True
       when resend $ do
-        riverWindowV1ProposeDimensions conn win
-          (fromIntegral (rect_width r)) (fromIntegral (rect_height r))
+        riverWindowV1ProposeDimensions conn win (fromIntegral pw) (fromIntegral ph)
         riverWindowV1SetTiled conn win (if tiled then allEdges else 0)
       pure (win, (want, dims))
   atomicWriteIORef (rtLastManage rt) $! current

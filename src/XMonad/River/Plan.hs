@@ -38,6 +38,10 @@ data Plan = Plan
     -- are tiled.  A window that is not told draws itself as though it were
     -- floating: its own decorations, and drop shadows outside the size it
     -- was given, which it then subtracts from its content.
+  , planUnsized    :: !(S.Set Window)
+    -- ^ Placed floats whose size is the client's to choose: proposed 0x0.
+    -- In the plan rather than read from the worker's state, since the plan
+    -- transmitted may be older than that state.
   , planBorders    :: !(M.Map Window (Dimension, (Word32, Word32, Word32, Word32)))
     -- ^ Width and RGBA per placed window, already resolved against any
     -- per-window override.  Borders are rendering state, so river forgets them
@@ -67,6 +71,7 @@ emptyPlan = Plan
   , planPlacements = []
   , planBorders    = M.empty
   , planFloating   = S.empty
+  , planUnsized    = S.empty
   , planVisible    = S.empty
   , planRaised     = []
   , planFocus      = ClearFocus

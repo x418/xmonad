@@ -27,6 +27,7 @@ import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.IORef (IORef, atomicModifyIORef', modifyIORef', readIORef)
 import Data.Word (Word32)
 import qualified Data.Map as M
+import qualified Data.Set as S
 
 import XMonad.River.Connection (Connection)
 import XMonad.River.Mailbox (Mailbox)
@@ -129,6 +130,12 @@ data RiverState m = RiverState
       -- and this does not hold is unmapped at the origin, as X11 would have
       -- said; the attributes are built when asked, not for every window on
       -- every pass.
+    , riverUnsized :: !(IORef (S.Set Window))
+      -- ^ Floats adopted before river had sized them, whose rectangle is
+      -- 'XMonad.Operations.floatLocation''s fallback rather than anyone's
+      -- choice.  Proposed 0x0, river's "the window decides", and centred at
+      -- the size it decided on the sequence its first @dimensions@ event
+      -- asks for.  Worker only.
     , riverLogDue :: !(IORef Bool)
       -- ^ 'XMonad.Operations.windows' ran since the last sequence's log hook.
       -- X11 ran the log hook on every @windows@; here it runs once, at the end

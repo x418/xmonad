@@ -126,6 +126,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm u
     -- learns the workspaces from the log hook would otherwise show nothing
     -- until the first window changed the set.
     logDue      <- newIORef True
+    unsized     <- newIORef S.empty
     borders     <- newIORef M.empty
     submapGen   <- newIORef 0
     ops         <- newIORef []
@@ -154,6 +155,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm u
       , riverDragOrigin  = dragOrigin
       , riverAfterLayout = afterLayout
       , riverGeometry    = geometry
+      , riverUnsized     = unsized
       , riverLogDue      = logDue
       , riverBorders     = borders
       , riverSubmapGen   = submapGen

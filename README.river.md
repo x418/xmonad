@@ -116,6 +116,7 @@ this backend. That is the intended outcome, not a regression to be papered over.
 | Workspaces | river has no workspace concept; hidden workspaces use `river_window_v1.hide`/`show`. |
 | Layouts | `LayoutClass`, `Tall`, `Full`, `Mirror`, `\|\|\|`. |
 | Manage hooks | Run during the manage sequence, *before* the window is rendered — the ordering guarantee xmonad has and sway's IPC cannot give. |
+| Floats | A new float is proposed 0x0 and centred at the size the client chose, once it reports one; afterwards it owns its size. `doRectFloat` sizes are honoured as given. |
 | `title`, `className`, `appName` | From `river_window_v1.title` and `app_id`. Note river has no separate instance name, so `className` and `appName` are the same string. |
 | Layer shell | Bound via `river_layer_shell_v1`, without which river closes every layer surface on sight. This is what makes prompts, notifications, wallpaper and bars appear at all, and its exclusive zones shrink the tiling area. |
 | Screens | Reconciled from river outputs every manage sequence, ordered by position so screen ids are stable across reconnects. |

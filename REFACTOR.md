@@ -106,6 +106,7 @@ rendering state legal in either sequence.  What did not:
 | D12 | `willFloat` asked "is it floating" from a hook that runs before the float | asks what upstream's `manage` asked |
 | D13 | the log hook ran in `windows` and again at the end of the sequence | once, `riverLogDue` |
 | D14 | `nominateLayerOutput` matched the screen origin to the output's; a bar on the left or top edge moved it | containment |
+| D15 | a float adopted before its first `dimensions` was proposed its minimum size or half the screen, which JBR took: dialogs cut off; a float that then resized itself was proposed the old size back, which JBR ignored, and river waited out its transaction timeout | proposed 0x0 and settled at the client's size (`riverUnsized`); floats never re-proposed for differing |
 
 ### Performance
 

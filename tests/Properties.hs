@@ -142,6 +142,7 @@ tests =
   ,("floating is reversible" ,  property prop_float_reversible)
   ,("floating sets geometry" ,  property prop_float_geometry)
   ,("floats can be deleted",    property prop_float_delete)
+  ,("centredRect centres, keeps the size, never goes negative", property prop_centred_rect)
   ,("screens includes current", property prop_screens)
 
   ,("differentiate works",     property prop_differentiate)

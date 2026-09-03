@@ -19,7 +19,7 @@ import Control.Monad (forM, forM_, unless, void, when)
 import Control.Monad.Reader (ask, asks)
 import Control.Monad.State (get, gets, modify, put)
 import Data.IORef
-import Data.List (sortOn)
+import Data.List (find, sortOn)
 import Data.Maybe (fromMaybe)
 import Data.Monoid (appEndo)
 import qualified Data.Map.Strict as M
@@ -61,6 +61,7 @@ manageSequence rt n acts = do
       syncScreens
       nominateLayerOutput rt
       adoptNewWindows rt
+      settleFloats rt
       mapM_ userCode acts
       applyLayout rt
       -- The log hook, once: for every 'windows' the actions ran, which X11
@@ -125,6 +126,7 @@ reapClosed rt = do
   forM_ [ w | w <- M.elems ws, rwClosed w ] $ \w -> do
     modify $ \st -> st { windowset = W.delete (rwObject w) (windowset st) }
     io $ modifyIORef' (rtAdopted rt) (S.delete (rwObject w))
+    io $ modifyIORef' (riverUnsized rs) (S.delete (rwObject w))
     -- river recycles ids; an override left behind would land on an
     -- unrelated window.
     io $ forgetBorderOverride (riverBorders rs) (rwObject w)
@@ -252,8 +254,41 @@ adoptNewWindows rt = do
           placed
             | shouldFloat = W.float (rwObject w) (clamp rr) inserted
             | otherwise = inserted
-      modify $ \st -> st { windowset = appEndo g placed }
+          final = appEndo g placed
+          -- A float still at the fallback's size, before river has sized
+          -- it, has a rectangle nobody chose: doFloat and doCenterFloat only
+          -- move that rectangle, doRectFloat picks its own.
+          W.RationalRect _ _ fw fh = rr
+          unsized = rwDimensions w == (0, 0) &&
+            case M.lookup (rwObject w) (W.floating final) of
+              Just (W.RationalRect _ _ fw' fh') -> (fw', fh') == (fw, fh)
+              Nothing -> False
+      when unsized $ io $ modifyIORef' (riverUnsized (rtState rt)) (S.insert (rwObject w))
+      modify $ \st -> st { windowset = final }
       void (broadcastEvent (WindowAdded (rwObject w)))
+
+-- | Give a float adopted before river had sized it the size the client chose:
+-- centred on its screen at the dimensions river has now reported.  Once per
+-- window, in the sequence its first @dimensions@ event asks for
+-- ("XMonad.River.WM.Events"); a window sunk meanwhile is left alone.  Plain
+-- 'modify', not 'windows': floats are not the log hook's business.
+settleFloats :: Runtime -> X ()
+settleFloats rt = do
+  pending <- io (readIORef (riverUnsized rs))
+  unless (S.null pending) $ do
+    known <- io (readIORef (riverWindows rs))
+    forM_ (S.toList pending) $ \w -> forM_ (M.lookup w known) $ \rw ->
+      case rwDimensions rw of
+        (0, 0) -> pure ()
+        (dw, dh) -> do
+          io (modifyIORef' (riverUnsized rs) (S.delete w))
+          ws <- gets windowset
+          when (M.member w (W.floating ws)) $ do
+            let scr = fromMaybe (W.current ws) $
+                  find ((== W.findTag w ws) . Just . W.tag . W.workspace) (screensOf ws)
+                rr = centredRect (screenRect (W.screenDetail scr)) (toInteger dw) (toInteger dh)
+            modify $ \st -> st { windowset = W.float w rr (windowset st) }
+  where rs = rtState rt
 
 -- | The user's startup hook, once, after the first manage sequence has been
 -- answered.  @XMONAD_RIVER_NO_STARTUP_HOOK@ skips it, so a real config can run
@@ -326,10 +361,12 @@ applyLayout rt = do
   -- keeps the previous pass alive until somebody reads it.
   io (atomicWriteIORef (riverGeometry (rtState rt)) $! placedMap)
 
+  unsized <- io (readIORef (riverUnsized (rtState rt)))
   io $ atomically $ modifyTVar' (shPlan (rtShared rt)) $ \p -> p
     { planSerial     = planSerial p + 1
     , planPlacements = placements
     , planFloating   = floating
+    , planUnsized    = S.filter (`S.member` floating) unsized
     , planBorders    = borders
     , planVisible    = placed
     , planRaised     = stillUp

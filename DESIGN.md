@@ -55,7 +55,7 @@ riverRestack                               worker only                 IORef
 rtLayoutMoved                              worker writes, loop reads   atomicWriteIORef / atomicModifyIORef'
 riverPlacements, riverGeometry,
   riverBorders, riverAfterLayout,
-  riverDragOrigin, riverLogDue,
+  riverDragOrigin, riverLogDue, riverUnsized,
   riverSubmapGen, inManageSeq, rtAdopted,
   rtRestored                               worker only                 IORef
 riverRestart                               worker (restart) or loop    atomicWriteIORef; read by the loop on
@@ -103,8 +103,8 @@ until the `manage_start` arrives (`rtDirtySent`).
    hands `manageSequence n acts` to the worker.
 2. The worker: restore a predecessor's state (first sequence only), drop what
    river closed, reconcile screens with outputs, adopt new windows through
-   the manage hook, run the actions, lay out, publish the `Plan`, mark `n`
-   done.
+   the manage hook, settle the floats river has sized since, run the
+   actions, lay out, publish the `Plan`, mark `n` done.
 3. The loop waits up to `planGraceMicros` for *that* sequence number.  If it
    landed, closed objects are destroyed.  Either way the plan in hand is
    transmitted -- bindings for new seats, the one-shot ops, dimensions,
@@ -122,9 +122,14 @@ between frames -- and check every reference against the objects river still
 has, since the plan may be older than the maps.  A render sequence given the
 same plan, windows and overlays as the last one -- river starts one whenever
 a client changes its own size -- sends nothing at all.  Dimensions are
-re-proposed when the ask changes or when the client moves away from it, not
-for as long as it merely differs: a terminal rounding to its cell would
-otherwise be configured every sequence.
+re-proposed when the ask changes or when a tiled client moves away from it,
+not for as long as it merely differs: a terminal rounding to its cell would
+otherwise be configured every sequence.  A float is never put back; it owns
+its size.  A float adopted before its first `dimensions` -- every dialog --
+has no size to propose and is proposed 0x0, river's "the window decides";
+the sequence its first `dimensions` asks for centres it at what it decided.
+Proposing the fallback instead (its minimum, or half the screen) was taken
+literally by JBR, which shrank its dialogs to it.
 
 ### Plan and Op
 

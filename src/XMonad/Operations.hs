@@ -490,11 +490,7 @@ floatLocation w = do
                         (width, height) = case rwDimensions rw of
                           (0, 0)   -> hinted
                           (dw, dh) -> (toInteger dw, toInteger dh)
-                        rwidth  = max 1 width  % sw
-                        rheight = max 1 height % sh
-                    in ( W.screen sc
-                       , W.RationalRect (0.5 - rwidth / 2) (0.5 - rheight / 2)
-                                        rwidth rheight )
+                    in (W.screen sc, centredRect sr width height)
 
 -- | A rectangle as a fraction of a screen: the exact inverse of
 -- 'scaleRationalRect', so a placed window survives the round trip unchanged
