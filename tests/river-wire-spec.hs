@@ -105,6 +105,14 @@ tests =
     , let body = bodyOf (enc (ObjectId 1) 0 (argUInt 1 <> argUInt 2))
       in decodeBody getWord32 body == Right 1 )
 
+  , ( "utf-8 roundtrips beyond ASCII, and malformed bytes decode to U+FFFD"
+    , let s = "Caf\233 \8211 na\239ve \10003 \128578"
+      in decodeUtf8 (encodeUtf8 s) == s
+         && encodeUtf8 "\8211" == BS.pack [0xe2, 0x80, 0x93]
+         && decodeUtf8 (BS.pack [0x61, 0xff, 0x62]) == "a\65533b"
+         && decodeUtf8 (BS.pack [0xe2, 0x80]) == "\65533\65533"
+         && decodeUtf8 (BS.pack [0xc0, 0x80]) == "\65533\65533" )
+
   , ( "decoding a truncated body fails rather than reading past the end"
     , case decodeBody ((,) <$> getWord32 <*> getWord32) (BS.pack [1,0,0,0]) of
         Left _  -> True

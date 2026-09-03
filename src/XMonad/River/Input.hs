@@ -43,7 +43,6 @@ module XMonad.River.Input
 
 import Data.Bits (complement, (.&.))
 import Data.ByteString (ByteString)
-import Data.Char (ord)
 import Data.Int (Int32)
 import Data.List (foldl')
 import Data.Maybe (fromMaybe)
@@ -53,6 +52,7 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
 import XMonad.River.Protocol.LibinputConfig
+import XMonad.River.Wire (encodeUtf8)
 
 --------------------------------------------------------------------------------
 -- Rules
@@ -251,9 +251,9 @@ validateInputConfig rules =
     -- Wayland fixed is signed 24.8.
     fixedMax = 8388607
     encodeName = \case
-      NameExactly x -> Exactly (utf8 x)
-      NameStartsWith x -> StartsWith (utf8 x)
-      NameContains x -> Contains (utf8 x)
+      NameExactly x -> Exactly (encodeUtf8 x)
+      NameStartsWith x -> StartsWith (encodeUtf8 x)
+      NameContains x -> Contains (encodeUtf8 x)
 
 -- | Forces every rule; the fields are strict.
 forceInputConfig :: InputConfig -> ()
@@ -309,20 +309,6 @@ settingsValues s = M.fromList $ concat
   where
     enumV f get code = [ (f, VUInt (code x)) | Just x <- [get s] ]
     boolV f get yes no = [ (f, VUInt (if b then yes else no)) | Just b <- [get s] ]
-
--- | UTF-8; the package has no @text@ dependency.
-utf8 :: String -> ByteString
-utf8 = BS.pack . concatMap encodeChar
-  where
-    encodeChar c
-      | n < 0x80 = [fromIntegral n]
-      | n < 0x800 = [0xc0 + hi 6, cont 0]
-      | n < 0x10000 = [0xe0 + hi 12, cont 6, cont 0]
-      | otherwise = [0xf0 + hi 18, cont 12, cont 6, cont 0]
-      where
-        n = ord c
-        hi k = fromIntegral (n `div` (2 ^ (k :: Int)))
-        cont k = 0x80 + fromIntegral ((n `div` (2 ^ (k :: Int))) `mod` 64)
 
 --------------------------------------------------------------------------------
 -- A device

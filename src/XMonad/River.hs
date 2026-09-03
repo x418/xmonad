@@ -182,6 +182,7 @@ import XMonad.River.Plan (Op(..))
 import XMonad.River.Runtime (RestartRequested(..), setMainThread, warnUnimplemented)
 import XMonad.River.Types
 import XMonad.River.State (Display'(..), InputCapture(..), RiverState(..), updatePlacement)
+import XMonad.River.Wire (decodeUtf8)
 
 -- | Run an action on the worker, from any thread.  It runs at the start of
 -- the next manage sequence, the earliest moment it could legally change
@@ -376,7 +377,7 @@ outputNames = do
     outs <- io . readIORef =<< asks (riverOutputs . riverState)
     let live = [ o | o <- sortOn roPosition (M.elems outs), not (roRemoved o)
                    , let (w, h) = roSize o, w > 0 && h > 0 ]
-    pure [ (S i, BC.unpack n) | (i, o) <- zip [0 ..] live, Just n <- [roName o] ]
+    pure [ (S i, decodeUtf8 n) | (i, o) <- zip [0 ..] live, Just n <- [roName o] ]
 
 -- | Close every prompt, releasing any keyboard grab one is holding.  Bind
 -- it: river matches xkb bindings before it consults keyboard focus, so this

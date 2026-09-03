@@ -44,6 +44,9 @@ module XMonad.River.Wire
   , Fixed
   , toFixed
   , fromFixed
+    -- * Text
+  , encodeUtf8
+  , decodeUtf8
     -- * Floating point in arrays
   , doubleBytes
   , bytesDouble
@@ -69,6 +72,7 @@ module XMonad.River.Wire
 import Control.DeepSeq (NFData (rnf))
 import Control.Monad (when)
 import Data.Bits (shiftL, shiftR, (.&.), (.|.))
+import Data.Char (chr, ord)
 import Data.ByteString (ByteString)
 import Data.Int (Int32)
 import Data.Word (Word16, Word32, Word8)
@@ -142,6 +146,45 @@ toFixed d = round (d * 256)
 
 fromFixed :: Int32 -> Fixed
 fromFixed n = fromIntegral n / 256
+
+--------------------------------------------------------------------------------
+-- Text
+
+-- | Wayland strings are UTF-8; @Data.ByteString.Char8@ would read each byte
+-- as a Latin-1 character.  The package has no @text@ dependency.
+encodeUtf8 :: String -> ByteString
+encodeUtf8 = BS.pack . concatMap encodeChar
+  where
+    encodeChar c
+      | n < 0x80 = [fromIntegral n]
+      | n < 0x800 = [0xc0 .|. hi 6, cont 0]
+      | n < 0x10000 = [0xe0 .|. hi 12, cont 6, cont 0]
+      | otherwise = [0xf0 .|. hi 18, cont 12, cont 6, cont 0]
+      where
+        n = ord c
+        hi k = fromIntegral (n `shiftR` k)
+        cont k = 0x80 .|. fromIntegral ((n `shiftR` k) .&. 0x3f)
+
+-- | Lenient: a malformed sequence decodes to U+FFFD, one per bad byte.
+decodeUtf8 :: ByteString -> String
+decodeUtf8 = go . BS.unpack
+  where
+    go [] = []
+    go (b : bs)
+      | b < 0x80 = chr (fromIntegral b) : go bs
+      | b .&. 0xe0 == 0xc0 = multi 1 (fromIntegral b .&. 0x1f) 0x80 bs
+      | b .&. 0xf0 == 0xe0 = multi 2 (fromIntegral b .&. 0x0f) 0x800 bs
+      | b .&. 0xf8 == 0xf0 = multi 3 (fromIntegral b .&. 0x07) 0x10000 bs
+      | otherwise = '\xfffd' : go bs
+      where
+        multi :: Int -> Int -> Int -> [Word8] -> String
+        multi k acc lowest rest =
+          let (conts, rest') = splitAt k rest
+              ok = length conts == k && all (\c -> c .&. 0xc0 == 0x80) conts
+              n = foldl (\a c -> (a `shiftL` 6) .|. (fromIntegral c .&. 0x3f)) acc conts
+          in if ok && n >= lowest && n <= 0x10ffff && (n < 0xd800 || n > 0xdfff)
+               then chr n : go rest'
+               else '\xfffd' : go rest
 
 --------------------------------------------------------------------------------
 -- Floating point in arrays

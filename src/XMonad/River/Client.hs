@@ -103,7 +103,7 @@ import qualified XMonad.River.Mailbox as MB
 import XMonad.River.Protocol.Core
 import XMonad.River.Protocol.LayerShellClient
 import XMonad.River.Types (KeyMask, shiftMask, controlMask, mod1Mask, mod3Mask, mod4Mask, mod5Mask)
-import XMonad.River.Wire (ObjectId, nullObject)
+import XMonad.River.Wire (ObjectId, nullObject, decodeUtf8)
 import qualified Data.Map.Strict as M
 import System.IO.Unsafe (unsafePerformIO)
 import XMonad.River.Xkb
@@ -540,7 +540,7 @@ readFdText (Fd fd) size
       got <- go buf 0
       -- The advertised size counts the terminator, and an interior NUL in a
       -- Haskell String is a trap waiting for whoever marshals it back out.
-      BC.unpack . BS.takeWhile (/= 0) <$> BS.packCStringLen (buf, got)
+      decodeUtf8 . BS.takeWhile (/= 0) <$> BS.packCStringLen (buf, got)
   where
     go buf got
       | got >= size = pure got
