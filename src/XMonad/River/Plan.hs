@@ -15,6 +15,7 @@ import Data.Word (Word32)
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
+import XMonad.River.Input (InputConfig)
 import XMonad.River.Types (Dimension, KeyMask, KeySym, Position, Rectangle, Window)
 import XMonad.River.Wire (ObjectId)
 
@@ -131,4 +132,7 @@ data Op
     -- and this says only what to listen for.  Drained inside a manage
     -- sequence, which is what makes arming atomic with the key press that
     -- asked for it.
+  | OpInstallInputConfig !InputConfig
+    -- ^ These input rules, as a new generation.  Validated and forced by
+    -- the worker; legal outside a sequence, so 'XMonad.River.Ops.emitNow'.
   deriving (Eq, Show)

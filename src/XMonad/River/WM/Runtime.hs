@@ -38,6 +38,7 @@ import XMonad.River.Plan (Plan)
 import XMonad.River.Protocol.WindowManagement
 import XMonad.River.State (InputCapture(..), RiverState(..))
 import XMonad.River.Types
+import XMonad.River.WM.Input (InputRuntime)
 import XMonad.River.Wire (ObjectId)
 import qualified XMonad.StackSet as W
 
@@ -61,6 +62,9 @@ data Runtime = Runtime
     -- ^ Negotiated @river_xkb_bindings_v1@ version; @get_seat@ and
     -- @ensure_next_key_eaten@ arrived in 2.
   , rtLayerShell     :: !(Maybe ObjectId)
+  , rtInput          :: !InputRuntime
+    -- ^ Input devices and their configuration; loop only, see
+    -- "XMonad.River.WM.Input".
   , rtFollowsMouse   :: !Bool
   , rtKeyActions     :: !(M.Map (KeyMask, KeySym) (X ()))
   , rtButtonActions  :: !(M.Map (KeyMask, Button) (Window -> X ()))

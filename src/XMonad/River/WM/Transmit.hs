@@ -31,6 +31,7 @@ import XMonad.River.Protocol.WindowManagement
 import XMonad.River.Protocol.XkbBindings
 import XMonad.River.State (InputCapture(..), RiverState(..), takeOps)
 import XMonad.River.Types
+import XMonad.River.WM.Input (installInputConfig)
 import XMonad.River.WM.Runtime
 import XMonad.River.Wire (ObjectId)
 
@@ -169,6 +170,8 @@ transmitManage rt plan = do
       bs <- fmap concat $ forM (liveSeats seats) $ \seat ->
         bindGrabbedSeat rt (rsObject seat) gen ks
       writeIORef (rtGrabbed rt) bs
+    -- Legal anywhere; queued here only if something used emitOp for it.
+    OpInstallInputConfig cfg -> installInputConfig (rtInput rt) cfg
     -- Sent by the loop's own pass; see 'sendNow'.
     OpExitSession -> pure ()
     OpStop -> pure ()

@@ -61,6 +61,10 @@ sources =
     , river "protocol/river-xkb-bindings-v1.xml" )
   , ( "river-layer-shell-v1.xml"
     , river "protocol/river-layer-shell-v1.xml" )
+  , ( "river-input-management-v1.xml"
+    , river "protocol/river-input-management-v1.xml" )
+  , ( "river-libinput-config-v1.xml"
+    , river "protocol/river-libinput-config-v1.xml" )
   , ( "wlr-layer-shell-unstable-v1.xml"
     , river "protocol/upstream/wlr-layer-shell-unstable-v1.xml" )
   , ( "virtual-keyboard-unstable-v1.xml"
@@ -90,6 +94,8 @@ targets =
   [ ("river-window-management-v1.xml", "XMonad.River.Protocol.WindowManagement", Nothing)
   , ("river-xkb-bindings-v1.xml",      "XMonad.River.Protocol.XkbBindings", Nothing)
   , ("river-layer-shell-v1.xml",       "XMonad.River.Protocol.LayerShell", Nothing)
+  , ("river-input-management-v1.xml",  "XMonad.River.Protocol.InputManagement", Nothing)
+  , ("river-libinput-config-v1.xml",   "XMonad.River.Protocol.LibinputConfig", Nothing)
   , ("wayland.xml",                    "XMonad.River.Protocol.Core",
       Just [ "wl_compositor", "wl_shm", "wl_shm_pool", "wl_surface"
               , "wl_buffer", "wl_region", "wl_callback"

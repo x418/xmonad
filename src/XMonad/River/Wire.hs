@@ -44,6 +44,11 @@ module XMonad.River.Wire
   , Fixed
   , toFixed
   , fromFixed
+    -- * Floating point in arrays
+  , doubleBytes
+  , bytesDouble
+  , floatsBytes
+  , bytesFloats
     -- * Encoding
   , encodeMessage
     -- * Decoding
@@ -137,6 +142,33 @@ toFixed d = round (d * 256)
 
 fromFixed :: Int32 -> Fixed
 fromFixed n = fromIntegral n / 256
+
+--------------------------------------------------------------------------------
+-- Floating point in arrays
+
+-- | A native-endian IEEE-754 double, as @river-libinput-config-v1@ carries
+-- one in an @array@ argument (acceleration speed).  Eight bytes.
+doubleBytes :: Double -> ByteString
+doubleBytes d = unsafeEncodeWith (pokeStorable d) 8
+
+-- | The inverse; 'Nothing' for anything but exactly eight bytes.
+bytesDouble :: ByteString -> Maybe Double
+bytesDouble bs
+  | BS.length bs /= 8 = Nothing
+  | otherwise = either (const Nothing) Just (decodeWith (peekStorableTy "Double") bs)
+
+-- | Native-endian 32-bit floats, packed: a calibration matrix is six of
+-- them, and encoding it as doubles would be a protocol error.
+floatsBytes :: [Float] -> ByteString
+floatsBytes fs = unsafeEncodeWith (mapM_ pokeStorable fs) (4 * length fs)
+
+-- | The inverse; 'Nothing' unless the length is a multiple of four.
+bytesFloats :: ByteString -> Maybe [Float]
+bytesFloats bs
+  | r /= 0 = Nothing
+  | otherwise = either (const Nothing) Just
+      (decodeWith (mapM (const (peekStorableTy "Float")) [1 .. n]) bs)
+  where (n, r) = BS.length bs `divMod` 4
 
 --------------------------------------------------------------------------------
 -- Arguments

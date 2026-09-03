@@ -102,6 +102,7 @@ library
                    XMonad.River.Client
                    XMonad.River.Connection
                    XMonad.River.Control
+                   XMonad.River.Input
                    XMonad.River.Keysym
                    XMonad.River.Keysym.Table
                    XMonad.River.Mailbox
@@ -112,13 +113,16 @@ library
                    XMonad.River.State
                    XMonad.River.Surface
                    XMonad.River.Protocol.Core
+                   XMonad.River.Protocol.InputManagement
                    XMonad.River.Protocol.LayerShell
                    XMonad.River.Protocol.LayerShellClient
+                   XMonad.River.Protocol.LibinputConfig
                    XMonad.River.Protocol.VirtualKeyboard
                    XMonad.River.Protocol.WindowManagement
                    XMonad.River.Protocol.XkbBindings
                    XMonad.River.Types
                    XMonad.River.WM.Events
+                   XMonad.River.WM.Input
                    XMonad.River.WM.Runtime
                    XMonad.River.WM.Sequence
                    XMonad.River.WM.Transmit
@@ -238,6 +242,21 @@ test-suite river-wire
   -- The wire codec, the only part of the stack testable without a compositor.
   -- Everything above it is unverified until run against a real river; see
   -- README.river.md.
+
+test-suite river-input
+  type:           exitcode-stdio-1.0
+  main-is:        river-input-spec.hs
+  hs-source-dirs: tests
+  build-depends:  base
+                , bytestring
+                , containers
+                , network
+                , xmonad
+  default-language: Haskell2010
+  ghc-options:    -Wall
+
+  -- Rules as values; the loop's half against a fake compositor on a
+  -- socketpair.  Real devices are a hardware step; see LIBINPUT.md.
 
 test-suite river-screen
   type:           exitcode-stdio-1.0

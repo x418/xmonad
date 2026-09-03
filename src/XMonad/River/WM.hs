@@ -56,6 +56,7 @@ import XMonad.River.Runtime (RestartRequested(..), exitLoopWith, sendRestart, se
 import XMonad.River.State (Display'(..), RiverState(..), nowOpsPending, takeNowOps)
 import XMonad.River.Types
 import XMonad.River.WM.Events
+import XMonad.River.WM.Input (InputRuntime, bindInput, installInputConfig)
 import XMonad.River.WM.Runtime
 import XMonad.River.WM.Sequence (manageSequence, runStartupHook)
 import XMonad.River.WM.Transmit (transmitManage, transmitRender)
@@ -79,6 +80,8 @@ riverMain userConfig dirs = do
   mCompositor <- bindGlobal conn registry globals
                    wlCompositorInterface 4 wlCompositorVersion
   mShm <- bindGlobal conn registry globals wlShmInterface 1 wlShmVersion
+  -- Optional: a compositor without them keeps its input devices as they are.
+  input <- bindInput conn registry globals
 
   case (mManager, mBindings) of
     (Just (manager, _), Just (bindings, bindingsVer)) -> do
@@ -92,7 +95,7 @@ riverMain userConfig dirs = do
         "xmonad-river: river_xkb_bindings_v1 is version 1; submaps cannot \
         \detect an unbound key and will wait for one of their own"
       run conn registry named manager bindings bindingsVer (fmap fst mLayerShell)
-          (fmap fst mCompositor) (fmap fst mShm) userConfig dirs
+          (fmap fst mCompositor) (fmap fst mShm) input userConfig dirs
     _ -> do
       hPutStrLn stderr
         "xmonad-river: river_window_manager_v1 (>= 4) or \
@@ -100,9 +103,9 @@ riverMain userConfig dirs = do
       exitFailure
 
 run :: Connection -> ObjectId -> M.Map Word32 Global -> ObjectId -> ObjectId -> Word32
-    -> Maybe ObjectId -> Maybe ObjectId -> Maybe ObjectId -> XConfig Layout
+    -> Maybe ObjectId -> Maybe ObjectId -> Maybe ObjectId -> InputRuntime -> XConfig Layout
     -> Directories -> IO ()
-run conn registry named manager bindings bindingsVer layerShell compositor shm userConfig dirs = do
+run conn registry named manager bindings bindingsVer layerShell compositor shm input userConfig dirs = do
   rs <- do
     windowsRef  <- newIORef M.empty
     outputsRef  <- newIORef M.empty
@@ -265,6 +268,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm u
       , rtBindingsGlobal = bindings
       , rtXkbVersion = bindingsVer
       , rtLayerShell = layerShell
+      , rtInput = input
       , rtFollowsMouse = focusFollowsMouse userConfig
       , rtKeyActions = keyActions xconf
       , rtButtonActions = buttonActions xconf
@@ -457,6 +461,7 @@ sendNow rt = \case
   OpSetXcursorTheme s name size -> do
     seats <- readIORef (riverSeats (rtState rt))
     when (M.member s seats) $ riverSeatV1SetXcursorTheme conn s name size
+  OpInstallInputConfig cfg -> installInputConfig (rtInput rt) cfg
   _ -> pure ()
   where conn = rtConn rt
 

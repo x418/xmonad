@@ -19,6 +19,7 @@ module XMonad.River.Connection
     Connection
   , connect
   , connectTo
+  , connectSocket
   , disconnect
     -- * Requests
   , request
@@ -38,6 +39,7 @@ module XMonad.River.Connection
   , dispatch
   , dispatchPending
   , roundtrip
+  , syncThen
     -- * Registry
   , Global(..)
   , getRegistry
@@ -146,6 +148,10 @@ connectTo path = do
   sock <- N.socket N.AF_UNIX N.Stream N.defaultProtocol
   N.connect sock (N.SockAddrUnix path)
   newConnection sock
+
+-- | Over a connected socket: a test's socketpair.
+connectSocket :: N.Socket -> IO Connection
+connectSocket = newConnection
 
 newConnection :: N.Socket -> IO Connection
 newConnection sock = do
@@ -339,6 +345,15 @@ roundtrip conn = do
         unless d (dispatch conn >> loop)
   loop
   clearListener conn cb
+
+-- | Send @wl_display.sync@ and run the action when it is answered, on the
+-- dispatching thread.  Nothing waits.
+syncThen :: Connection -> IO () -> IO ()
+syncThen conn act = do
+  cb <- newObject conn
+  -- @done@ destroys the callback; @delete_id@ returns the id.
+  setListener conn cb $ \_ _ -> clearListener conn cb >> act
+  request conn displayId 0 (argObject cb)
 
 --------------------------------------------------------------------------------
 -- Registry

@@ -136,6 +136,16 @@ module XMonad.River (
     -- * Lifecycle
     RestartRequested(..), setMainThread, exitSession,
 
+    -- * Input devices
+    --
+    -- | What @xinput@ did: rules over closed data, matched by the loop.
+    setInputConfig,
+    InputRule(..), InputMatch(..), defaultInputMatch, touchpads,
+    NameMatch(..), InputType(..),
+    InputSettings(..), defaultInputSettings,
+    SendEvents(..), ButtonMap(..), DragLock(..), ThreeFingerDrag(..),
+    AccelProfile(..), ClickMethod(..), ScrollMethod(..),
+
     -- * Keysym tables
     keysymTable, reverseKeysymTable,
 
@@ -150,7 +160,7 @@ import Data.IORef (IORef, atomicModifyIORef', atomicWriteIORef, modifyIORef', re
 import Data.Maybe (fromMaybe, isJust)
 import Data.Word (Word32)
 import Control.Concurrent (forkIO, threadDelay)
-import Control.Exception (SomeException, handle)
+import Control.Exception (SomeException, evaluate, handle)
 import Control.Monad (forM, forM_, unless, void, when)
 import Control.Monad.IO.Class (MonadIO)
 import Control.Monad.Reader (ask, asks)
@@ -163,6 +173,7 @@ import XMonad.Operations (applySizeHintsContents, pointWithin)
 import XMonad.River.Keysym.Table (keysymTable, reverseKeysymTable)
 import qualified XMonad.River.Mailbox as MB
 import XMonad.River.Client (closeAllClients)
+import XMonad.River.Input
 import qualified XMonad.River.Connection as C
 import XMonad.River.Protocol.WindowManagement
 import XMonad.River.Protocol.XkbBindings
@@ -489,6 +500,19 @@ submapNextKey subKeys onUnbound = do
         , icGeneration = gen
         }
     emitOp (OpCaptureInput keys' 0 True gen)
+
+-- | Replace the input rules.  Authoritative: a field no rule sets returns
+-- to the device's default, so run no other input-configuration client.
+-- Applies to devices present and hot-plugged; an invalid rule leaves the
+-- whole set uninstalled, with a line on stderr.  Needs no manage sequence.
+setInputConfig :: [InputRule] -> X ()
+setInputConfig rules = case validateInputConfig rules of
+    Left err -> io $ hPutStrLn stderr
+        ("xmonad-river: setInputConfig: " ++ err ++ "; no rules were installed")
+    Right cfg -> do
+        -- On the worker: the loop is never handed a thunk.
+        io (evaluate (forceInputConfig cfg))
+        emitNow (OpInstallInputConfig cfg)
 
 -- | Claim the next capture generation.
 nextGeneration :: IORef Int -> IO Int

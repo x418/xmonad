@@ -33,6 +33,20 @@ blocked action costs window management, never the session.
 refused with a reason, and its listener has a thread of its own so it can
 interrupt a wedged loop.
 
+### XKB protocol split
+
+`river-xkb-bindings-v1.xml` is generated, bound and used for keybindings,
+submaps, modifier watches and input capture. Binding resources follow the same
+generation discipline as the rest of loop-owned input state.
+
+`river-xkb-config-v1.xml` is a separate, currently unimplemented protocol. It
+is the planned configuration surface for per-device keymaps, runtime layout
+selection and lock-state control. Those operations must not be added to the
+bindings protocol abstraction or implemented by restarting river with new
+`XKB_DEFAULT_*` variables.  Like `river_libinput_device_v1`, its keyboard
+object names its `river_input_device_v1` once, at creation, and only if that
+object already exists: `river_input_manager_v1` is bound first.
+
 ## Architecture
 
 ### Ownership
@@ -53,6 +67,8 @@ riverExtraKeys                             worker writes (generation,  atomicWri
 riverOverlays, riverOverlayPos             contrib writes, loop reads  atomicModifyIORef' (XMonad.Util.XUtils)
 riverRestack                               worker only                 IORef
 rtLayoutMoved                              worker writes, loop reads   atomicWriteIORef / atomicModifyIORef'
+rtInput (devices, links, pending
+  results, the installed rules)            loop only                   IORef
 riverPlacements, riverGeometry,
   riverBorders, riverAfterLayout,
   riverDragOrigin, riverLogDue, riverUnsized,
@@ -131,6 +147,14 @@ the sequence its first `dimensions` asks for centres it at what it decided.
 Proposing the fallback instead (its minimum, or half the screen) was taken
 literally by JBR, which shrank its dialogs to it.
 
+river itself has a four-stage state machine:
+`idle -> manage -> inflight_configures -> render -> idle`.  After
+`manage_finish`, it waits for every configure acknowledgement or for its fixed
+100 ms timeout before starting render.  When render and manage are both dirty
+while idle, render wins.  Code must therefore not assume that `render_start`
+immediately follows `manage_finish`, or that a requested manage sequence cannot
+be delayed by pending render work.
+
 ### Plan and Op
 
 Most of what a sequence sends is a restatement and is a value (`Plan`):
@@ -138,6 +162,13 @@ placements, borders, visibility, stacking, focus.  A few requests are
 one-shot effects -- `close`, `pointer_warp`, `set_capabilities` -- and are
 `Op`s, drained as they are sent.  Re-sending a plan is free; re-sending an op
 is a bug.
+
+An `Op` is strict, first-order data.  User functions are evaluated only by the
+worker and must never be stored in an op or in loop-owned state.  Input-device
+rules are the example: `setInputConfig` validates and forces them on the
+worker and `OpInstallInputConfig` carries the value, which the loop matches
+against each device and reconciles to its advertised defaults
+(`XMonad.River.WM.Input`, `LIBINPUT.md` in nixos-config).
 
 ### Input routing
 
@@ -188,6 +219,10 @@ keyboard with nobody reading it is a session with no keyboard.
   Magnifier keep off its neighbours' borders.  A contrib-scale change.
 - **`riverPlacements` is an assoc list**, searched linearly by
   `floatLocation`, `windowUnderPointer` and every `op_delta`.
+- **Render can postpone manage work.**  river gives a dirty render sequence
+  priority over a dirty manage sequence, and configure acknowledgements can
+  hold the render transition for up to 100 ms.  The protocol provides no
+  fairness guarantee if a client continually schedules rendering.
 
 ## Assumptions about river
 
