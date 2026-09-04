@@ -15,19 +15,24 @@
 -- here: cairo and pango belong on the contrib side of the line, not in the
 -- window manager.
 module XMonad.River.Buffer
-  ( Buffer(..)
+  ( sealedMemfd
+  , Buffer(..)
   , newBuffer
   , destroyBuffer
   , bufferSize
   ) where
 
 import Control.Monad (when)
+import Data.ByteString (ByteString)
 import Data.Word (Word8)
 import Foreign.C.Error (throwErrnoIf, throwErrnoIfNull, throwErrnoIfMinus1_)
 import Foreign.C.String (CString, withCString)
 import Foreign.C.Types (CInt (..), CSize (..))
-import Foreign.Ptr (Ptr)
+import Foreign.Ptr (Ptr, castPtr, plusPtr)
+import System.Posix.IO (fdWriteBuf)
 import System.Posix.Types (Fd (..))
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Unsafe as BSU
 
 import XMonad.River.Connection (Connection)
 import XMonad.River.Protocol.Core
@@ -35,6 +40,24 @@ import XMonad.River.Wire (ObjectId)
 
 foreign import ccall unsafe "hs_wl_memfd"
   c_memfd :: CString -> CSize -> IO CInt
+foreign import ccall unsafe "hs_wl_seal"
+  c_seal :: CInt -> IO CInt
+
+-- | A sealed memfd holding the bytes: what @river_xkb_config_v1.create_keymap@
+-- wants.  The caller owns the descriptor.
+sealedMemfd :: String -> ByteString -> IO Fd
+sealedMemfd name bytes = do
+  fd <- withCString name $ \n ->
+    throwErrnoIf (< 0) "sealedMemfd: memfd_create" (c_memfd n (fromIntegral (BS.length bytes)))
+  BSU.unsafeUseAsCStringLen bytes $ \(p, len) -> writeAll (Fd fd) (castPtr p) (fromIntegral len)
+  _ <- throwErrnoIf (< 0) "sealedMemfd: seal" (c_seal fd)
+  pure (Fd fd)
+  where
+    writeAll fd p n
+      | n <= 0 = pure ()
+      | otherwise = do
+          k <- fdWriteBuf fd p n
+          writeAll fd (p `plusPtr` fromIntegral k) (n - k)
 
 foreign import ccall unsafe "hs_wl_mmap"
   c_mmap :: CInt -> CSize -> IO (Ptr Word8)

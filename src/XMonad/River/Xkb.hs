@@ -28,6 +28,7 @@ module XMonad.River.Xkb
   , updateModifiers
   , modifierActive
   , defaultKeymapText
+  , compileKeymap
   ) where
 
 import Control.Monad (when)
@@ -36,7 +37,8 @@ import Foreign.C.String (CString, peekCString, withCString)
 import Foreign.C.Types (CChar (..), CInt (..), CSize (..))
 import Foreign.ForeignPtr ()
 import Foreign.Marshal.Alloc (allocaBytes)
-import Foreign.Ptr (Ptr, nullPtr)
+import Foreign.Ptr (Ptr, nullPtr, plusPtr)
+import Foreign.Storable (poke, sizeOf)
 
 data XkbContext
 data XkbKeymap
@@ -165,6 +167,30 @@ modifierActive x name = withCString name $ \cs -> do
 --
 -- 'Nothing' if libxkbcommon cannot produce one, which would mean no xkb data
 -- is installed.
+-- | A keymap compiled from RMLVO names -- rules, model, layouts, variants,
+-- options, comma-separated as xkb takes them, empty for its default -- as
+-- @XKB_KEYMAP_FORMAT_TEXT_V1@ text.  'Nothing' if xkb cannot compile it.
+compileKeymap :: String -> String -> String -> String -> String -> IO (Maybe String)
+compileKeymap rules model layouts variants options =
+  withField rules $ \pr -> withField model $ \pm -> withField layouts $ \pl ->
+  withField variants $ \pv -> withField options $ \po ->
+  allocaBytes (5 * sizeOf pr) $ \names -> do
+    mapM_ (\(i, p) -> poke (names `plusPtr` (i * sizeOf pr)) p) (zip [0 ..] [pr, pm, pl, pv, po])
+    ctx <- c_context_new 0
+    if ctx == nullPtr then pure Nothing else do
+      km <- c_keymap_new_from_names ctx names 0
+      if km == nullPtr
+        then c_context_unref ctx >> pure Nothing
+        else do
+          cs <- c_keymap_get_as_string km 1
+          out <- if cs == nullPtr then pure Nothing else Just <$> peekCString cs
+          c_keymap_unref km
+          c_context_unref ctx
+          pure out
+  where
+    withField "" k = k nullPtr
+    withField s k = withCString s k
+
 defaultKeymapText :: IO (Maybe String)
 defaultKeymapText = do
   ctx <- c_context_new 0

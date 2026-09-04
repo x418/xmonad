@@ -163,9 +163,15 @@ opKbInputDevice = 1
 opKbLayout = 2
 opKbDone = 7
 
-reqSetLayoutByIndex, reqSetLayoutByName :: Word16
+reqSetLayoutByIndex, reqSetLayoutByName, reqSetKeymap, reqCreateKeymap :: Word16
+reqSetKeymap = 1
 reqSetLayoutByIndex = 2
 reqSetLayoutByName = 3
+reqCreateKeymap = 2
+
+opKeymapSuccess, opKeymapFailure :: Word16
+opKeymapSuccess = 0
+opKeymapFailure = 1
 
 opInputDevice = 1
 opLibinputDevice = 1
@@ -521,6 +527,37 @@ harnessTests check = do
      named <- settle fk
      check "a layout by name" $
        named == [ (kb1, reqSetLayoutByName, runEncoded (argString (Just "de"))) ]
+     -- A keymap: created from a memfd, set on every keyboard once accepted,
+     -- with the layout index put back; keyboards to come get it at done.
+     setKeymap (fkRuntime fk) "xkb_keymap { }"
+     created <- settle fk
+     km <- case created of
+       [(o, p, body)] | o == fkXkb fk && p == reqCreateKeymap
+                      , Right (i, 1) <- decodeBody ((,) <$> getObject <*> getWord32) body -> pure i
+       _ -> pure (ObjectId 0)
+     check "create_keymap carries a new id and the text_v1 format" $ km /= ObjectId 0
+     event fk km opKeymapSuccess mempty
+     applied <- settle fk
+     check "on success the keymap is set and the layout index restored" $
+       applied == [ (kb1, reqSetKeymap, runEncoded (argObject km)), (kb1, reqSetLayoutByIndex, runEncoded (argInt 2)) ]
+     let kb2 = ObjectId 0xff000011
+     event fk (fkXkb fk) opXkbKeyboard (argObject kb2)
+     event fk kb2 opKbLayout (argUInt 0 <> argString (Just "English"))
+     event fk kb2 opKbDone mempty
+     late <- settle fk
+     check "a keyboard arriving later gets the keymap at done, index 0 left alone" $
+       late == [ (kb2, reqSetKeymap, runEncoded (argObject km)) ]
+     setKeymap (fkRuntime fk) "xkb_keymap { broken"
+     created2 <- settle fk
+     case created2 of
+       [(_, _, body)] | Right (i, _) <- decodeBody ((,) <$> getObject <*> getWord32) body ->
+         event fk i opKeymapFailure (argString (Just "syntax"))
+       _ -> pure ()
+     rejected <- settle fk
+     warned <- readIORef (fkWarned fk)
+     check "a rejected keymap is destroyed and reported; keyboards keep the old one" $
+       length (filter (\(_, p, _) -> p == reqSetKeymap) rejected) == 0
+         && any (\m -> take 15 m == "keymap rejected") warned
 
 -- | Compare sends by object, opcode and value, ignoring the result ids.
 matchesValues :: [(ObjectId, Word16, Either e (ObjectId, Word32))] -> [(ObjectId, Word16, Word32)] -> Bool

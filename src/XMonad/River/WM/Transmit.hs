@@ -17,6 +17,7 @@ import Control.Concurrent.STM (readTVarIO)
 import Control.Monad (forM, forM_, unless, void, when)
 import Data.Bits ((.&.), (.|.))
 import Data.IORef
+import Data.Word (Word32)
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import System.IO (hPutStrLn, stderr)
@@ -31,18 +32,19 @@ import XMonad.River.Protocol.WindowManagement
 import XMonad.River.Protocol.XkbBindings
 import XMonad.River.State (InputCapture(..), RiverState(..), takeOps)
 import XMonad.River.Types
-import XMonad.River.WM.Input (installInputConfig, setKeyboardLayout)
+import XMonad.River.WM.Input (installInputConfig, setKeyboardLayout, setKeymap)
 import XMonad.River.WM.Runtime
 import XMonad.River.Wire (ObjectId)
 
 -- | Create river bindings for the config's keys and buttons on one seat.
--- Inside a manage sequence, where @enable@ is legal.
+-- Inside a manage sequence, where @enable@ and the layout override are legal.
 bindSeat :: Runtime -> ObjectId -> IO ()
 bindSeat rt seat = do
   bindPanic rt seat
   forM_ (M.toList (rtKeyActions rt)) $ \((mask, keysym), action) -> do
     b <- riverXkbBindingsV1GetXkbBinding conn (rtBindingsGlobal rt) seat keysym
            (riverModifiers mask)
+    riverXkbBindingV1SetLayoutOverride conn b firstLayout
     modifyIORef' (rtBindings rt) (M.insert b action)
     riverXkbBindingV1Listen conn b $ \case
       RiverXkbBindingV1Pressed -> do
@@ -73,6 +75,7 @@ bindPanic :: Runtime -> ObjectId -> IO ()
 bindPanic rt seat = do
   b <- riverXkbBindingsV1GetXkbBinding conn (rtBindingsGlobal rt) seat
          xK_Escape (riverModifiers (controlMask .|. mod1Mask .|. shiftMask))
+  riverXkbBindingV1SetLayoutOverride conn b firstLayout
   riverXkbBindingV1Listen conn b $ \case
     RiverXkbBindingV1Pressed -> do
       n <- closeAllClients
@@ -173,6 +176,7 @@ transmitManage rt plan = do
     -- Legal anywhere; queued here only if something used emitOp for it.
     OpInstallInputConfig cfg -> installInputConfig (rtInput rt) cfg
     OpKeyboardLayout req -> setKeyboardLayout (rtInput rt) req
+    OpSetKeymap text -> setKeymap (rtInput rt) text
     -- Sent by the loop's own pass; see 'sendNow'.
     OpExitSession -> pure ()
     OpStop -> pure ()
@@ -312,11 +316,18 @@ armCapture rt seats ks mods oneShot gen = do
   where
     conn = rtConn rt
 
+-- | Every binding matches keysyms in the keymap's first layout, whichever is
+-- active: X11 grabbed keycodes resolved in the first group, and a binding on
+-- @z@ stays on that key under a layout that swaps it.
+firstLayout :: Word32
+firstLayout = 0
+
 bindGrabbedSeat :: Runtime -> ObjectId -> Int -> [(KeyMask, KeySym)] -> IO [ObjectId]
 bindGrabbedSeat rt seat gen ks =
   forM (zip [0 :: Int ..] ks) $ \(i, (mask, keysym)) -> do
     b <- riverXkbBindingsV1GetXkbBinding conn (rtBindingsGlobal rt)
            seat keysym (riverModifiers mask)
+    riverXkbBindingV1SetLayoutOverride conn b firstLayout
     let fire pick = do
           (tableGen, acts) <- readIORef (riverExtraKeys rs)
           when (tableGen == gen) $
@@ -337,6 +348,7 @@ bindCaptureSeat rt seat ks oneShot gen =
   forM (zip [0 :: Int ..] ks) $ \(i, (mask, keysym)) -> do
     b <- riverXkbBindingsV1GetXkbBinding conn (rtBindingsGlobal rt)
            seat keysym (riverModifiers mask)
+    riverXkbBindingV1SetLayoutOverride conn b firstLayout
     riverXkbBindingV1Listen conn b $ \case
       RiverXkbBindingV1Pressed
         | oneShot -> claim >>= \taken -> forM_ taken $ \cap -> do

@@ -9,6 +9,7 @@ module XMonad.River.WM.Input
   , newInputRuntime
   , installInputConfig
   , setKeyboardLayout
+  , setKeymap
   , inputDeviceCount
   , inputPendingCount
   ) where
@@ -24,6 +25,7 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import System.IO (hPutStrLn, stderr)
 
+import XMonad.River.Buffer (sealedMemfd)
 import XMonad.River.Connection
 import XMonad.River.Input
 import XMonad.River.Plan (KeyboardLayoutRequest(..))
@@ -83,6 +85,8 @@ data InputRuntime = InputRuntime
   , irOnLayout   :: !(Maybe (Int, String) -> IO ())
     -- ^ Told the active layout whenever a keyboard reports one.
   , irKeyboards  :: !(IORef (M.Map ObjectId XkbKeyboard))
+  , irKeymap     :: !(IORef (Maybe ObjectId))
+    -- ^ The @river_xkb_keymap_v1@ in force, set on every keyboard to come.
   , irDevices    :: !(IORef (M.Map ObjectId Device))
   , irLinks      :: !(IORef (M.Map ObjectId ObjectId))
     -- ^ libinput object to input device object.
@@ -135,7 +139,8 @@ newInputRuntime
   -> IO InputRuntime
 newInputRuntime conn warn onLayout mManager mConfig mXkb = do
   rt <- InputRuntime conn mConfig mXkb onLayout
-          <$> newIORef M.empty <*> newIORef M.empty <*> newIORef M.empty <*> newIORef M.empty
+          <$> newIORef M.empty <*> newIORef Nothing
+          <*> newIORef M.empty <*> newIORef M.empty <*> newIORef M.empty
           <*> newIORef Nothing <*> newIORef 0 <*> pure warn <*> newIORef False
   forM_ mManager $ \im ->
     riverInputManagerV1Listen conn im $ \case
@@ -294,7 +299,10 @@ addKeyboard rt kb = do
     RiverXkbKeyboardV1Layout i n -> do
       modifyIORef' (irKeyboards rt) (M.adjust (\k -> k { kbIndex = i, kbName = n }) kb)
       report rt kb
-    RiverXkbKeyboardV1Done -> modifyIORef' (irKeyboards rt) (M.adjust (\k -> k { kbDone = True }) kb)
+    RiverXkbKeyboardV1Done -> do
+      first <- not . maybe False kbDone . M.lookup kb <$> readIORef (irKeyboards rt)
+      modifyIORef' (irKeyboards rt) (M.adjust (\k -> k { kbDone = True }) kb)
+      when first $ readIORef (irKeymap rt) >>= mapM_ (applyKeymap rt kb)
     RiverXkbKeyboardV1Removed -> do
       riverXkbKeyboardV1Destroy conn kb
       modifyIORef' (irKeyboards rt) (M.delete kb)
@@ -306,6 +314,38 @@ report :: InputRuntime -> ObjectId -> IO ()
 report rt kb = readIORef (irKeyboards rt) >>= mapM_ tell . M.lookup kb
   where
     tell k = irOnLayout rt (Just (fromIntegral (kbIndex k), maybe "" decodeUtf8 (kbName k)))
+
+-- | Compile-free: the text is the worker's.  A sealed memfd goes to
+-- @create_keymap@; on success the keymap is set on every keyboard, present
+-- and to come, and the previous one destroyed.
+setKeymap :: InputRuntime -> ByteString -> IO ()
+setKeymap rt text = case irXkb rt of
+  Nothing -> irWarn rt "keymap ignored: river_xkb_config_v1 is unavailable"
+  Just xk -> do
+    fd <- sealedMemfd "xmonad-keymap" text
+    km <- riverXkbConfigV1CreateKeymap conn xk fd riverXkbConfigV1KeymapFormatTextV1
+    riverXkbKeymapV1Listen conn km $ \case
+      RiverXkbKeymapV1Success -> do
+        old <- atomicModifyIORef' (irKeymap rt) (\o -> (Just km, o))
+        kbs <- readIORef (irKeyboards rt)
+        forM_ (M.keys (M.filter kbDone kbs)) $ \kb -> applyKeymap rt kb km
+        forM_ old (riverXkbKeymapV1Destroy conn)
+      RiverXkbKeymapV1Failure msg -> do
+        irWarn rt ("keymap rejected: " ++ decodeUtf8 msg)
+        riverXkbKeymapV1Destroy conn km
+      _ -> pure ()
+  where conn = irConn rt
+
+-- | @set_keymap@ resets the layout; the index the keyboard reported is put
+-- back, so a restart's re-send keeps the layout the user was on.
+applyKeymap :: InputRuntime -> ObjectId -> ObjectId -> IO ()
+applyKeymap rt kb km = do
+  kbs <- readIORef (irKeyboards rt)
+  forM_ (M.lookup kb kbs) $ \k -> do
+    riverXkbKeyboardV1SetKeymap conn kb km
+    when (kbIndex k /= 0) $
+      riverXkbKeyboardV1SetLayoutByIndex conn kb (fromIntegral (kbIndex k))
+  where conn = irConn rt
 
 -- | Make a layout active on every keyboard.  Legal outside a sequence.
 setKeyboardLayout :: InputRuntime -> KeyboardLayoutRequest -> IO ()

@@ -57,7 +57,7 @@ import XMonad.River.Runtime (RestartRequested(..), exitLoopWith, sendRestart, se
 import XMonad.River.State (Display'(..), RiverState(..), nowOpsPending, takeNowOps)
 import XMonad.River.Types
 import XMonad.River.WM.Events
-import XMonad.River.WM.Input (InputRuntime, bindInput, installInputConfig, setKeyboardLayout)
+import XMonad.River.WM.Input (InputRuntime, bindInput, installInputConfig, setKeyboardLayout, setKeymap)
 import XMonad.River.WM.Runtime
 import XMonad.River.WM.Sequence (manageSequence, runStartupHook)
 import XMonad.River.WM.Transmit (transmitManage, transmitRender)
@@ -470,6 +470,7 @@ sendNow rt = \case
     when (M.member s seats) $ riverSeatV1SetXcursorTheme conn s name size
   OpInstallInputConfig cfg -> installInputConfig (rtInput rt) cfg
   OpKeyboardLayout req -> setKeyboardLayout (rtInput rt) req
+  OpSetKeymap text -> setKeymap (rtInput rt) text
   _ -> pure ()
   where conn = rtConn rt
 

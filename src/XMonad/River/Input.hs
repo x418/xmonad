@@ -19,6 +19,9 @@ module XMonad.River.Input
   , AccelProfile(..)
   , ClickMethod(..)
   , ScrollMethod(..)
+    -- * Keymaps
+  , Keymap(..)
+  , defaultKeymap
     -- * The validated config
   , InputConfig
   , inputRules
@@ -151,6 +154,23 @@ data InputRule = InputRule
   { inputMatch    :: !InputMatch
   , inputSettings :: !InputSettings
   } deriving (Eq, Show, Read)
+
+--------------------------------------------------------------------------------
+-- Keymaps
+
+-- | An xkb keymap by RMLVO names, each comma-separated as xkb takes them
+-- and empty for xkb's default.
+data Keymap = Keymap
+  { keymapRules    :: !String
+  , keymapModel    :: !String
+  , keymapLayouts  :: !String
+  , keymapVariants :: !String
+  , keymapOptions  :: !String
+  } deriving (Eq, Show, Read)
+
+-- | xkb's defaults throughout.
+defaultKeymap :: Keymap
+defaultKeymap = Keymap "" "" "" "" ""
 
 --------------------------------------------------------------------------------
 -- Fields and values

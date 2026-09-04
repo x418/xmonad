@@ -139,6 +139,9 @@ data Op
     -- the worker; legal outside a sequence, so 'XMonad.River.Ops.emitNow'.
   | OpKeyboardLayout !KeyboardLayoutRequest
     -- ^ @river_xkb_keyboard_v1.set_layout_by_*@ on every keyboard; 'emitNow'.
+  | OpSetKeymap !ByteString
+    -- ^ This keymap text, compiled on the worker, for every keyboard present
+    -- and to come; 'emitNow'.
   deriving (Eq, Show)
 
 -- | Which layout of the keymap to make active.

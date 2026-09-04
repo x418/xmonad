@@ -152,6 +152,20 @@ hs_wl_memfd(const char *name, size_t size)
     return fd;
 }
 
+/* Seal a memfd against resizing and writing, as a keymap handed to the
+ * compositor should be.  0 where sealing does not exist. */
+#include <fcntl.h>
+int
+hs_wl_seal(int fd)
+{
+#ifdef F_ADD_SEALS
+    return fcntl(fd, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE | F_SEAL_SEAL);
+#else
+    (void) fd;
+    return 0;
+#endif
+}
+
 /* Map size bytes of fd read/write shared.  Returns NULL on failure. */
 void *
 hs_wl_mmap(int fd, size_t size)

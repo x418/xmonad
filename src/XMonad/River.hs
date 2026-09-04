@@ -143,6 +143,9 @@ module XMonad.River (
     -- | What @setxkbmap@'s layout switching did, through
     -- @river_xkb_config_v1@; the keymap itself is still river's.
     keyboardLayout, nextKeyboardLayout, setKeyboardLayout, setKeyboardLayoutByName,
+    -- | What @setxkbmap@ did: the keymap itself, on every keyboard present
+    -- and to come.
+    setKeymap, Keymap(..), defaultKeymap,
     InputRule(..), InputMatch(..), defaultInputMatch, touchpads,
     NameMatch(..), InputType(..),
     InputSettings(..), defaultInputSettings,
@@ -186,6 +189,7 @@ import XMonad.River.Runtime (RestartRequested(..), setMainThread, warnUnimplemen
 import XMonad.River.Types
 import XMonad.River.State (Display'(..), InputCapture(..), RiverState(..), updatePlacement)
 import XMonad.River.Wire (decodeUtf8, encodeUtf8)
+import XMonad.River.Xkb (compileKeymap)
 
 -- | Run an action on the worker, from any thread.  It runs at the start of
 -- the next manage sequence, the earliest moment it could legally change
@@ -533,6 +537,18 @@ setKeyboardLayout = emitNow . OpKeyboardLayout . KeyboardLayoutIndex . fromInteg
 -- | A layout by its keymap name; unknown does nothing.
 setKeyboardLayoutByName :: String -> X ()
 setKeyboardLayoutByName = emitNow . OpKeyboardLayout . KeyboardLayoutName . encodeUtf8
+
+-- | Compile the keymap with libxkbcommon, here on the worker, and have
+-- river set it on every keyboard.  Resets modifier state; the active layout
+-- index is kept.  A keymap xkb cannot compile is reported and not sent.
+setKeymap :: Keymap -> X ()
+setKeymap km = do
+    text <- io (compileKeymap (keymapRules km) (keymapModel km) (keymapLayouts km)
+                           (keymapVariants km) (keymapOptions km))
+    case text of
+        Nothing -> io $ hPutStrLn stderr
+            ("xmonad-river: setKeymap: xkb cannot compile " ++ show km)
+        Just t -> emitNow (OpSetKeymap (encodeUtf8 t))
 
 -- | Claim the next capture generation.
 nextGeneration :: IORef Int -> IO Int
