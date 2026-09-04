@@ -261,6 +261,10 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm g
     sent       <- newIORef 0
     asked      <- newIORef 0
     bindRef    <- newIORef M.empty
+    bindKeys   <- newIORef M.empty
+    prefixKeys <- newIORef S.empty
+    prefixPressed <- newIORef False
+    prefixHeld <- newIORef False
     pointerRef <- newIORef M.empty
     bound      <- newIORef S.empty
     grabbed    <- newIORef []
@@ -306,6 +310,10 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm g
       , rtSent = sent
       , rtAsked = asked
       , rtBindings = bindRef
+      , rtBindingKeys = bindKeys
+      , rtPrefixKeys = prefixKeys
+      , rtPrefixPressed = prefixPressed
+      , rtPrefixHeld = prefixHeld
       , rtPointerBind = pointerRef
       , rtBoundSeats = bound
       , rtGrabbed = grabbed
@@ -494,6 +502,7 @@ sendNow rt = \case
   OpInstallInputConfig cfg -> installInputConfig (rtInput rt) cfg
   OpKeyboardLayout req -> setKeyboardLayout (rtInput rt) req
   OpSetKeymap text -> setKeymap (rtInput rt) text
+  OpDeclareSubmapPrefixes ks -> writeIORef (rtPrefixKeys rt) (S.fromList ks)
   _ -> pure ()
   where conn = rtConn rt
 
@@ -517,6 +526,13 @@ onManagerEvent rt = \case
     -- plan in hand, and its own plan is transmitted when it lands (see the
     -- loop).  What is never allowed is waiting for user code.
     landed <- awaitPlan (rtShared rt) n planGraceMicros
+    -- A submap prefix whose action is still on the worker: the config's
+    -- bindings are disabled now, so the next key cannot fire one, and come
+    -- back with the plan that ran it (see 'transmitManage').
+    prefix <- atomicModifyIORef' (rtPrefixPressed rt) (\p -> (False, p))
+    when (prefix && not landed) $ do
+      readIORef (rtBindings rt) >>= mapM_ (riverXkbBindingV1Disable conn) . M.keys
+      writeIORef (rtPrefixHeld rt) True
     -- Only once this sequence's 'reapClosed' has seen the closed entries, or a
     -- window would be dropped from the map while the WindowSet still holds it.
     when landed (reapObjects rt)

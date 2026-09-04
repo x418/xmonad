@@ -21,7 +21,8 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
 import XMonad.Core
-import XMonad.Operations (focus, mouseMoveWindow, mouseResizeWindow)
+import XMonad.Operations (focus, mouseMoveWindow)
+import XMonad.River (mouseResizeWindowEdges)
 import XMonad.River.Connection
 import XMonad.River.Ops (emitOp)
 import XMonad.River.Plan (Op(..))
@@ -88,10 +89,9 @@ addWindow rt win = do
       adjust ref win $ \w -> w { rwFullscreen = False }
       queueAction rt $ void $ broadcastEvent (WindowFullscreenChanged win False)
     -- A client-side title bar being dragged: the same interactive operation
-    -- the mod-drag bindings start.  Edges are ignored; xmonad resizes from
-    -- the bottom-right corner.
+    -- the mod-drag bindings start, from the edges the client named.
     RiverWindowV1PointerMoveRequested _ -> queueAction rt (mouseMoveWindow win)
-    RiverWindowV1PointerResizeRequested _ _ -> queueAction rt (mouseResizeWindow win)
+    RiverWindowV1PointerResizeRequested _ edges -> queueAction rt (mouseResizeWindowEdges edges win)
     _ -> pure ()
   where conn = rtConn rt
 

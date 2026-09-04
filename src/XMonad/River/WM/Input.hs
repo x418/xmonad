@@ -33,7 +33,8 @@ import XMonad.River.Plan (KeyboardLayoutRequest(..))
 import XMonad.River.Protocol.InputManagement
 import XMonad.River.Protocol.LibinputConfig
 import XMonad.River.Protocol.XkbConfig
-import XMonad.River.Wire (ObjectId, bytesDouble, decodeUtf8, doubleBytes, nullObject)
+import XMonad.River.Wire (ObjectId, bytesDouble, bytesFloats, decodeUtf8, doubleBytes, floatsBytes, nullObject)
+import qualified Data.ByteString as BS
 
 -- | One @river_input_device_v1@ and, once linked, its libinput object.
 data Device = Device
@@ -77,6 +78,7 @@ data XkbKeyboard = XkbKeyboard
 
 data InputRuntime = InputRuntime
   { irConn       :: !Connection
+  , irManager    :: !(Maybe ObjectId)
   , irLibinput   :: !(Maybe ObjectId)
     -- ^ @river_libinput_config_v1@ at version 2, with the input manager;
     -- 'Nothing' and devices are left alone.
@@ -88,6 +90,8 @@ data InputRuntime = InputRuntime
   , irOutput     :: !(ByteString -> IO (Maybe ObjectId))
     -- ^ The @wl_output@ bound for a connector name, if river has it.
   , irKeyboards  :: !(IORef (M.Map ObjectId XkbKeyboard))
+  , irSeats      :: !(IORef (S.Set ByteString))
+    -- ^ Seats this client created, destroyed once no rule names them.
   , irKeymap     :: !(IORef (Maybe ObjectId))
     -- ^ The @river_xkb_keymap_v1@ in force, set on every keyboard to come.
   , irDevices    :: !(IORef (M.Map ObjectId Device))
@@ -143,8 +147,8 @@ newInputRuntime
   -> Maybe ObjectId                 -- ^ xkb config
   -> IO InputRuntime
 newInputRuntime conn warn onLayout output mManager mConfig mXkb = do
-  rt <- InputRuntime conn mConfig mXkb onLayout output
-          <$> newIORef M.empty <*> newIORef Nothing
+  rt <- InputRuntime conn mManager mConfig mXkb onLayout output
+          <$> newIORef M.empty <*> newIORef S.empty <*> newIORef Nothing
           <*> newIORef M.empty <*> newIORef M.empty <*> newIORef M.empty
           <*> newIORef Nothing <*> newIORef 0 <*> pure warn <*> newIORef False
   forM_ mManager $ \im ->
@@ -176,6 +180,14 @@ installInputConfig rt cfg = case irLibinput rt of
   Just _ -> do
     gen <- atomicModifyIORef' (irGeneration rt) (\n -> (n + 1, n + 1))
     writeIORef (irConfig rt) (Just (gen, cfg))
+    -- Seats before devices, so an assignment finds its seat; a seat no rule
+    -- names any more goes, its devices back to the default.
+    forM_ (irManager rt) $ \im -> do
+      have <- readIORef (irSeats rt)
+      let want = S.fromList (inputSeats cfg)
+      forM_ (S.toList (S.difference want have)) (riverInputManagerV1CreateSeat (irConn rt) im)
+      forM_ (S.toList (S.difference have want)) (riverInputManagerV1DestroySeat (irConn rt) im)
+      writeIORef (irSeats rt) want
     devs <- readIORef (irDevices rt)
     forM_ (M.keys devs) (reconcileDevice rt)
 
@@ -213,11 +225,14 @@ addDevice rt dev = do
 -- | What @river_input_device_v1@'s own settings default to, unreported.
 deviceDefaults :: Maybe InputType -> [(Field, Value)]
 deviceDefaults = \case
-  Just Pointer -> [(FScrollFactor, VDouble 1), (FMapToOutput, VText BC.empty)]
-  Just Touch -> [(FMapToOutput, VText BC.empty)]
-  Just Tablet -> [(FMapToOutput, VText BC.empty)]
-  Just Keyboard -> [(FRepeat, VPair 25 600)]
+  Just Pointer -> (FScrollFactor, VDouble 1) : mapped
+  Just Touch -> mapped
+  Just Tablet -> mapped
+  Just Keyboard -> (FRepeat, VPair 25 600) : seated
   Nothing -> []
+  where
+    seated = [(FSeat, VText (BC.pack "default"))]
+    mapped = (FMapToOutput, VText BC.empty) : (FMapToRectangle, VRect 0 0 0 0) : seated
 
 -- | The input-device fields a device can take, by type.
 deviceFields :: Maybe InputType -> S.Set Field
@@ -307,6 +322,8 @@ noteEvent ev sn = case ev of
   RiverLibinputDeviceV1DwtpCurrent v -> cur FDwtp (VUInt v)
   RiverLibinputDeviceV1RotationDefault v -> dflt FRotation (VUInt v)
   RiverLibinputDeviceV1RotationCurrent v -> cur FRotation (VUInt v)
+  RiverLibinputDeviceV1CalibrationMatrixDefault bs -> maybe sn (dflt FCalibration . VFloats) (bytesFloats bs)
+  RiverLibinputDeviceV1CalibrationMatrixCurrent bs -> maybe sn (cur FCalibration . VFloats) (bytesFloats bs)
   _ -> sn
   where
     dflt f v = sn { snDefaults = M.insert f v (snDefaults sn) }
@@ -438,17 +455,40 @@ send rt dev d gen f v = case (f, v) of
     | BC.null name -> riverInputDeviceV1MapToOutput conn dev nullObject >> sent
     -- Left unrecorded until the output is there; 'outputsChanged' retries.
     | otherwise -> irOutput rt name >>= mapM_ (\o -> riverInputDeviceV1MapToOutput conn dev o >> sent)
+  (FMapToRectangle, VRect x y w h) -> riverInputDeviceV1MapToRectangle conn dev x y w h >> sent
+  (FSeat, VText name) -> riverInputDeviceV1AssignToSeat conn dev name >> sent
   (FScrollFactor, _) -> pure ()
   (FRepeat, _) -> pure ()
   (FMapToOutput, _) -> pure ()
+  (FMapToRectangle, _) -> pure ()
+  (FSeat, _) -> pure ()
+  -- A config object per apply: points, apply, destroy; the apply's result
+  -- is the field's.  libinput copies the config, so the object is free.
+  (FAccelCustom, VCurves cs) -> forM_ ((,) <$> dvLib d <*> irLibinput rt) $ \(lib, lc) -> do
+    cfg <- riverLibinputConfigV1CreateAccelConfig conn lc riverLibinputDeviceV1AccelProfileCustom
+    forM_ cs $ \c -> do
+      r <- riverLibinputAccelConfigV1SetPoints conn cfg (accelType (curveType c))
+             (doubleBytes (curveStep c)) (BS.concat (map doubleBytes (curvePoints c)))
+      riverLibinputResultV1Listen conn r $ \ev -> do
+        freeObject conn r
+        unless (ev == RiverLibinputResultV1Success) $
+          irWarn rt (BC.unpack (dvName d) ++ " (" ++ show dev ++ "): custom acceleration points refused")
+    result <- riverLibinputDeviceV1ApplyAccelConfig conn lib cfg
+    riverLibinputAccelConfigV1Destroy conn cfg
+    track lib result
   _ -> forM_ (dvLib d) $ \lib -> do
     mResult <- setter conn lib f v
-    forM_ mResult $ \result -> do
+    forM_ mResult (track lib)
+  where
+    conn = irConn rt
+    track _ result = do
       riverLibinputResultV1Listen conn result (onResult rt result)
       modifyIORef' (irPending rt) (M.insert result (Pending dev f v gen))
       adjustDevice rt dev $ \d' -> d' { dvInflight = S.insert f (dvInflight d') }
-  where
-    conn = irConn rt
+    accelType = \case
+      AccelFallback -> riverLibinputAccelConfigV1AccelTypeFallback
+      AccelMotion -> riverLibinputAccelConfigV1AccelTypeMotion
+      AccelScroll -> riverLibinputAccelConfigV1AccelTypeScroll
     sent = adjustDevice rt dev $ \d' -> d' { dvSnapshot = (dvSnapshot d')
       { snCurrents = M.insert f v (snCurrents (dvSnapshot d')) } }
 
@@ -474,6 +514,7 @@ setter conn lib f v = case (f, v) of
   (FDwt, VUInt x) -> Just <$> riverLibinputDeviceV1SetDwt conn lib x
   (FDwtp, VUInt x) -> Just <$> riverLibinputDeviceV1SetDwtp conn lib x
   (FRotation, VUInt x) -> Just <$> riverLibinputDeviceV1SetRotation conn lib x
+  (FCalibration, VFloats fs) -> Just <$> riverLibinputDeviceV1SetCalibrationMatrix conn lib (floatsBytes fs)
   _ -> pure Nothing
 
 -- | The event destroys the object; the id comes back with @delete_id@.

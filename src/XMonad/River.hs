@@ -56,6 +56,7 @@ module XMonad.River (
     -- | X11 answered @XGetWindowAttributes@ for any window; river never
     -- reports where a window is, because the window manager is what decided.
     windowRect, moveResizeWindow, pointerPosition, windowUnderPointer,
+    mouseResizeWindowEdges,
 
     -- * Stacking
     --
@@ -118,7 +119,7 @@ module XMonad.River (
     -- | What a submap is built on.  River has no keyboard grab, so this
     -- installs a binding per key instead -- and, unlike X11's, it cannot wait
     -- for the answer.  See 'submapNextKey'.
-    submapNextKey,
+    submapNextKey, declareSubmapPrefixes,
 
     -- * Getting the keyboard back
     --
@@ -163,19 +164,20 @@ import Data.Bits ((.&.))
 import System.IO (hPutStrLn, stderr)
 import Control.Concurrent.STM (atomically, writeTVar)
 import Data.IORef (IORef, atomicModifyIORef', atomicWriteIORef, modifyIORef', readIORef)
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe, isJust, isNothing)
 import Data.Word (Word32)
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Exception (SomeException, evaluate, handle)
 import Control.Monad (forM, forM_, unless, void, when)
 import Control.Monad.IO.Class (MonadIO)
 import Control.Monad.Reader (ask, asks)
+import Control.Monad.State (gets)
 import qualified Data.ByteString.Char8 as BC
 import qualified Data.Map.Strict as M
 
 import XMonad.Core
 import Data.List (find, sortOn)
-import XMonad.Operations (applySizeHintsContents, pointWithin)
+import XMonad.Operations (applySizeHintsContents, float, mouseDrag, pointWithin)
 import XMonad.River.Keysym.Table (keysymTable, reverseKeysymTable)
 import qualified XMonad.River.Mailbox as MB
 import XMonad.River.Client (closeAllClients)
@@ -257,6 +259,46 @@ moveResizeWindow w r = do
         emitOp (OpProposeDimensions w width height)
         rs <- asks riverState
         updatePlacement rs w r { rect_width = width, rect_height = height }
+
+-- | Resize a window by dragging the edges river named
+-- (@river_window_v1.edges@ bits), the opposite ones staying put; none
+-- means the bottom-right corner, as 'XMonad.Operations.mouseResizeWindow'.
+mouseResizeWindowEdges :: Word32 -> Window -> X ()
+mouseResizeWindowEdges edges w = do
+    known <- io . readIORef =<< asks (riverWindows . riverState)
+    geometry <- io . readIORef =<< asks (riverGeometry . riverState)
+    drag <- gets dragging
+    seats <- io . readIORef =<< asks (riverSeats . riverState)
+    let free = isNothing drag && any (not . rsRemoved) (M.elems seats)
+    forM_ ((,) <$> M.lookup w geometry <*> M.lookup w known) $ \(r, rw) -> when free $ do
+        emitOp (OpInformResize w True)
+        let on e = edges .&. e /= 0
+            none = edges == 0
+            left = on riverWindowV1EdgesLeft
+            top = on riverWindowV1EdgesTop
+            right = on riverWindowV1EdgesRight || none
+            bottom = on riverWindowV1EdgesBottom || none
+            w0 = fromIntegral (rect_width r) :: Position
+            h0 = fromIntegral (rect_height r) :: Position
+        mouseDrag
+            (\ex ey -> do
+                (ox, oy) <- io . readIORef =<< asks (riverDragOrigin . riverState)
+                let dx = ex - ox
+                    dy = ey - oy
+                    wantW | left = w0 - dx | right = w0 + dx | otherwise = w0
+                    wantH | top = h0 - dy | bottom = h0 + dy | otherwise = h0
+                    (width, height) = applySizeHintsContents (rwSizeHints rw) (max 1 wantW, max 1 wantH)
+                    x' | left = rect_x r + w0 - fromIntegral width | otherwise = rect_x r
+                    y' | top = rect_y r + h0 - fromIntegral height | otherwise = rect_y r
+                moveResizeWindow w (Rectangle x' y' width height)
+                float w)
+            (emitOp (OpInformResize w False) >> float w)
+
+-- | Tell the loop which keys open submaps, so a press it answers before the
+-- worker has run the action still keeps the next key from a global binding.
+-- "XMonad.Util.EZConfig.submapPrefixes" derives them from a keymap.
+declareSubmapPrefixes :: [(KeyMask, KeySym)] -> X ()
+declareSubmapPrefixes = emitNow . OpDeclareSubmapPrefixes
 
 -- | Where the pointer is, as river last reported it.  'Nothing' before it has
 -- moved, or with no seat.

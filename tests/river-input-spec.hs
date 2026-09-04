@@ -134,6 +134,22 @@ pureTests =
         && isLeft (validateInputConfig [rule touchpads defaultInputSettings { scrollFactor = Just 1e9 }])
         && not (isLeft (validateInputConfig [rule touchpads defaultInputSettings { scrollFactor = Just 0.5, accelSpeed = Just (-1) }])) )
 
+  , ( "validation: calibration, curves and rectangles"
+    , isLeft (validateInputConfig [rule touchpads defaultInputSettings { calibrationMatrix = Just [1, 0, 0] }])
+        && isLeft (validateInputConfig [rule touchpads defaultInputSettings { accelCustom = Just [], accelProfile = Nothing }])
+        && isLeft (validateInputConfig [rule touchpads defaultInputSettings { accelCustom = Just [AccelCurve AccelMotion 1 [0, 1]], accelProfile = Just AccelFlat }])
+        && isLeft (validateInputConfig [rule touchpads defaultInputSettings { mapToRectangle = Just (0, 0, -1, 5) }])
+        && either (const False) ((== ["second"]) . inputSeats)
+             (validateInputConfig [rule touchpads defaultInputSettings { seat = Just "second" }, rule touchpads defaultInputSettings { seat = Just "default" }]) )
+
+  , ( "curves select the custom profile and need its bit"
+    , let sn = touchpadSnapshot { snAccelProfiles = 7, snDefaults = M.insert FAccelProfile (VUInt 2) (snDefaults touchpadSnapshot)
+                                , snCurrents = M.insert FAccelProfile (VUInt 2) (snCurrents touchpadSnapshot) }
+          curves = VCurves [AccelCurve AccelMotion 1 [0, 1]]
+      in toSend (reconcile allReady S.empty sn (M.fromList [ (FAccelCustom, curves) ]))
+           == [ (FAccelProfile, VUInt 4), (FAccelCustom, curves), (FScrollFactor, VDouble 1) ]
+         && unsupported (reconcile allReady S.empty sn { snAccelProfiles = 3 } (M.fromList [ (FAccelCustom, curves) ])) == [ FAccelProfile, FAccelCustom ] )
+
   , ( "validation names the rule"
     , either (== "rule 2: accelSpeed is outside [-1, 1]") (const False)
         (validateInputConfig [ rule touchpads defaultInputSettings
@@ -205,12 +221,24 @@ opLibDwtDefault = 47
 opLibDwtCurrent = 48
 opLibDone = 55
 
-reqDevDestroy, reqSetScrollFactor, reqSetRepeatInfo, reqMapToOutput, reqLibDestroy, reqSetTap, reqSetAccelSpeed
+reqDevDestroy, reqSetScrollFactor, reqSetRepeatInfo, reqMapToOutput, reqMapToRectangle, reqAssignToSeat
+  , reqCreateSeat, reqDestroySeat, reqLibDestroy, reqSetTap, reqSetAccelSpeed, reqSetCalibration
+  , reqSetAccelProfile, reqApplyAccelConfig, reqCreateAccelConfig, reqAccelSetPoints, reqAccelDestroy
   , reqSetClickMethod, reqBind, reqSync :: Word16
 reqDevDestroy = 0
+reqAssignToSeat = 1
 reqSetRepeatInfo = 2
 reqSetScrollFactor = 3
 reqMapToOutput = 4
+reqMapToRectangle = 5
+reqCreateSeat = 2
+reqDestroySeat = 3
+reqSetCalibration = 7
+reqSetAccelProfile = 8
+reqApplyAccelConfig = 10
+reqCreateAccelConfig = 2
+reqAccelSetPoints = 1
+reqAccelDestroy = 0
 reqLibDestroy = 0
 reqSetTap = 2
 reqSetAccelSpeed = 9
@@ -323,7 +351,7 @@ announceTouchpadLib fk lib dev = do
   event fk lib opLibTapSupport (argInt 2)
   event fk lib opLibTapDefault (argUInt 0)
   event fk lib opLibTapCurrent (argUInt 0)
-  event fk lib opLibAccelProfilesSupport (argUInt 3)
+  event fk lib opLibAccelProfilesSupport (argUInt 7)
   event fk lib opLibAccelProfileDefault (argUInt 2)
   event fk lib opLibAccelProfileCurrent (argUInt 2)
   event fk lib opLibAccelSpeedDefault (argArray (doubleBytes 0))
@@ -378,9 +406,10 @@ harnessTests check = do
      quiet <- settle fk
      check "device before config: nothing is sent" $ null quiet
      sent <- install fk touchpadRules
-     check "install sends tap, click method, scroll factor 1.0 and no mapping; not dwt, already on" $
+     check "install sends tap, click method and the device's own defaults; not dwt, already on" $
        map (\(o, p, _) -> (o, p)) sent
-         == [ (lib1, reqSetTap), (lib1, reqSetClickMethod), (dev1, reqSetScrollFactor), (dev1, reqMapToOutput) ]
+         == [ (lib1, reqSetTap), (lib1, reqSetClickMethod), (dev1, reqSetScrollFactor), (dev1, reqMapToOutput)
+            , (dev1, reqMapToRectangle), (dev1, reqAssignToSeat) ]
      check "set_tap carries a client new_id then the enum" $
        case sent of
          ((_, _, body) : _) -> case decodeBody ((,) <$> getObject <*> getWord32) body of
@@ -406,7 +435,8 @@ harnessTests check = do
      sent <- settle fk
      check "config before device: applied at readiness, the device's own fields included" $
        map (\(o, p, _) -> (o, p)) sent
-         == [ (lib1, reqSetTap), (lib1, reqSetClickMethod), (dev1, reqSetScrollFactor), (dev1, reqMapToOutput) ]
+         == [ (lib1, reqSetTap), (lib1, reqSetClickMethod), (dev1, reqSetScrollFactor), (dev1, reqMapToOutput)
+            , (dev1, reqMapToRectangle), (dev1, reqAssignToSeat) ]
 
   -- A keyboard and a libinput-less mouse: the touchpad rule leaves them alone.
   do fk <- newFake
@@ -416,8 +446,11 @@ harnessTests check = do
      sent <- settle fk
      check "a keyboard gets the repeat default; a pointer without libinput its own fields after the sync" $
        sent == [ (dev1, reqSetRepeatInfo, runEncoded (argInt 25 <> argInt 600))
+               , (dev1, reqAssignToSeat, runEncoded (argString (Just "default")))
                , (dev2, reqSetScrollFactor, runEncoded (argFixed 1))
-               , (dev2, reqMapToOutput, runEncoded (argObject nullObject)) ]
+               , (dev2, reqMapToOutput, runEncoded (argObject nullObject))
+               , (dev2, reqMapToRectangle, runEncoded (argInt 0 <> argInt 0 <> argInt 0 <> argInt 0))
+               , (dev2, reqAssignToSeat, runEncoded (argString (Just "default"))) ]
 
   -- Output mapping waits for the output; repeat is a keyboard's.
   do fk <- newFake
@@ -429,7 +462,9 @@ harnessTests check = do
      announceDevice fk touch 2 "Touchscreen"
      sent <- settle fk
      check "repeat is sent; a mapping to an unknown output waits" $
-       sent == [ (dev1, reqSetRepeatInfo, runEncoded (argInt 30 <> argInt 250)) ]
+       map (\(o, p, _) -> (o, p)) sent
+         == [ (dev1, reqSetRepeatInfo), (dev1, reqAssignToSeat), (touch, reqMapToRectangle), (touch, reqAssignToSeat) ]
+         && [ b | (o, p, b) <- sent, p == reqSetRepeatInfo ] == [ runEncoded (argInt 30 <> argInt 250) ]
      writeIORef (fkOutputs fk) (M.fromList [ ("eDP-1", eDP) ])
      outputsChanged (fkRuntime fk)
      mapped <- settle fk
@@ -443,6 +478,54 @@ harnessTests check = do
      check "removing the rules clears the mapping and restores the repeat default" $
        cleared == [ (dev1, reqSetRepeatInfo, runEncoded (argInt 25 <> argInt 600))
                   , (touch, reqMapToOutput, runEncoded (argObject nullObject)) ]
+
+  -- Rectangle mapping, seats, calibration and custom curves.
+  do fk <- newFake
+     let touch = ObjectId 0xff000005
+         tlib = ObjectId 0xff000006
+     announceDevice fk touch 2 "Touchscreen"
+     event fk (fkConfig fk) opLibinputDevice (argObject tlib)
+     event fk tlib opLibInputDevice (argObject touch)
+     event fk tlib 17 (argInt 1)
+     event fk tlib 18 (argArray (floatsBytes [1, 0, 0, 0, 1, 0]))
+     event fk tlib 19 (argArray (floatsBytes [1, 0, 0, 0, 1, 0]))
+     event fk tlib opLibDone mempty
+     _ <- settle fk
+     sent <- install fk [ rule defaultInputMatch { matchType = Just Touch } defaultInputSettings
+                            { mapToRectangle = Just (10, 20, 300, 400), seat = Just "second"
+                            , calibrationMatrix = Just [1, 0, 0.5, 0, 1, 0] } ]
+     check "the seat is created before the device is assigned; rectangle and matrix go out" $
+       map (\(o, p, _) -> (o, p)) sent
+         == [ (fkManager fk, reqCreateSeat), (tlib, reqSetCalibration), (touch, reqMapToOutput)
+            , (touch, reqMapToRectangle), (touch, reqAssignToSeat) ]
+         && [ b | (o, p, b) <- sent, o == touch, p == reqMapToRectangle ] == [ runEncoded (argInt 10 <> argInt 20 <> argInt 300 <> argInt 400) ]
+         && [ b | (o, p, b) <- sent, p == reqAssignToSeat ] == [ runEncoded (argString (Just "second")) ]
+         && [ BS.length b | (o, p, b) <- sent, p == reqSetCalibration ] == [ 4 + 4 + 24 ]
+     forM_ (setters tlib sent) $ \(_, _, body) -> case decodeBody getObject body of
+       Right res -> event fk res resSuccess mempty >> deleteId fk res
+       Left _ -> pure ()
+     event fk tlib 19 (argArray (floatsBytes [1, 0, 0.5, 0, 1, 0]))
+     event fk tlib opLibDone mempty
+     _ <- settle fk
+     gone <- install fk []
+     check "no rule: the device goes back to the default seat and the seat is destroyed" $
+       map (\(o, p, _) -> (o, p)) gone
+         == [ (fkManager fk, reqDestroySeat), (touch, reqMapToRectangle), (touch, reqAssignToSeat) ]
+         || map (\(o, p, _) -> (o, p)) gone
+         == [ (fkManager fk, reqDestroySeat), (tlib, reqSetCalibration), (touch, reqMapToRectangle), (touch, reqAssignToSeat) ]
+  do fk <- newFake
+     announceDevice fk dev1 pointerType "Touchpad"
+     announceTouchpadLib fk lib1 dev1
+     _ <- settle fk
+     sent <- install fk [ rule touchpads defaultInputSettings { accelCustom = Just [AccelCurve AccelMotion 0.5 [0, 1, 2]] } ]
+     let kinds = map (\(o, p, _) -> (o, p)) sent
+     check "curves: profile custom, a config object with points, applied and destroyed" $
+       take 2 kinds == [ (lib1, reqSetAccelProfile), (fkConfig fk, reqCreateAccelConfig) ]
+         && case drop 2 kinds of
+              (cfg, p1) : (l, p2) : (cfg', p3) : rest ->
+                p1 == reqAccelSetPoints && cfg == cfg' && p3 == reqAccelDestroy && l == lib1 && p2 == reqApplyAccelConfig
+                  && map snd rest == [ reqSetScrollFactor, reqMapToOutput, reqMapToRectangle, reqAssignToSeat ]
+              _ -> False
 
   -- Scroll factor and acceleration speed on the wire.
   do fk <- newFake

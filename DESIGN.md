@@ -208,9 +208,10 @@ keyboard with nobody reading it is a session with no keyboard.
   inside a sequence and a submap ends on a key press outside one, so the
   config's bindings come back at the next sequence.
 - **A submap can arm late.**  If the worker is behind, the sequence goes out
-  without the submap and the globals are live for a round trip.  A real
-  guarantee needs submap prefixes declared to the loop ahead of time, which
-  is a contrib change.
+  without the submap.  `declareSubmapPrefixes` closes it: a declared prefix's
+  press the worker is late for disables the config's bindings in that
+  sequence, and the plan that ran the action releases them unless it armed a
+  capture.  Undeclared prefixes keep the race.
 - **The state file is written by the worker.**  A wedged worker degrades a
   restart to the last committed state (`restartGraceMicros`).  The loop could
   write it from the last published plan, at the cost of `ReleaseResources`

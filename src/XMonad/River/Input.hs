@@ -17,6 +17,8 @@ module XMonad.River.Input
   , DragLock(..)
   , ThreeFingerDrag(..)
   , AccelProfile(..)
+  , AccelType(..)
+  , AccelCurve(..)
   , ClickMethod(..)
   , ScrollMethod(..)
     -- * Keymaps
@@ -25,6 +27,7 @@ module XMonad.River.Input
     -- * The validated config
   , InputConfig
   , inputRules
+  , inputSeats
   , Rule(..)
   , validateInputConfig
   , forceInputConfig
@@ -47,7 +50,7 @@ module XMonad.River.Input
 import Data.Bits (complement, (.&.))
 import Data.ByteString (ByteString)
 import Data.Int (Int32)
-import Data.List (foldl')
+import Data.List (foldl', nub)
 import Data.Maybe (fromMaybe)
 import Data.Word (Word32)
 import qualified Data.ByteString as BS
@@ -106,9 +109,21 @@ data DragLock = DragLockDisabled | DragLockTimeout | DragLockSticky
 data ThreeFingerDrag = ThreeFingerDragDisabled | ThreeFingerDrag3 | ThreeFingerDrag4
   deriving (Eq, Show, Read, Enum, Bounded)
 
--- | No @custom@: it needs the acceleration-config object, not offered here.
+-- | The custom profile is 'accelCustom', which selects it.
 data AccelProfile = AccelNone | AccelFlat | AccelAdaptive
   deriving (Eq, Show, Read, Enum, Bounded)
+
+-- | Which movement a custom curve applies to.
+data AccelType = AccelFallback | AccelMotion | AccelScroll
+  deriving (Eq, Show, Read, Enum, Bounded)
+
+-- | A custom acceleration function: output speed at @step@ intervals of
+-- input speed, per @libinput_config_accel_set_points@.
+data AccelCurve = AccelCurve
+  { curveType   :: !AccelType
+  , curveStep   :: !Double
+  , curvePoints :: ![Double]
+  } deriving (Eq, Show, Read)
 
 data ClickMethod = ClickNone | ButtonAreas | ClickFinger
   deriving (Eq, Show, Read, Enum, Bounded)
@@ -148,6 +163,17 @@ data InputSettings = InputSettings
   , keyRepeat                :: !(Maybe (Word32, Word32))
     -- ^ Repeats per second and delay in milliseconds, for a keyboard; the
     -- default is river's @25@ and @600@, which it does not report.
+  , calibrationMatrix        :: !(Maybe [Double])
+    -- ^ Six values, a touchscreen's or tablet's.
+  , accelCustom              :: !(Maybe [AccelCurve])
+    -- ^ Custom acceleration curves; selects the @custom@ profile, so
+    -- exclusive with 'accelProfile'.  Nothing restores: 'accelProfile' does.
+  , mapToRectangle           :: !(Maybe (Int, Int, Int, Int))
+    -- ^ @x y width height@ in the global space a pointer, touch or tablet
+    -- device is confined to; wins over 'mapToOutput'.  Zero size clears.
+  , seat                     :: !(Maybe String)
+    -- ^ The seat the device belongs to, created if named nowhere else;
+    -- the default is @\"default\"@.
   } deriving (Eq, Show, Read)
 
 -- | Sets nothing: every field reconciles to its default.
@@ -155,7 +181,7 @@ defaultInputSettings :: InputSettings
 defaultInputSettings = InputSettings
   Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
   Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
-  Nothing Nothing
+  Nothing Nothing Nothing Nothing Nothing Nothing
 
 data InputRule = InputRule
   { inputMatch    :: !InputMatch
@@ -189,8 +215,8 @@ data Field
   = FSendEvents | FTap | FTapButtonMap | FDrag | FDragLock | FThreeFingerDrag
   | FAccelProfile | FAccelSpeed | FNaturalScroll | FLeftHanded | FClickMethod
   | FClickfingerButtonMap | FMiddleEmulation | FScrollMethod | FScrollButton
-  | FScrollButtonLock | FDwt | FDwtp | FRotation
-  | FScrollFactor | FMapToOutput | FRepeat
+  | FScrollButtonLock | FDwt | FDwtp | FRotation | FCalibration | FAccelCustom
+  | FScrollFactor | FMapToOutput | FRepeat | FMapToRectangle | FSeat
   deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- | The protocol's name for a field, for diagnostics.
@@ -215,9 +241,13 @@ fieldName = \case
   FDwt -> "dwt"
   FDwtp -> "dwtp"
   FRotation -> "rotation"
+  FCalibration -> "calibration_matrix"
+  FAccelCustom -> "accel_config"
   FScrollFactor -> "scroll_factor"
   FMapToOutput -> "map_to_output"
   FRepeat -> "repeat_info"
+  FMapToRectangle -> "map_to_rectangle"
+  FSeat -> "seat"
 
 -- | The fields that need the libinput snapshot; the rest are the input
 -- device's own.
@@ -225,8 +255,10 @@ libinputFields :: S.Set Field
 libinputFields = S.fromList [ f | f <- [minBound .. maxBound], f < FScrollFactor ]
 
 -- | A value on the wire: a uint, a double the protocol carries in an array,
--- an output name, or a repeat rate and delay.
-data Value = VUInt !Word32 | VDouble !Double | VText !ByteString | VPair !Word32 !Word32
+-- a name, a repeat rate and delay, a matrix, curves, or a rectangle.
+data Value
+  = VUInt !Word32 | VDouble !Double | VText !ByteString | VPair !Word32 !Word32
+  | VFloats ![Float] | VCurves ![AccelCurve] | VRect !Int32 !Int32 !Int32 !Int32
   deriving (Eq, Show)
 
 -- | Equal enough not to re-send.
@@ -252,15 +284,19 @@ data NameMatch'
   | Contains !ByteString
   deriving (Eq, Show)
 
--- | Rules the loop can evaluate: validated, normalised, fully evaluated.
-newtype InputConfig = InputConfig { inputRules :: [Rule] }
-  deriving (Eq, Show)
+-- | Rules the loop can evaluate: validated, normalised, fully evaluated;
+-- and the seats they name, for the loop to create.
+data InputConfig = InputConfig
+  { inputRules :: ![Rule]
+  , inputSeats :: ![ByteString]
+  } deriving (Eq, Show)
 
 -- | The config, or which rule is wrong and why.  A negative scroll factor
 -- is a protocol error, not an @invalid@ result, so it is refused here.
 validateInputConfig :: [InputRule] -> Either String InputConfig
-validateInputConfig rules =
-  InputConfig <$> sequence (zipWith check [1 :: Int ..] rules)
+validateInputConfig rules = do
+  rs <- sequence (zipWith check [1 :: Int ..] rules)
+  pure (InputConfig rs (nub [ s | r <- rs, Just (VText s) <- [M.lookup FSeat (ruleValues r)], s /= encodeUtf8 "default" ]))
   where
     check n (InputRule m s) = do
       let at what = Left ("rule " ++ show n ++ ": " ++ what)
@@ -276,6 +312,18 @@ validateInputConfig rules =
                           then at "keyRepeat does not fit a protocol int"
                           else Right ())
         (keyRepeat s)
+      mapM_ (\cal -> if length cal /= 6 || any bad cal then at "calibrationMatrix is not six finite values" else Right ())
+        (calibrationMatrix s)
+      mapM_ (\cs -> if null cs || any (\c -> bad (curveStep c) || curveStep c <= 0 || null (curvePoints c) || any bad (curvePoints c)) cs
+                      then at "accelCustom needs a positive step and finite points per curve"
+                      else if accelProfile s /= Nothing then at "accelCustom selects the custom profile; accelProfile must be unset"
+                      else Right ())
+        (accelCustom s)
+      mapM_ (\(x, y, w, h) -> if w < 0 || h < 0 || any (\v -> v > 0x7fffffff || v < -0x80000000) [x, y, w, h]
+                                then at "mapToRectangle needs a non-negative size that fits a protocol int"
+                                else Right ())
+        (mapToRectangle s)
+      mapM_ (\sn -> if null sn then at "seat is empty" else Right ()) (seat s)
       Right Rule
         { ruleType = matchType m
         , ruleName = fmap encodeName (matchName m)
@@ -284,6 +332,7 @@ validateInputConfig rules =
         }
     -- Wayland fixed is signed 24.8.
     fixedMax = 8388607
+    bad v = isNaN v || isInfinite v
     encodeName = \case
       NameExactly x -> Exactly (encodeUtf8 x)
       NameStartsWith x -> StartsWith (encodeUtf8 x)
@@ -291,7 +340,7 @@ validateInputConfig rules =
 
 -- | Forces every rule; the fields are strict.
 forceInputConfig :: InputConfig -> ()
-forceInputConfig (InputConfig rs) = foldr seq () rs
+forceInputConfig (InputConfig rs ss) = foldr seq (foldr seq () ss) rs
 
 -- | The fields a settings record sets, as wire values.
 settingsValues :: InputSettings -> M.Map Field Value
@@ -341,6 +390,11 @@ settingsValues s = M.fromList $ concat
   , [ (FScrollFactor, VDouble f) | Just f <- [scrollFactor s] ]
   , [ (FMapToOutput, VText (encodeUtf8 o)) | Just o <- [mapToOutput s] ]
   , [ (FRepeat, VPair r d) | Just (r, d) <- [keyRepeat s] ]
+  , [ (FCalibration, VFloats (map realToFrac m)) | Just m <- [calibrationMatrix s] ]
+  , [ (FAccelCustom, VCurves cs) | Just cs <- [accelCustom s] ]
+  , [ (FMapToRectangle, VRect (fromIntegral x) (fromIntegral y) (fromIntegral w) (fromIntegral h))
+    | Just (x, y, w, h) <- [mapToRectangle s] ]
+  , [ (FSeat, VText (encodeUtf8 n)) | Just n <- [seat s] ]
   ]
   where
     enumV f get code = [ (f, VUInt (code x)) | Just x <- [get s] ]
@@ -412,10 +466,22 @@ reconcile
   -> Snapshot
   -> M.Map Field Value     -- ^ the explicit values, from 'desiredValues'
   -> Outcome
-reconcile ready inflight sn explicit = foldr step (Outcome [] []) [minBound .. maxBound]
+reconcile ready inflight sn explicit0 = foldr step (Outcome [] []) [minBound .. maxBound]
   where
+    -- Curves select the custom profile; the profile field must agree or it
+    -- would put the default back after every apply.
+    explicit
+      | M.member FAccelCustom explicit0 = M.insert FAccelProfile (VUInt 4) explicit0
+      | otherwise = explicit0
     step f o
       | not (S.member f ready) = o
+      -- No default event: supported with the custom bit, nothing to restore.
+      | f == FAccelCustom = case M.lookup f explicit of
+          Nothing -> o
+          Just v
+            | snAccelProfiles sn .&. 4 == 0 -> o { unsupported = f : unsupported o }
+            | S.member f inflight || M.lookup f (snCurrents sn) == Just v -> o
+            | otherwise -> o { toSend = (f, v) : toSend o }
       | otherwise = case (M.lookup f explicit, M.lookup f (snDefaults sn)) of
           (Nothing, Nothing) -> o
           (Just _, Nothing) -> o { unsupported = f : unsupported o }

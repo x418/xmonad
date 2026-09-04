@@ -142,6 +142,9 @@ data Op
   | OpSetKeymap !ByteString
     -- ^ This keymap text, compiled on the worker, for every keyboard present
     -- and to come; 'emitNow'.
+  | OpDeclareSubmapPrefixes ![(KeyMask, KeySym)]
+    -- ^ Keys whose action opens a submap: a press the worker is late for
+    -- holds the config's bindings until its plan lands; 'emitNow'.
   deriving (Eq, Show)
 
 -- | Which layout of the keymap to make active.

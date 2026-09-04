@@ -46,10 +46,13 @@ bindSeat rt seat = do
            (riverModifiers mask)
     riverXkbBindingV1SetLayoutOverride conn b firstLayout
     modifyIORef' (rtBindings rt) (M.insert b action)
+    modifyIORef' (rtBindingKeys rt) (M.insert b (mask, keysym))
     riverXkbBindingV1Listen conn b $ \case
       RiverXkbBindingV1Pressed -> do
         acts <- readIORef (rtBindings rt)
         forM_ (M.lookup b acts) (queueAction rt)
+        prefixes <- readIORef (rtPrefixKeys rt)
+        when (S.member (mask, keysym) prefixes) $ writeIORef (rtPrefixPressed rt) True
       _ -> pure ()
     riverXkbBindingV1Enable conn b
   forM_ (M.toList (rtButtonActions rt)) $ \((mask, button), action) -> do
@@ -177,6 +180,7 @@ transmitManage rt plan = do
     OpInstallInputConfig cfg -> installInputConfig (rtInput rt) cfg
     OpKeyboardLayout req -> setKeyboardLayout (rtInput rt) req
     OpSetKeymap text -> setKeymap (rtInput rt) text
+    OpDeclareSubmapPrefixes ks -> writeIORef (rtPrefixKeys rt) (S.fromList ks)
     -- Sent by the loop's own pass; see 'sendNow'.
     OpExitSession -> pure ()
     OpStop -> pure ()
@@ -199,6 +203,16 @@ transmitManage rt plan = do
   -- timeout showing stale buffers for the whole output.  One proposed 0x0
   -- ('planUnsized') decides for itself; the worker settles it at what it
   -- decided.
+  -- The plan that ran a held prefix's action releases the hold: a capture
+  -- among its ops keeps the bindings disabled on its own terms, and none
+  -- means the action opened no submap.
+  held <- readIORef (rtPrefixHeld rt)
+  lastSent <- readIORef (rtSent rt)
+  when (held && planSerial plan > lastSent) $ do
+    writeIORef (rtPrefixHeld rt) False
+    unless (any isCapture ops) $
+      readIORef (rtBindings rt) >>= mapM_ (riverXkbBindingV1Enable conn) . M.keys
+
   -- No plan yet -- a sequence before the usable areas were known -- places
   -- nothing: river keeps what the windows have.
   when (planSerial plan > 0) $ do
@@ -318,6 +332,10 @@ armCapture rt seats ks mods oneShot gen = do
         queueAction rt (icOnEnd cap)
   where
     conn = rtConn rt
+
+isCapture :: Op -> Bool
+isCapture OpCaptureInput{} = True
+isCapture _ = False
 
 -- | Every binding matches keysyms in the keymap's first layout, whichever is
 -- active: X11 grabbed keycodes resolved in the first group, and a binding on

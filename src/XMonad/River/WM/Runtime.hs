@@ -89,6 +89,14 @@ data Runtime = Runtime
     -- ^ 'planSerial' a @manage_dirty@ has already been sent for.
   , rtBindings       :: !(IORef (M.Map ObjectId (X ())))
     -- ^ The config's key bindings, by binding object.
+  , rtBindingKeys    :: !(IORef (M.Map ObjectId (KeyMask, KeySym)))
+  , rtPrefixKeys     :: !(IORef (S.Set (KeyMask, KeySym)))
+    -- ^ Keys the config declared as submap prefixes.
+  , rtPrefixPressed  :: !(IORef Bool)
+    -- ^ A prefix was pressed in the batch before this manage_start.
+  , rtPrefixHeld     :: !(IORef Bool)
+    -- ^ The config's bindings are disabled for a prefix whose action the
+    -- worker has not run yet; released with the plan that ran it.
   , rtPointerBind    :: !(IORef (M.Map ObjectId (Window -> X ())))
   , rtBoundSeats     :: !(IORef (S.Set ObjectId))
   , rtGrabbed        :: !(IORef [ObjectId])
