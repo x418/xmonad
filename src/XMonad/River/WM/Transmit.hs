@@ -31,7 +31,7 @@ import XMonad.River.Protocol.WindowManagement
 import XMonad.River.Protocol.XkbBindings
 import XMonad.River.State (InputCapture(..), RiverState(..), takeOps)
 import XMonad.River.Types
-import XMonad.River.WM.Input (installInputConfig)
+import XMonad.River.WM.Input (installInputConfig, setKeyboardLayout)
 import XMonad.River.WM.Runtime
 import XMonad.River.Wire (ObjectId)
 
@@ -172,6 +172,7 @@ transmitManage rt plan = do
       writeIORef (rtGrabbed rt) bs
     -- Legal anywhere; queued here only if something used emitOp for it.
     OpInstallInputConfig cfg -> installInputConfig (rtInput rt) cfg
+    OpKeyboardLayout req -> setKeyboardLayout (rtInput rt) req
     -- Sent by the loop's own pass; see 'sendNow'.
     OpExitSession -> pure ()
     OpStop -> pure ()

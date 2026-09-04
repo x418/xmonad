@@ -16,6 +16,7 @@ import qualified Network.Socket.ByteString as NBS
 
 import XMonad.River.Connection
 import XMonad.River.Input
+import XMonad.River.Plan (KeyboardLayoutRequest (..))
 import XMonad.River.WM.Input
 import XMonad.River.Wire
 
@@ -154,7 +155,18 @@ pureTests =
 -- The fake compositor
 
 -- | Wire opcodes, in XML order.
-opInputDevice, opLibinputDevice :: Word16
+opInputDevice, opLibinputDevice, opXkbKeyboard :: Word16
+opXkbKeyboard = 1
+
+opKbInputDevice, opKbLayout, opKbDone :: Word16
+opKbInputDevice = 1
+opKbLayout = 2
+opKbDone = 7
+
+reqSetLayoutByIndex, reqSetLayoutByName :: Word16
+reqSetLayoutByIndex = 2
+reqSetLayoutByName = 3
+
 opInputDevice = 1
 opLibinputDevice = 1
 
@@ -188,7 +200,7 @@ opLibDwtCurrent = 48
 opLibDone = 55
 
 reqDevDestroy, reqSetScrollFactor, reqLibDestroy, reqSetTap, reqSetAccelSpeed
-  , reqSetClickMethod, reqBind, reqSync, reqStop :: Word16
+  , reqSetClickMethod, reqBind, reqSync :: Word16
 reqDevDestroy = 0
 reqSetScrollFactor = 3
 reqLibDestroy = 0
@@ -197,7 +209,6 @@ reqSetAccelSpeed = 9
 reqSetClickMethod = 13
 reqBind = 0
 reqSync = 0
-reqStop = 0
 
 resSuccess, resUnsupported :: Word16
 resSuccess = 0
@@ -213,8 +224,10 @@ data Fake = Fake
   , fkPeer    :: N.Socket
   , fkManager :: ObjectId
   , fkConfig  :: ObjectId
+  , fkXkb     :: ObjectId
   , fkRuntime :: InputRuntime
   , fkWarned  :: IORef [String]
+  , fkLayouts :: IORef [Maybe (Int, String)]
   , fkBuffer  :: IORef ByteString
   }
 
@@ -226,9 +239,12 @@ newFake = do
   conn <- connectSocket a
   im <- newObject conn
   lc <- newObject conn
+  xk <- newObject conn
   warned <- newIORef []
-  rt <- newInputRuntime conn (\m -> modifyIORef' warned (m :)) (Just (im, lc))
-  Fake conn b im lc rt warned <$> newIORef BS.empty
+  layouts <- newIORef []
+  rt <- newInputRuntime conn (\m -> modifyIORef' warned (m :)) (\l -> modifyIORef' layouts (l :))
+          (Just im) (Just lc) (Just xk)
+  Fake conn b im lc xk rt warned layouts <$> newIORef BS.empty
 
 -- | A server event, queued; 'settle' delivers.
 event :: Fake -> ObjectId -> Word16 -> Encoded -> IO ()
@@ -468,15 +484,43 @@ harnessTests check = do
      conn <- connectSocket a
      let globalsV1 = [ Global 10 "river_input_manager_v1" 1, Global 11 "river_libinput_config_v1" 2 ]
          globalsHalf = [ Global 10 "river_input_manager_v1" 2, Global 11 "river_libinput_config_v1" 1 ]
-     _ <- bindInput conn registry globalsV1
+     _ <- bindInput conn registry globalsV1 (const (pure ()))
      flush conn
-     _ <- bindInput conn registry globalsHalf
+     _ <- bindInput conn registry globalsHalf (const (pure ()))
      flush conn
      bytes <- NBS.recv b 65536
      let (msgs, _) = splitMessages bytes
          reqs = [ (msgObject h, msgOpcode h) | (h, _) <- msgs ]
-     check "v1 input manager: nothing bound; v1 libinput: the manager is bound then stopped" $
-       reqs == [ (registry, reqBind), (ObjectId 2, reqStop) ] || reqs == [ (registry, reqBind), (ObjectId 3, reqStop) ]
+     check "v1 input manager: nothing bound; v1 libinput: only the manager is bound" $
+       reqs == [ (registry, reqBind) ]
+
+  -- Keyboards: the active layout is reported; next wraps by a sync.
+  do fk <- newFake
+     let kb1 = ObjectId 0xff000010
+     announceDevice fk dev1 keyboardType "Keyboard"
+     event fk (fkXkb fk) opXkbKeyboard (argObject kb1)
+     event fk kb1 opKbInputDevice (argObject dev1)
+     event fk kb1 opKbLayout (argUInt 1 <> argString (Just "German"))
+     event fk kb1 opKbDone mempty
+     _ <- settle fk
+     reported <- readIORef (fkLayouts fk)
+     check "a keyboard's layout is reported" $ reported == [ Just (1, "German") ]
+     setKeyboardLayout (fkRuntime fk) KeyboardLayoutNext
+     wrapped <- settle fk
+     check "next past the last layout wraps to 0" $
+       [ (o, p, b) | (o, p, b) <- wrapped, o == kb1 ]
+         == [ (kb1, reqSetLayoutByIndex, runEncoded (argInt 2)), (kb1, reqSetLayoutByIndex, runEncoded (argInt 0)) ]
+     setKeyboardLayout (fkRuntime fk) KeyboardLayoutNext
+     event fk kb1 opKbLayout (argUInt 2 <> argString (Just "French"))
+     moved <- settle fk
+     reported2 <- readIORef (fkLayouts fk)
+     check "next that lands does not wrap, and is reported" $
+       [ (o, p, b) | (o, p, b) <- moved, o == kb1 ] == [ (kb1, reqSetLayoutByIndex, runEncoded (argInt 2)) ]
+         && take 1 reported2 == [ Just (2, "French") ]
+     setKeyboardLayout (fkRuntime fk) (KeyboardLayoutName "de")
+     named <- settle fk
+     check "a layout by name" $
+       named == [ (kb1, reqSetLayoutByName, runEncoded (argString (Just "de"))) ]
 
 -- | Compare sends by object, opcode and value, ignoring the result ids.
 matchesValues :: [(ObjectId, Word16, Either e (ObjectId, Word32))] -> [(ObjectId, Word16, Word32)] -> Bool

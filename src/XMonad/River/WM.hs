@@ -29,6 +29,7 @@ import Control.Concurrent (forkIO, killThread, newChan, newEmptyMVar, putMVar, r
 import Control.Concurrent.STM
 import Control.Exception (SomeException, catch, fromException, handle, throwIO)
 import Control.Monad (forever, unless, void, when)
+import Control.Monad.Reader (asks)
 import Data.IORef
 import Data.List (isSuffixOf)
 import Data.Maybe (isNothing)
@@ -56,7 +57,7 @@ import XMonad.River.Runtime (RestartRequested(..), exitLoopWith, sendRestart, se
 import XMonad.River.State (Display'(..), RiverState(..), nowOpsPending, takeNowOps)
 import XMonad.River.Types
 import XMonad.River.WM.Events
-import XMonad.River.WM.Input (InputRuntime, bindInput, installInputConfig)
+import XMonad.River.WM.Input (InputRuntime, bindInput, installInputConfig, setKeyboardLayout)
 import XMonad.River.WM.Runtime
 import XMonad.River.WM.Sequence (manageSequence, runStartupHook)
 import XMonad.River.WM.Transmit (transmitManage, transmitRender)
@@ -80,9 +81,6 @@ riverMain userConfig dirs = do
   mCompositor <- bindGlobal conn registry globals
                    wlCompositorInterface 4 wlCompositorVersion
   mShm <- bindGlobal conn registry globals wlShmInterface 1 wlShmVersion
-  -- Optional: a compositor without them keeps its input devices as they are.
-  input <- bindInput conn registry globals
-
   case (mManager, mBindings) of
     (Just (manager, _), Just (bindings, bindingsVer)) -> do
       when (isNothing mLayerShell) $ hPutStrLn stderr
@@ -95,7 +93,7 @@ riverMain userConfig dirs = do
         "xmonad-river: river_xkb_bindings_v1 is version 1; submaps cannot \
         \detect an unbound key and will wait for one of their own"
       run conn registry named manager bindings bindingsVer (fmap fst mLayerShell)
-          (fmap fst mCompositor) (fmap fst mShm) input userConfig dirs
+          (fmap fst mCompositor) (fmap fst mShm) globals userConfig dirs
     _ -> do
       hPutStrLn stderr
         "xmonad-river: river_window_manager_v1 (>= 4) or \
@@ -103,9 +101,9 @@ riverMain userConfig dirs = do
       exitFailure
 
 run :: Connection -> ObjectId -> M.Map Word32 Global -> ObjectId -> ObjectId -> Word32
-    -> Maybe ObjectId -> Maybe ObjectId -> Maybe ObjectId -> InputRuntime -> XConfig Layout
+    -> Maybe ObjectId -> Maybe ObjectId -> Maybe ObjectId -> [Global] -> XConfig Layout
     -> Directories -> IO ()
-run conn registry named manager bindings bindingsVer layerShell compositor shm input userConfig dirs = do
+run conn registry named manager bindings bindingsVer layerShell compositor shm globals userConfig dirs = do
   rs <- do
     windowsRef  <- newIORef M.empty
     outputsRef  <- newIORef M.empty
@@ -134,6 +132,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm i
     submapGen   <- newIORef 0
     ops         <- newIORef []
     nowOps      <- newTVarIO []
+    kbLayout    <- newIORef Nothing
     pure RiverState
       { riverManager     = manager
       , riverBindings    = bindings
@@ -164,6 +163,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm i
       , riverSubmapGen   = submapGen
       , riverOps         = ops
       , riverNowOps      = nowOps
+      , riverKeyboardLayout = kbLayout
       }
 
   when (null (workspaces userConfig)) $ hPutStrLn stderr
@@ -229,6 +229,13 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm i
           Nothing -> hPutStrLn stderr
             ("xmonad-river: worker: " ++ show (e :: SomeException))
   workerRef <- newIORef =<< forkIO worker
+
+  -- Optional: a compositor without the input globals keeps its devices as
+  -- they are.  A layout change is written for the worker and the log hook
+  -- run, so the bar learns of it.
+  input <- bindInput conn registry globals $ \active -> do
+    atomicWriteIORef (riverKeyboardLayout rs) active
+    submit (asks (logHook . config) >>= userCodeDef ())
 
   sh <- Shared <$> newTVarIO emptyPlan <*> newTVarIO 0
   rt <- do
@@ -462,6 +469,7 @@ sendNow rt = \case
     seats <- readIORef (riverSeats (rtState rt))
     when (M.member s seats) $ riverSeatV1SetXcursorTheme conn s name size
   OpInstallInputConfig cfg -> installInputConfig (rtInput rt) cfg
+  OpKeyboardLayout req -> setKeyboardLayout (rtInput rt) req
   _ -> pure ()
   where conn = rtConn rt
 

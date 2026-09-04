@@ -140,6 +140,9 @@ module XMonad.River (
     --
     -- | What @xinput@ did: rules over closed data, matched by the loop.
     setInputConfig,
+    -- | What @setxkbmap@'s layout switching did, through
+    -- @river_xkb_config_v1@; the keymap itself is still river's.
+    keyboardLayout, nextKeyboardLayout, setKeyboardLayout, setKeyboardLayoutByName,
     InputRule(..), InputMatch(..), defaultInputMatch, touchpads,
     NameMatch(..), InputType(..),
     InputSettings(..), defaultInputSettings,
@@ -178,11 +181,11 @@ import qualified XMonad.River.Connection as C
 import XMonad.River.Protocol.WindowManagement
 import XMonad.River.Protocol.XkbBindings
 import XMonad.River.Ops (emitNow, emitOp)
-import XMonad.River.Plan (Op(..))
+import XMonad.River.Plan (KeyboardLayoutRequest(..), Op(..))
 import XMonad.River.Runtime (RestartRequested(..), setMainThread, warnUnimplemented)
 import XMonad.River.Types
 import XMonad.River.State (Display'(..), InputCapture(..), RiverState(..), updatePlacement)
-import XMonad.River.Wire (decodeUtf8)
+import XMonad.River.Wire (decodeUtf8, encodeUtf8)
 
 -- | Run an action on the worker, from any thread.  It runs at the start of
 -- the next manage sequence, the earliest moment it could legally change
@@ -514,6 +517,22 @@ setInputConfig rules = case validateInputConfig rules of
         -- On the worker: the loop is never handed a thunk.
         io (evaluate (forceInputConfig cfg))
         emitNow (OpInstallInputConfig cfg)
+
+-- | The active xkb layout, index and name, as river last reported it.
+keyboardLayout :: X (Maybe (Int, String))
+keyboardLayout = io . readIORef =<< asks (riverKeyboardLayout . riverState)
+
+-- | The next layout of the keymap, wrapping, on every keyboard.
+nextKeyboardLayout :: X ()
+nextKeyboardLayout = emitNow (OpKeyboardLayout KeyboardLayoutNext)
+
+-- | A layout by index; out of range does nothing.
+setKeyboardLayout :: Int -> X ()
+setKeyboardLayout = emitNow . OpKeyboardLayout . KeyboardLayoutIndex . fromIntegral
+
+-- | A layout by its keymap name; unknown does nothing.
+setKeyboardLayoutByName :: String -> X ()
+setKeyboardLayoutByName = emitNow . OpKeyboardLayout . KeyboardLayoutName . encodeUtf8
 
 -- | Claim the next capture generation.
 nextGeneration :: IORef Int -> IO Int

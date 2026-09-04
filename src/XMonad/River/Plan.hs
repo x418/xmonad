@@ -8,9 +8,11 @@ module XMonad.River.Plan
   , emptyPlan
   , FocusTarget(..)
   , Op(..)
+  , KeyboardLayoutRequest(..)
   ) where
 
 import Data.ByteString (ByteString)
+import Data.Int (Int32)
 import Data.Word (Word32)
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
@@ -135,4 +137,15 @@ data Op
   | OpInstallInputConfig !InputConfig
     -- ^ These input rules, as a new generation.  Validated and forced by
     -- the worker; legal outside a sequence, so 'XMonad.River.Ops.emitNow'.
+  | OpKeyboardLayout !KeyboardLayoutRequest
+    -- ^ @river_xkb_keyboard_v1.set_layout_by_*@ on every keyboard; 'emitNow'.
+  deriving (Eq, Show)
+
+-- | Which layout of the keymap to make active.
+data KeyboardLayoutRequest
+  = KeyboardLayoutNext
+    -- ^ The one after the active one, wrapping: river reports no count, so
+    -- an out-of-range index is detected by a sync with no @layout@ event.
+  | KeyboardLayoutIndex !Int32
+  | KeyboardLayoutName !ByteString
   deriving (Eq, Show)

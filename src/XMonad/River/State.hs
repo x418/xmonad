@@ -154,6 +154,10 @@ data RiverState m = RiverState
     , riverNowOps :: !(TVar [Op])
       -- ^ Requests that need no sequence and must not wait for one.  A
       -- 'TVar' so the loop, which waits on it, wakes.
+    , riverKeyboardLayout :: !(IORef (Maybe (Int, String)))
+      -- ^ The active xkb layout, index and name, as last reported; loop
+      -- writes atomically, worker reads.  'Nothing' without
+      -- @river_xkb_config_v1@ or before the first keyboard.
     }
 
 -- | What 'XMonad.Core.withDisplay' hands out.  X11's was the server

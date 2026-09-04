@@ -39,13 +39,14 @@ interrupt a wedged loop.
 submaps, modifier watches and input capture. Binding resources follow the same
 generation discipline as the rest of loop-owned input state.
 
-`river-xkb-config-v1.xml` is a separate, currently unimplemented protocol. It
-is the planned configuration surface for per-device keymaps, runtime layout
-selection and lock-state control. Those operations must not be added to the
-bindings protocol abstraction or implemented by restarting river with new
-`XKB_DEFAULT_*` variables.  Like `river_libinput_device_v1`, its keyboard
-object names its `river_input_device_v1` once, at creation, and only if that
-object already exists: `river_input_manager_v1` is bound first.
+`river-xkb-config-v1.xml` is bound by `XMonad.River.WM.Input` for layout
+switching (`setKeyboardLayout`, `nextKeyboardLayout`; the active layout is
+reported through `riverKeyboardLayout` and the log hook).  Per-device keymaps
+and lock state are still to come; they belong here, not in the bindings
+abstraction and not in restarting river with new `XKB_DEFAULT_*` variables.
+Like `river_libinput_device_v1`, its keyboard object names its
+`river_input_device_v1` once, at creation, and only if that object already
+exists: `river_input_manager_v1` is bound first.
 
 ## Architecture
 

@@ -1,12 +1,14 @@
 {-# LANGUAGE LambdaCase #-}
 -- | The loop's half of input-device configuration: the objects river
 -- announces, what each advertised, and reconciling that with the installed
--- rules.  Loop thread only.  See @LIBINPUT.md@.
+-- rules; and the xkb keyboards, for switching layouts.  Loop thread only.
+-- See @LIBINPUT.md@.
 module XMonad.River.WM.Input
   ( InputRuntime
   , bindInput
   , newInputRuntime
   , installInputConfig
+  , setKeyboardLayout
   , inputDeviceCount
   , inputPendingCount
   ) where
@@ -14,6 +16,8 @@ module XMonad.River.WM.Input
 import Control.Monad (forM_, unless, when)
 import Data.ByteString (ByteString)
 import Data.IORef
+import Data.Int (Int32)
+import Data.Word (Word32)
 import Data.Maybe (isNothing)
 import qualified Data.ByteString.Char8 as BC
 import qualified Data.Map.Strict as M
@@ -22,9 +26,11 @@ import System.IO (hPutStrLn, stderr)
 
 import XMonad.River.Connection
 import XMonad.River.Input
+import XMonad.River.Plan (KeyboardLayoutRequest(..))
 import XMonad.River.Protocol.InputManagement
 import XMonad.River.Protocol.LibinputConfig
-import XMonad.River.Wire (ObjectId, bytesDouble, doubleBytes)
+import XMonad.River.Protocol.XkbConfig
+import XMonad.River.Wire (ObjectId, bytesDouble, decodeUtf8, doubleBytes)
 
 -- | One @river_input_device_v1@ and, once linked, its libinput object.
 data Device = Device
@@ -56,11 +62,27 @@ data Pending = Pending
   , pdGeneration :: !Int
   }
 
+-- | One @river_xkb_keyboard_v1@.
+data XkbKeyboard = XkbKeyboard
+  { kbIndex   :: !Word32
+  , kbName    :: !(Maybe ByteString)
+  , kbDone    :: !Bool
+  , kbWrapAt  :: !(Maybe Word32)
+    -- ^ A next-layout request sent from this index; if the sync finds it
+    -- unchanged, the index was out of range and layout 0 is set instead.
+  }
+
 data InputRuntime = InputRuntime
   { irConn       :: !Connection
-  , irGlobals    :: !(Maybe (ObjectId, ObjectId))
-    -- ^ @river_input_manager_v1@ and @river_libinput_config_v1@ at version
-    -- 2, or 'Nothing' and devices are left alone.
+  , irLibinput   :: !(Maybe ObjectId)
+    -- ^ @river_libinput_config_v1@ at version 2, with the input manager;
+    -- 'Nothing' and devices are left alone.
+  , irXkb        :: !(Maybe ObjectId)
+    -- ^ @river_xkb_config_v1@ at version 2; 'Nothing' and layouts cannot
+    -- be switched.
+  , irOnLayout   :: !(Maybe (Int, String) -> IO ())
+    -- ^ Told the active layout whenever a keyboard reports one.
+  , irKeyboards  :: !(IORef (M.Map ObjectId XkbKeyboard))
   , irDevices    :: !(IORef (M.Map ObjectId Device))
   , irLinks      :: !(IORef (M.Map ObjectId ObjectId))
     -- ^ libinput object to input device object.
@@ -72,49 +94,60 @@ data InputRuntime = InputRuntime
   , irWarnedOff  :: !(IORef Bool)
   }
 
--- | Bind both globals, the input manager first: a libinput device names its
--- input device once, at creation, only if that object already exists.  Both
--- or neither.
-bindInput :: Connection -> ObjectId -> [Global] -> IO InputRuntime
-bindInput conn registry globals = do
+-- | Bind the globals, the input manager first: a libinput device or xkb
+-- keyboard names its input device once, at creation, only if that object
+-- already exists.  Each of the other two is optional on its own.
+bindInput
+  :: Connection -> ObjectId -> [Global]
+  -> (Maybe (Int, String) -> IO ())  -- ^ told the active layout
+  -> IO InputRuntime
+bindInput conn registry globals onLayout = do
   mManager <- bindGlobal conn registry globals
                 riverInputManagerV1Interface 2 riverInputManagerV1Version
-  mConfig <- case mManager of
-    Nothing -> pure Nothing
-    Just _ -> bindGlobal conn registry globals
-                riverLibinputConfigV1Interface 2 riverLibinputConfigV1Version
-  case (mManager, mConfig) of
-    (Just (im, _), Just (lc, _)) -> newInputRuntime conn warn (Just (im, lc))
-    (Just (im, _), Nothing) -> do
-      riverInputManagerV1Stop conn im
-      riverInputManagerV1Listen conn im $ \case
-        RiverInputManagerV1Finished -> riverInputManagerV1Destroy conn im
-        _ -> pure ()
-      unavailable
-    _ -> unavailable
+  case mManager of
+    Nothing -> do
+      warn "river_input_manager_v1 is not offered at version 2; input devices \
+           \are left as they are and layouts cannot be switched"
+      newInputRuntime conn warn onLayout Nothing Nothing Nothing
+    Just (im, _) -> do
+      mConfig <- bindGlobal conn registry globals
+                   riverLibinputConfigV1Interface 2 riverLibinputConfigV1Version
+      mXkb <- bindGlobal conn registry globals
+                riverXkbConfigV1Interface 2 riverXkbConfigV1Version
+      when (isNothing mConfig) $
+        warn "river_libinput_config_v1 is not offered at version 2; input \
+             \devices are left as they are"
+      when (isNothing mXkb) $
+        warn "river_xkb_config_v1 is not offered at version 2; layouts cannot \
+             \be switched"
+      newInputRuntime conn warn onLayout (Just im) (fst <$> mConfig) (fst <$> mXkb)
   where
     warn = hPutStrLn stderr . ("xmonad-river: input: " ++)
-    unavailable = do
-      warn "river_input_manager_v1 and river_libinput_config_v1 are not both \
-           \offered at version 2; input devices are left as they are"
-      newInputRuntime conn warn Nothing
 
 -- | The runtime over bound globals; separate from 'bindInput' for the tests.
 newInputRuntime
   :: Connection
   -> (String -> IO ())              -- ^ where diagnostics go
-  -> Maybe (ObjectId, ObjectId)     -- ^ input manager and libinput config
+  -> (Maybe (Int, String) -> IO ())  -- ^ told the active layout
+  -> Maybe ObjectId                 -- ^ input manager
+  -> Maybe ObjectId                 -- ^ libinput config
+  -> Maybe ObjectId                 -- ^ xkb config
   -> IO InputRuntime
-newInputRuntime conn warn mGlobals = do
-  rt <- InputRuntime conn mGlobals
-          <$> newIORef M.empty <*> newIORef M.empty <*> newIORef M.empty
+newInputRuntime conn warn onLayout mManager mConfig mXkb = do
+  rt <- InputRuntime conn mConfig mXkb onLayout
+          <$> newIORef M.empty <*> newIORef M.empty <*> newIORef M.empty <*> newIORef M.empty
           <*> newIORef Nothing <*> newIORef 0 <*> pure warn <*> newIORef False
-  forM_ mGlobals $ \(im, lc) -> do
+  forM_ mManager $ \im ->
     riverInputManagerV1Listen conn im $ \case
       RiverInputManagerV1InputDevice dev -> addDevice rt dev
       _ -> pure ()
+  forM_ mConfig $ \lc ->
     riverLibinputConfigV1Listen conn lc $ \case
       RiverLibinputConfigV1LibinputDevice lib -> addLibinputDevice rt lib
+      _ -> pure ()
+  forM_ mXkb $ \xk ->
+    riverXkbConfigV1Listen conn xk $ \case
+      RiverXkbConfigV1XkbKeyboard kb -> addKeyboard rt kb
       _ -> pure ()
   pure rt
 
@@ -126,7 +159,7 @@ inputPendingCount rt = M.size <$> readIORef (irPending rt)
 
 -- | A new generation of rules, reconciled against every device.
 installInputConfig :: InputRuntime -> InputConfig -> IO ()
-installInputConfig rt cfg = case irGlobals rt of
+installInputConfig rt cfg = case irLibinput rt of
   Nothing -> do
     warned <- atomicModifyIORef' (irWarnedOff rt) (\w -> (True, w))
     unless warned $ irWarn rt "input rules ignored: the protocols are unavailable"
@@ -250,6 +283,52 @@ noteEvent ev sn = case ev of
   where
     dflt f v = sn { snDefaults = M.insert f v (snDefaults sn) }
     cur f v = sn { snCurrents = M.insert f v (snCurrents sn) }
+
+--------------------------------------------------------------------------------
+-- Keyboards
+
+addKeyboard :: InputRuntime -> ObjectId -> IO ()
+addKeyboard rt kb = do
+  modifyIORef' (irKeyboards rt) (M.insert kb (XkbKeyboard 0 Nothing False Nothing))
+  riverXkbKeyboardV1Listen conn kb $ \case
+    RiverXkbKeyboardV1Layout i n -> do
+      modifyIORef' (irKeyboards rt) (M.adjust (\k -> k { kbIndex = i, kbName = n }) kb)
+      report rt kb
+    RiverXkbKeyboardV1Done -> modifyIORef' (irKeyboards rt) (M.adjust (\k -> k { kbDone = True }) kb)
+    RiverXkbKeyboardV1Removed -> do
+      riverXkbKeyboardV1Destroy conn kb
+      modifyIORef' (irKeyboards rt) (M.delete kb)
+    _ -> pure ()
+  where conn = irConn rt
+
+-- | Tell the worker a keyboard's active layout.
+report :: InputRuntime -> ObjectId -> IO ()
+report rt kb = readIORef (irKeyboards rt) >>= mapM_ tell . M.lookup kb
+  where
+    tell k = irOnLayout rt (Just (fromIntegral (kbIndex k), maybe "" decodeUtf8 (kbName k)))
+
+-- | Make a layout active on every keyboard.  Legal outside a sequence.
+setKeyboardLayout :: InputRuntime -> KeyboardLayoutRequest -> IO ()
+setKeyboardLayout rt req = case irXkb rt of
+  Nothing -> irWarn rt "layout request ignored: river_xkb_config_v1 is unavailable"
+  Just _ -> readIORef (irKeyboards rt) >>= mapM_ one . M.toList
+  where
+    conn = irConn rt
+    one (kb, k) = case req of
+      KeyboardLayoutIndex i -> riverXkbKeyboardV1SetLayoutByIndex conn kb i
+      KeyboardLayoutName n -> riverXkbKeyboardV1SetLayoutByName conn kb n
+      -- Out of range has no effect and no event: a sync that finds the
+      -- index unchanged wraps to 0.
+      KeyboardLayoutNext -> do
+        let from = kbIndex k
+        riverXkbKeyboardV1SetLayoutByIndex conn kb (fromIntegral from + 1)
+        modifyIORef' (irKeyboards rt) (M.adjust (\x -> x { kbWrapAt = Just from }) kb)
+        syncThen conn $ do
+          kbs <- readIORef (irKeyboards rt)
+          forM_ (M.lookup kb kbs) $ \x -> when (kbWrapAt x == Just from) $ do
+            modifyIORef' (irKeyboards rt) (M.adjust (\y -> y { kbWrapAt = Nothing }) kb)
+            when (kbIndex x == from && from /= 0) $
+              riverXkbKeyboardV1SetLayoutByIndex conn kb (0 :: Int32)
 
 --------------------------------------------------------------------------------
 -- Reconciliation
