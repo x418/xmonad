@@ -199,44 +199,47 @@ transmitManage rt plan = do
   -- timeout showing stale buffers for the whole output.  One proposed 0x0
   -- ('planUnsized') decides for itself; the worker settles it at what it
   -- decided.
-  lastM <- readIORef (rtLastManage rt)
-  current <- fmap M.fromList $ forM
-    [ (win, r, rw) | (win, r) <- planPlacements plan, Just rw <- [M.lookup win known] ] $
-    \(win, r, rw) -> do
-      let tiled = not (S.member win (planFloating plan))
-          (pw, ph) | S.member win (planUnsized plan) = (0, 0)
-                   | otherwise = (rect_width r, rect_height r)
-          want = (pw, ph, tiled)
-          asked = (fromIntegral pw, fromIntegral ph)
-          dims = rwDimensions rw
-          resend = case M.lookup win lastM of
-            Just (want', seen) ->
-              want' /= want || (tiled && dims /= asked && dims /= seen)
-            Nothing -> True
-      when resend $ do
-        riverWindowV1ProposeDimensions conn win (fromIntegral pw) (fromIntegral ph)
-        riverWindowV1SetTiled conn win (if tiled then allEdges else 0)
-      pure (win, (want, dims))
-  atomicWriteIORef (rtLastManage rt) $! current
+  -- No plan yet -- a sequence before the usable areas were known -- places
+  -- nothing: river keeps what the windows have.
+  when (planSerial plan > 0) $ do
+    lastM <- readIORef (rtLastManage rt)
+    current <- fmap M.fromList $ forM
+      [ (win, r, rw) | (win, r) <- planPlacements plan, Just rw <- [M.lookup win known] ] $
+      \(win, r, rw) -> do
+        let tiled = not (S.member win (planFloating plan))
+            (pw, ph) | S.member win (planUnsized plan) = (0, 0)
+                     | otherwise = (rect_width r, rect_height r)
+            want = (pw, ph, tiled)
+            asked = (fromIntegral pw, fromIntegral ph)
+            dims = rwDimensions rw
+            resend = case M.lookup win lastM of
+              Just (want', seen) ->
+                want' /= want || (tiled && dims /= asked && dims /= seen)
+              Nothing -> True
+        when resend $ do
+          riverWindowV1ProposeDimensions conn win (fromIntegral pw) (fromIntegral ph)
+          riverWindowV1SetTiled conn win (if tiled then allEdges else 0)
+        pure (win, (want, dims))
+    atomicWriteIORef (rtLastManage rt) $! current
 
-  -- Keyboard focus.  A seat whose keyboard has gone to a layer surface is left
-  -- alone: river discards the request under an exclusive grab and, under a
-  -- non-exclusive one, would silently steal the keyboard back.
-  --
-  -- A window without dimensions has not mapped.  river would give it the
-  -- keyboard at once, and a client that gets @wl_keyboard.enter@ before its
-  -- first buffer may have nothing to attach it to: JBR drops it, and IDEA
-  -- then dispatches no shortcut until focus leaves and returns.  Every other
-  -- compositor focuses on map, so that is the only order clients have met.
-  -- The keyboard stays where it is; the first dimensions event asks for the
-  -- sequence that sends this ('XMonad.River.WM.Events.addWindow').
-  forM_ (M.elems seats) $ \s ->
-    unless (layerHasFocus (rsLayerFocus s)) $
-      case planFocus plan of
-        FocusWindow win | Just rw <- M.lookup win known ->
-          when (rwDimensions rw /= (0, 0)) $
-            riverSeatV1FocusWindow conn (rsObject s) win
-        _ -> riverSeatV1ClearFocus conn (rsObject s)
+    -- Keyboard focus.  A seat whose keyboard has gone to a layer surface is left
+    -- alone: river discards the request under an exclusive grab and, under a
+    -- non-exclusive one, would silently steal the keyboard back.
+    --
+    -- A window without dimensions has not mapped.  river would give it the
+    -- keyboard at once, and a client that gets @wl_keyboard.enter@ before its
+    -- first buffer may have nothing to attach it to: JBR drops it, and IDEA
+    -- then dispatches no shortcut until focus leaves and returns.  Every other
+    -- compositor focuses on map, so that is the only order clients have met.
+    -- The keyboard stays where it is; the first dimensions event asks for the
+    -- sequence that sends this ('XMonad.River.WM.Events.addWindow').
+    forM_ (M.elems seats) $ \s ->
+      unless (layerHasFocus (rsLayerFocus s)) $
+        case planFocus plan of
+          FocusWindow win | Just rw <- M.lookup win known ->
+            when (rwDimensions rw /= (0, 0)) $
+              riverSeatV1FocusWindow conn (rsObject s) win
+          _ -> riverSeatV1ClearFocus conn (rsObject s)
   where
     conn = rtConn rt
     rs = rtState rt
@@ -412,7 +415,7 @@ transmitRender rt = do
   let given = (planSerial plan, windowsGen, overlays,
                M.restrictKeys positions (S.fromList overlays))
   lastGiven <- readIORef (rtLastRendered rt)
-  unless (given == lastGiven) $ do
+  when (planSerial plan > 0) $ unless (given == lastGiven) $ do
     atomicWriteIORef (rtLastRendered rt) $! given
     renderPlan rt plan known overlays positions
   where

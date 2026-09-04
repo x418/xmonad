@@ -125,7 +125,11 @@ until the `manage_start` arrives (`rtDirtySent`).
 2. The worker: restore a predecessor's state (first sequence only), drop what
    river closed, reconcile screens with outputs, adopt new windows through
    the manage hook, settle the floats river has sized since, run the
-   actions, lay out, publish the `Plan`, mark `n` done.
+   actions, lay out, publish the `Plan`, mark `n` done.  No layout until
+   every output has reported its usable area: the first sequence after a
+   connect precedes the layer shell's answer, and laying out over the bar
+   would resize every window twice (river follows the area with a
+   sequence).  With no plan yet the loop transmits nothing.
 3. The loop waits up to `planGraceMicros` for *that* sequence number.  If it
    landed, closed objects are destroyed.  Either way the plan in hand is
    transmitted -- bindings for new seats, the one-shot ops, dimensions,

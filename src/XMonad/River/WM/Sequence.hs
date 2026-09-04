@@ -63,7 +63,11 @@ manageSequence rt n acts = do
       adoptNewWindows rt
       settleFloats rt
       mapM_ userCode acts
-      applyLayout rt
+      -- Before every output's usable area is known the layout would cover
+      -- the bar and be undone a sequence later, resizing every window twice;
+      -- river follows the area with a sequence of its own.
+      ready <- areasKnown rt
+      when ready (applyLayout rt)
       -- The log hook, once: for every 'windows' the actions ran, which X11
       -- ran it after each of, and for a set that changed on its own -- a
       -- window opening or closing, a restore, a rescreen.
@@ -73,6 +77,17 @@ manageSequence rt n acts = do
       io (writeIORef logDue False)
       when (due || not (sameWindows before after)) $
         asks (logHook . config) >>= userCodeDef ()
+
+-- | Every live output has reported its @non_exclusive_area@, or there is no
+-- layer shell to report one.
+areasKnown :: Runtime -> X Bool
+areasKnown rt = case rtLayerShell rt of
+  Nothing -> pure True
+  Just _ -> do
+    outs <- io (readIORef (riverOutputs (rtState rt)))
+    pure $ and [ roLayerArea o /= Nothing
+               | o <- M.elems outs, not (roRemoved o)
+               , let (w, h) = roSize o, w > 0 && h > 0 ]
 
 -- | Whether two 'WindowSet's would produce the same status line.  Not 'Eq':
 -- that would compare layouts, which may rewrite their state on every pass.

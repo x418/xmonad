@@ -100,9 +100,11 @@ addOutput rt out = do
   mLayer <- forM (rtLayerShell rt) $ \shell -> do
     lo <- riverLayerShellV1GetOutput conn shell out
     riverLayerShellOutputV1Listen conn lo $ \case
-      RiverLayerShellOutputV1NonExclusiveArea x y width height ->
+      RiverLayerShellOutputV1NonExclusiveArea x y width height -> do
         adjust ref out $ \o -> o { roLayerArea = Just (Rectangle x y
           (fromIntegral width) (fromIntegral height)) }
+        -- river follows this with a manage_start; asked for anyway.
+        atomically (writeTVar (riverDirty (rtState rt)) True)
       _ -> pure ()
     pure lo
   modifyIORef' ref $ M.insert out RiverOutput

@@ -36,8 +36,8 @@ import Data.Maybe (isNothing)
 import Data.Word (Word32)
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import System.Directory (doesFileExist)
-import System.Environment (getArgs, getExecutablePath)
+import System.Directory (doesFileExist, findExecutable)
+import System.Environment (getArgs, getExecutablePath, getProgName)
 import System.Exit (ExitCode(..), exitFailure, exitSuccess, exitWith)
 import System.IO (hPutStrLn, stderr)
 import System.Posix.Process (executeFile)
@@ -447,18 +447,23 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm g
 
 -- | What to exec on restart, or 'Nothing' if there is nothing to exec.
 --
--- Linux appends @\" (deleted)\"@ to @\/proc\/self\/exe@ once the binary has
--- been replaced, which is exactly what installing a new build does.  Stripped,
--- and checked for existence, because the point is not to tear down a working
--- session for a successor that is not there.
+-- The program name resolved on PATH, so a switched profile's build is what
+-- runs next; otherwise @\/proc\/self\/exe@, stripped of the @\" (deleted)\"@
+-- Linux appends once the binary was replaced, and checked for existence.
 restartTarget :: IO (Maybe FilePath)
 restartTarget = do
-  raw <- getExecutablePath
-  let suffix = " (deleted)"
-      path | suffix `isSuffixOf` raw = take (length raw - length suffix) raw
-           | otherwise = raw
-  ok <- doesFileExist path
-  pure (if ok then Just path else Nothing)
+  -- The name on PATH first: a profile's symlink points at the build
+  -- installed since, where /proc/self/exe is the one running.
+  onPath <- getProgName >>= findExecutable
+  case onPath of
+    Just exe -> pure (Just exe)
+    Nothing -> do
+      raw <- getExecutablePath
+      let suffix = " (deleted)"
+          path | suffix `isSuffixOf` raw = take (length raw - length suffix) raw
+               | otherwise = raw
+      ok <- doesFileExist path
+      pure (if ok then Just path else Nothing)
 
 -- | Requests that need no sequence and must not wait for one.
 sendNow :: Runtime -> Op -> IO ()
