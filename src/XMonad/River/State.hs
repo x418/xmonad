@@ -94,8 +94,8 @@ data RiverState m = RiverState
       -- ^ Protocol lifecycle work that must run on the event loop after any
       -- render currently in progress. Drawable destruction uses this ordering.
     , riverPlacements :: !(IORef [(Window, Rectangle)])
-      -- ^ Where the last layout put each window: the only record of a
-      -- window's position, since river never reports one.  Topmost first.
+      -- ^ The last layout's placements, topmost first: the stacking order,
+      -- for what is under the pointer.  Lookups by window go to 'riverGeometry'.
     , riverExtraKeys :: !(IORef (Int, [(m (), m ())]))
       -- ^ Press and release actions for 'XMonad.River.grabKeys', by index,
       -- tagged with the generation the bindings were created for.  The loop
@@ -216,6 +216,7 @@ forgetBorderOverride ref w = atomicModifyIORef' ref (\m -> (M.delete w m, ()))
 -- | Correct the recorded geometry of a window something just moved outside a
 -- layout run, so 'XMonad.Operations.floatLocation' reads the move back rather
 -- than undoing it.  A window with no placement is left alone.
-updatePlacement :: MonadIO m => IORef [(Window, Rectangle)] -> Window -> Rectangle -> m ()
-updatePlacement ref w r = liftIO $ modifyIORef' ref $
-    map (\e -> if fst e == w then (w, r) else e)
+updatePlacement :: MonadIO m => RiverState n -> Window -> Rectangle -> m ()
+updatePlacement rs w r = liftIO $ do
+    modifyIORef' (riverPlacements rs) $ map (\e -> if fst e == w then (w, r) else e)
+    modifyIORef' (riverGeometry rs) $ M.adjust (const r) w

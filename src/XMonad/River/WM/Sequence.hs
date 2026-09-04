@@ -290,20 +290,45 @@ adoptNewWindows rt = do
 settleFloats :: Runtime -> X ()
 settleFloats rt = do
   pending <- io (readIORef (riverUnsized rs))
-  unless (S.null pending) $ do
-    known <- io (readIORef (riverWindows rs))
-    forM_ (S.toList pending) $ \w -> forM_ (M.lookup w known) $ \rw ->
-      case rwDimensions rw of
-        (0, 0) -> pure ()
-        (dw, dh) -> do
-          io (modifyIORef' (riverUnsized rs) (S.delete w))
-          ws <- gets windowset
-          when (M.member w (W.floating ws)) $ do
-            let scr = fromMaybe (W.current ws) $
-                  find ((== W.findTag w ws) . Just . W.tag . W.workspace) (screensOf ws)
-                rr = centredRect (screenRect (W.screenDetail scr)) (toInteger dw) (toInteger dh)
-            modify $ \st -> st { windowset = W.float w rr (windowset st) }
-  where rs = rtState rt
+  known <- io (readIORef (riverWindows rs))
+  forM_ (S.toList pending) $ \w -> forM_ (M.lookup w known) $ \rw ->
+    case rwDimensions rw of
+      (0, 0) -> pure ()
+      (dw, dh) -> do
+        io (modifyIORef' (riverUnsized rs) (S.delete w))
+        ws <- gets windowset
+        when (M.member w (W.floating ws)) $ do
+          scr <- screenOf w
+          let rr = centredRect (screenRect (W.screenDetail scr)) (toInteger dw) (toInteger dh)
+          modify $ \st -> st { windowset = W.float w rr (windowset st) }
+  -- A float that sized itself keeps the size, as X11's granted
+  -- ConfigureRequest let it.  Only a size that changed since last seen: one
+  -- this side proposed is the placement's already, and the client's report
+  -- of it is not a change of mind.
+  geometry <- io (readIORef (riverGeometry rs))
+  seen <- io (readIORef (rtFloatSizes rt))
+  floats <- gets (M.keys . W.floating . windowset)
+  let sized = [ (w, rwDimensions rw) | w <- floats, Just rw <- [M.lookup w known]
+              , rwDimensions rw /= (0, 0), not (S.member w pending) ]
+  forM_ sized $ \(w, (dw, dh)) ->
+    when (M.lookup w seen /= Just (dw, dh)) $
+      forM_ (M.lookup w geometry) $ \r ->
+        when ((rect_width r, rect_height r) /= (fromIntegral dw, fromIntegral dh)) $ do
+          scr <- screenOf w
+          let r' = r { rect_width = fromIntegral dw, rect_height = fromIntegral dh }
+          modify $ \st -> st { windowset = W.float w (relativeRect (screenRect (W.screenDetail scr)) r') (windowset st) }
+  io (writeIORef (rtFloatSizes rt) (M.fromList sized))
+  where
+    rs = rtState rt
+    screenOf :: Window -> X (W.Screen WorkspaceId (Layout Window) Window ScreenId ScreenDetail)
+    screenOf w = do
+      ws <- gets windowset
+      pure $ fromMaybe (W.current ws) $
+        find ((== W.findTag w ws) . Just . W.tag . W.workspace) (screensOf ws)
+    -- 'XMonad.Operations.relativeRect', which is not exported.
+    relativeRect (Rectangle sx sy sw sh) (Rectangle x y w h) = W.RationalRect
+      (fromIntegral (x - sx) / fromIntegral (max 1 sw)) (fromIntegral (y - sy) / fromIntegral (max 1 sh))
+      (fromIntegral w / fromIntegral (max 1 sw)) (fromIntegral h / fromIntegral (max 1 sh))
 
 -- | The user's startup hook, once, after the first manage sequence has been
 -- answered.  @XMONAD_RIVER_NO_STARTUP_HOOK@ skips it, so a real config can run

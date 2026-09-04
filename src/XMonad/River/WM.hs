@@ -25,9 +25,9 @@ module XMonad.River.WM
   ( riverMain
   ) where
 
-import Control.Concurrent (forkIO, killThread, newChan, newEmptyMVar, putMVar, readChan, takeMVar, writeChan)
+import Control.Concurrent (forkFinally, forkIO, killThread, newChan, newEmptyMVar, putMVar, readChan, takeMVar, writeChan)
 import Control.Concurrent.STM
-import Control.Exception (SomeException, catch, fromException, handle, throwIO)
+import Control.Exception (AsyncException(ThreadKilled), SomeException, catch, fromException, handle, throwIO)
 import Control.Monad (forever, unless, void, when)
 import Control.Monad.Reader (asks)
 import Data.IORef
@@ -228,7 +228,18 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm g
           Just code -> exitLoopWith code
           Nothing -> hPutStrLn stderr
             ("xmonad-river: worker: " ++ show (e :: SomeException))
-  workerRef <- newIORef =<< forkIO worker
+  -- Respawned if it dies any way but the restart path's kill, so river is
+  -- never left with a loop and nobody behind it.
+  workerRef <- newIORef =<< forkIO (pure ())
+  let spawnWorker = do
+        tid <- forkFinally worker $ \r -> case r of
+          Left e | Just ThreadKilled <- fromException e -> pure ()
+          Left e -> do
+            hPutStrLn stderr ("xmonad-river: worker died: " ++ show e ++ "; respawned")
+            spawnWorker
+          Right () -> spawnWorker
+        writeIORef workerRef tid
+  spawnWorker
 
   -- Optional: a compositor without the input globals keeps its devices as
   -- they are.  A layout change is written for the worker and the log hook
@@ -272,6 +283,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm g
     lastGiven  <- newIORef (-1, -1, [], M.empty)
     adopted    <- newIORef S.empty
     restored   <- newIORef False
+    floatSizes <- newIORef M.empty
     moved      <- newIORef False
     pure Runtime
       { rtConn = conn
@@ -316,6 +328,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm g
       , rtLastRendered = lastGiven
       , rtAdopted = adopted
       , rtRestored = restored
+      , rtFloatSizes = floatSizes
       , rtLayoutMoved = moved
       }
 
@@ -438,7 +451,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm g
               readIORef workerRef >>= killThread
               writeIORef (inManageSeq rs) False
               runX' writeStateToFile
-              forkIO worker >>= writeIORef workerRef
+              spawnWorker
             atomicWriteIORef (riverRestart rs) (Just (exe, args))
             -- Answered before the stop: after it there is an exec and no
             -- thread left to answer with.

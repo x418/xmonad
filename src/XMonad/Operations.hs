@@ -449,8 +449,8 @@ type D = (Dimension, Dimension)
 floatLocation :: Window -> X (ScreenId, W.RationalRect)
 floatLocation w = do
     ws <- gets windowset
-    placements <- io . readIORef =<< asks (riverPlacements . riverState)
-    case lookup w placements of
+    placements <- io . readIORef =<< asks (riverGeometry . riverState)
+    case M.lookup w placements of
         Just r -> do
             -- The screen the window is on, not the focused one.  Upstream
             -- takes the same care, and for the same reason: floating a window
@@ -579,18 +579,18 @@ dragWindowTo :: Window -> Rectangle -> X ()
 dragWindowTo w r = do
     emitOp (OpSetPosition w (rect_x r) (rect_y r))
     emitOp (OpProposeDimensions w (rect_width r) (rect_height r))
-    ref <- asks (riverPlacements . riverState)
-    updatePlacement ref w r
+    rs <- asks riverState
+    updatePlacement rs w r
 
 -- | Drag the window under the cursor with the mouse while it is dragged.
 mouseMoveWindow :: Window -> X ()
 mouseMoveWindow w = whenX (isClient w) $ do
-    placements <- io . readIORef =<< asks (riverPlacements . riverState)
+    placements <- io . readIORef =<< asks (riverGeometry . riverState)
     -- The window's own origin is the thing the pointer's movement is added to.
     -- This used to add it to the /screen's/ origin, which meant a window
     -- jumped to wherever in the screen the pointer had travelled from the
     -- corner rather than following the pointer.
-    forM_ (lookup w placements) $ \r ->
+    forM_ (M.lookup w placements) $ \r ->
         mouseDrag
             (\ex ey -> do
                 (ox, oy) <- dragOrigin
@@ -604,9 +604,9 @@ mouseMoveWindow w = whenX (isClient w) $ do
 -- rather than warping the pointer to the corner first as X11 did.
 mouseResizeWindow :: Window -> X ()
 mouseResizeWindow w = whenX (isClient w) $ do
-    placements <- io . readIORef =<< asks (riverPlacements . riverState)
+    placements <- io . readIORef =<< asks (riverGeometry . riverState)
     known <- io . readIORef =<< asks (riverWindows . riverState)
-    forM_ ((,) <$> lookup w placements <*> M.lookup w known) $ \(r, rw) -> do
+    forM_ ((,) <$> M.lookup w placements <*> M.lookup w known) $ \(r, rw) -> do
         started <- startMouseDrag
             (\ex ey -> do
                 (ox, oy) <- dragOrigin

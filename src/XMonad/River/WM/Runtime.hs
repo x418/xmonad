@@ -147,6 +147,9 @@ data Runtime = Runtime
   , rtAdopted        :: !(IORef (S.Set Window))
     -- ^ Windows the manage hook has run for.
   , rtRestored       :: !(IORef Bool)
+  , rtFloatSizes     :: !(IORef (M.Map Window (Int32, Int32)))
+    -- ^ Each float's size as last seen, so a size the client changed itself
+    -- can be told from one this side proposed and is waiting on.
   , rtLayoutMoved    :: !(IORef Bool)
     -- ^ The last layout pass moved a window.  Worker writes, loop takes; the
     -- next @pointer_enter@ is then the layout's doing, not the pointer's.

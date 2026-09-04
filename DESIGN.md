@@ -75,6 +75,7 @@ rtLayoutMoved                              worker writes, loop reads   atomicWri
 rtInput (devices, links, pending
   results, the installed rules)            loop only                   IORef
 riverPlacements, riverGeometry,
+  rtFloatSizes,
   riverBorders, riverAfterLayout,
   riverDragOrigin, riverLogDue, riverUnsized,
   riverSubmapGen, inManageSeq, rtAdopted,
@@ -214,9 +215,6 @@ keyboard with nobody reading it is a session with no keyboard.
   restart to the last committed state (`restartGraceMicros`).  The loop could
   write it from the last published plan, at the cost of `ReleaseResources`
   becoming best-effort.
-- **A dead worker.**  The worker catches every synchronous exception per
-  action, and the restart path replaces the one it kills; nothing watches
-  for it dying any other way.
 - **Compositor-side fullscreen.**  `river_window_v1.fullscreen` is not used;
   fullscreen is the layout's, with `inform_fullscreen` telling the client.
 - **Decorations are shell surfaces.**  Contrib draws tab bars and overlays
@@ -226,8 +224,8 @@ keyboard with nobody reading it is a session with no keyboard.
   order them with their window, and `sync_next_commit` would make a
   decoration's frame atomic with the layout's; `set_clip_box` would let
   Magnifier keep off its neighbours' borders.  A contrib-scale change.
-- **`riverPlacements` is an assoc list**, searched linearly by
-  `floatLocation`, `windowUnderPointer` and every `op_delta`.
+- **`riverPlacements` is an assoc list**, kept for the stacking order
+  `windowUnderPointer` needs; every lookup by window goes to `riverGeometry`.
 - **Render can postpone manage work.**  river gives a dirty render sequence
   priority over a dirty manage sequence, and configure acknowledgements can
   hold the render transition for up to 100 ms.  The protocol provides no

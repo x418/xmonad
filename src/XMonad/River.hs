@@ -237,8 +237,8 @@ exitSession = emitNow OpExitSession
 -- 'Nothing' for a window not currently placed.
 windowRect :: Window -> X (Maybe Rectangle)
 windowRect w = do
-    placements <- io . readIORef =<< asks (riverPlacements . riverState)
-    pure (lookup w placements)
+    placements <- io . readIORef =<< asks (riverGeometry . riverState)
+    pure (M.lookup w placements)
 
 -- | Put a window at an absolute position and size, size hints applied.
 --
@@ -255,8 +255,8 @@ moveResizeWindow w r = do
                 (rect_width r, rect_height r)
         emitOp (OpSetPosition w (rect_x r) (rect_y r))
         emitOp (OpProposeDimensions w width height)
-        ref <- asks (riverPlacements . riverState)
-        updatePlacement ref w r { rect_width = width, rect_height = height }
+        rs <- asks riverState
+        updatePlacement rs w r { rect_width = width, rect_height = height }
 
 -- | Where the pointer is, as river last reported it.  'Nothing' before it has
 -- moved, or with no seat.
