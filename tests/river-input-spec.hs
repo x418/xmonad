@@ -205,10 +205,12 @@ opLibDwtDefault = 47
 opLibDwtCurrent = 48
 opLibDone = 55
 
-reqDevDestroy, reqSetScrollFactor, reqLibDestroy, reqSetTap, reqSetAccelSpeed
+reqDevDestroy, reqSetScrollFactor, reqSetRepeatInfo, reqMapToOutput, reqLibDestroy, reqSetTap, reqSetAccelSpeed
   , reqSetClickMethod, reqBind, reqSync :: Word16
 reqDevDestroy = 0
+reqSetRepeatInfo = 2
 reqSetScrollFactor = 3
+reqMapToOutput = 4
 reqLibDestroy = 0
 reqSetTap = 2
 reqSetAccelSpeed = 9
@@ -234,6 +236,7 @@ data Fake = Fake
   , fkRuntime :: InputRuntime
   , fkWarned  :: IORef [String]
   , fkLayouts :: IORef [Maybe (Int, String)]
+  , fkOutputs :: IORef (M.Map ByteString ObjectId)
   , fkBuffer  :: IORef ByteString
   }
 
@@ -248,9 +251,10 @@ newFake = do
   xk <- newObject conn
   warned <- newIORef []
   layouts <- newIORef []
+  outputs <- newIORef M.empty
   rt <- newInputRuntime conn (\m -> modifyIORef' warned (m :)) (\l -> modifyIORef' layouts (l :))
-          (Just im) (Just lc) (Just xk)
-  Fake conn b im lc xk rt warned layouts <$> newIORef BS.empty
+          (\n -> M.lookup n <$> readIORef outputs) (Just im) (Just lc) (Just xk)
+  Fake conn b im lc xk rt warned layouts outputs <$> newIORef BS.empty
 
 -- | A server event, queued; 'settle' delivers.
 event :: Fake -> ObjectId -> Word16 -> Encoded -> IO ()
@@ -374,9 +378,9 @@ harnessTests check = do
      quiet <- settle fk
      check "device before config: nothing is sent" $ null quiet
      sent <- install fk touchpadRules
-     check "install sends tap, click method and scroll factor 1.0; not dwt, already on" $
+     check "install sends tap, click method, scroll factor 1.0 and no mapping; not dwt, already on" $
        map (\(o, p, _) -> (o, p)) sent
-         == [ (lib1, reqSetTap), (lib1, reqSetClickMethod), (dev1, reqSetScrollFactor) ]
+         == [ (lib1, reqSetTap), (lib1, reqSetClickMethod), (dev1, reqSetScrollFactor), (dev1, reqMapToOutput) ]
      check "set_tap carries a client new_id then the enum" $
        case sent of
          ((_, _, body) : _) -> case decodeBody ((,) <$> getObject <*> getWord32) body of
@@ -400,9 +404,9 @@ harnessTests check = do
      announceDevice fk dev1 pointerType "Touchpad"
      announceTouchpadLib fk lib1 dev1
      sent <- settle fk
-     check "config before device: applied at readiness, scroll factor included" $
+     check "config before device: applied at readiness, the device's own fields included" $
        map (\(o, p, _) -> (o, p)) sent
-         == [ (lib1, reqSetTap), (lib1, reqSetClickMethod), (dev1, reqSetScrollFactor) ]
+         == [ (lib1, reqSetTap), (lib1, reqSetClickMethod), (dev1, reqSetScrollFactor), (dev1, reqMapToOutput) ]
 
   -- A keyboard and a libinput-less mouse: the touchpad rule leaves them alone.
   do fk <- newFake
@@ -410,8 +414,35 @@ harnessTests check = do
      announceDevice fk dev1 keyboardType "Keyboard"
      announceDevice fk dev2 pointerType "Virtual Mouse"
      sent <- settle fk
-     check "a keyboard gets nothing; a pointer without libinput gets scroll factor 1.0 after the sync" $
-       sent == [ (dev2, reqSetScrollFactor, runEncoded (argFixed 1)) ]
+     check "a keyboard gets the repeat default; a pointer without libinput its own fields after the sync" $
+       sent == [ (dev1, reqSetRepeatInfo, runEncoded (argInt 25 <> argInt 600))
+               , (dev2, reqSetScrollFactor, runEncoded (argFixed 1))
+               , (dev2, reqMapToOutput, runEncoded (argObject nullObject)) ]
+
+  -- Output mapping waits for the output; repeat is a keyboard's.
+  do fk <- newFake
+     _ <- install fk [ rule defaultInputMatch { matchType = Just Touch } defaultInputSettings { mapToOutput = Just "eDP-1" }
+                     , rule defaultInputMatch { matchType = Just Keyboard } defaultInputSettings { keyRepeat = Just (30, 250) } ]
+     let touch = ObjectId 0xff000005
+         eDP = ObjectId 0xff000020
+     announceDevice fk dev1 keyboardType "Keyboard"
+     announceDevice fk touch 2 "Touchscreen"
+     sent <- settle fk
+     check "repeat is sent; a mapping to an unknown output waits" $
+       sent == [ (dev1, reqSetRepeatInfo, runEncoded (argInt 30 <> argInt 250)) ]
+     writeIORef (fkOutputs fk) (M.fromList [ ("eDP-1", eDP) ])
+     outputsChanged (fkRuntime fk)
+     mapped <- settle fk
+     check "the mapping is sent once the output is there" $
+       mapped == [ (touch, reqMapToOutput, runEncoded (argObject eDP)) ]
+     outputsChanged (fkRuntime fk)
+     again <- settle fk
+     check "an output change re-sends the mapping, nothing else" $
+       again == [ (touch, reqMapToOutput, runEncoded (argObject eDP)) ]
+     cleared <- install fk []
+     check "removing the rules clears the mapping and restores the repeat default" $
+       cleared == [ (dev1, reqSetRepeatInfo, runEncoded (argInt 25 <> argInt 600))
+                  , (touch, reqMapToOutput, runEncoded (argObject nullObject)) ]
 
   -- Scroll factor and acceleration speed on the wire.
   do fk <- newFake
@@ -490,9 +521,9 @@ harnessTests check = do
      conn <- connectSocket a
      let globalsV1 = [ Global 10 "river_input_manager_v1" 1, Global 11 "river_libinput_config_v1" 2 ]
          globalsHalf = [ Global 10 "river_input_manager_v1" 2, Global 11 "river_libinput_config_v1" 1 ]
-     _ <- bindInput conn registry globalsV1 (const (pure ()))
+     _ <- bindInput conn registry globalsV1 (const (pure ())) (const (pure Nothing))
      flush conn
-     _ <- bindInput conn registry globalsHalf (const (pure ()))
+     _ <- bindInput conn registry globalsHalf (const (pure ())) (const (pure Nothing))
      flush conn
      bytes <- NBS.recv b 65536
      let (msgs, _) = splitMessages bytes

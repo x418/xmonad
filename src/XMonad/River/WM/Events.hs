@@ -12,7 +12,7 @@ module XMonad.River.WM.Events
   ) where
 
 import Control.Concurrent.STM (atomically, writeTVar)
-import Control.Monad (forM, forM_, void, when)
+import Control.Monad (forM, forM_, unless, void, when)
 import Control.Monad.Reader (asks)
 import Control.Monad.State (gets)
 import Data.IORef
@@ -31,6 +31,7 @@ import XMonad.River.Protocol.WindowManagement
 import XMonad.River.Protocol.XkbBindings
 import XMonad.River.State (InputCapture(..), RiverState(..))
 import XMonad.River.Types
+import XMonad.River.WM.Input (outputsChanged)
 import XMonad.River.WM.Runtime
 import XMonad.River.Wire (ObjectId, isNullObject)
 import qualified XMonad.StackSet as W
@@ -124,7 +125,9 @@ addOutput rt out = do
         wl <- bindNamed conn (rtRegistry rt) g wlOutputVersion
         adjust ref out $ \o -> o { roWlOutput = Just wl }
         wlOutputListen conn wl $ \case
-          WlOutputName n -> adjust ref out $ \o -> o { roName = Just n }
+          WlOutputName n -> do
+            adjust ref out $ \o -> o { roName = Just n }
+            outputsChanged (rtInput rt)
           _ -> pure ()
     _ -> pure ()
   where conn = rtConn rt
@@ -242,6 +245,7 @@ reapObjects rt = do
     forM_ (roWlOutput o) (wlOutputRelease conn)
     riverOutputV1Destroy conn (roObject o)
     modifyIORef' outRef (M.delete (roObject o))
+  unless (null [ () | o <- M.elems outs, roRemoved o ]) $ outputsChanged (rtInput rt)
 
   let seatRef = riverSeats rs
   seats <- readIORef seatRef

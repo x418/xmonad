@@ -32,7 +32,7 @@ import Control.Monad (forever, unless, void, when)
 import Control.Monad.Reader (asks)
 import Data.IORef
 import Data.List (isSuffixOf)
-import Data.Maybe (isNothing)
+import Data.Maybe (isNothing, listToMaybe)
 import Data.Word (Word32)
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
@@ -233,9 +233,14 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm g
   -- Optional: a compositor without the input globals keeps its devices as
   -- they are.  A layout change is written for the worker and the log hook
   -- run, so the bar learns of it.
-  input <- bindInput conn registry globals $ \active -> do
-    atomicWriteIORef (riverKeyboardLayout rs) active
-    submit (asks (logHook . config) >>= userCodeDef ())
+  input <- bindInput conn registry globals
+    (\active -> do
+      atomicWriteIORef (riverKeyboardLayout rs) active
+      submit (asks (logHook . config) >>= userCodeDef ()))
+    (\name -> do
+      outs <- readIORef (riverOutputs rs)
+      pure (listToMaybe [ wl | o <- M.elems outs, not (roRemoved o)
+                             , roName o == Just name, Just wl <- [roWlOutput o] ]))
 
   sh <- Shared <$> newTVarIO emptyPlan <*> newTVarIO 0
   rt <- do

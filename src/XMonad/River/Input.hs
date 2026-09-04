@@ -142,6 +142,12 @@ data InputSettings = InputSettings
     -- ^ Degrees clockwise, in @[0, 360)@.
   , scrollFactor             :: !(Maybe Double)
     -- ^ Non-negative; @1.0@ is neutral and the default, river keeping none.
+  , mapToOutput              :: !(Maybe String)
+    -- ^ A connector name a pointer, touch or tablet device is confined to;
+    -- @\"\"@ and the default map to the whole layout.
+  , keyRepeat                :: !(Maybe (Word32, Word32))
+    -- ^ Repeats per second and delay in milliseconds, for a keyboard; the
+    -- default is river's @25@ and @600@, which it does not report.
   } deriving (Eq, Show, Read)
 
 -- | Sets nothing: every field reconciles to its default.
@@ -149,6 +155,7 @@ defaultInputSettings :: InputSettings
 defaultInputSettings = InputSettings
   Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
   Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+  Nothing Nothing
 
 data InputRule = InputRule
   { inputMatch    :: !InputMatch
@@ -175,15 +182,15 @@ defaultKeymap = Keymap "" "" "" "" ""
 --------------------------------------------------------------------------------
 -- Fields and values
 
--- | A @river_libinput_device_v1@ setter, or 'FScrollFactor':
--- @river_input_device_v1.set_scroll_factor@, reconciled alike with @1.0@
--- as its default.
+-- | A @river_libinput_device_v1@ setter, or a @river_input_device_v1@ one
+-- from 'FScrollFactor' on, reconciled alike against a default river does
+-- not report: @1.0@, no mapping, @25@/@600@.
 data Field
   = FSendEvents | FTap | FTapButtonMap | FDrag | FDragLock | FThreeFingerDrag
   | FAccelProfile | FAccelSpeed | FNaturalScroll | FLeftHanded | FClickMethod
   | FClickfingerButtonMap | FMiddleEmulation | FScrollMethod | FScrollButton
   | FScrollButtonLock | FDwt | FDwtp | FRotation
-  | FScrollFactor
+  | FScrollFactor | FMapToOutput | FRepeat
   deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- | The protocol's name for a field, for diagnostics.
@@ -209,20 +216,23 @@ fieldName = \case
   FDwtp -> "dwtp"
   FRotation -> "rotation"
   FScrollFactor -> "scroll_factor"
+  FMapToOutput -> "map_to_output"
+  FRepeat -> "repeat_info"
 
--- | The fields that need the libinput snapshot: all but the scroll factor.
+-- | The fields that need the libinput snapshot; the rest are the input
+-- device's own.
 libinputFields :: S.Set Field
-libinputFields = S.fromList [ f | f <- [minBound .. maxBound], f /= FScrollFactor ]
+libinputFields = S.fromList [ f | f <- [minBound .. maxBound], f < FScrollFactor ]
 
--- | A value on the wire: a uint, or a double the protocol carries in an array.
-data Value = VUInt !Word32 | VDouble !Double
+-- | A value on the wire: a uint, a double the protocol carries in an array,
+-- an output name, or a repeat rate and delay.
+data Value = VUInt !Word32 | VDouble !Double | VText !ByteString | VPair !Word32 !Word32
   deriving (Eq, Show)
 
 -- | Equal enough not to re-send.
 sameValue :: Value -> Value -> Bool
-sameValue (VUInt a) (VUInt b) = a == b
 sameValue (VDouble a) (VDouble b) = abs (a - b) < 1e-9
-sameValue _ _ = False
+sameValue a b = a == b
 
 --------------------------------------------------------------------------------
 -- The validated config
@@ -262,6 +272,10 @@ validateInputConfig rules =
                      then at "scrollFactor is negative, not finite, or too large for a Wayland fixed"
                      else Right ())
         (scrollFactor s)
+      mapM_ (\(r, d) -> if r > 0x7fffffff || d > 0x7fffffff
+                          then at "keyRepeat does not fit a protocol int"
+                          else Right ())
+        (keyRepeat s)
       Right Rule
         { ruleType = matchType m
         , ruleName = fmap encodeName (matchName m)
@@ -325,6 +339,8 @@ settingsValues s = M.fromList $ concat
   , boolV FDwtp disableWhileTrackpointing riverLibinputDeviceV1DwtpStateEnabled riverLibinputDeviceV1DwtpStateDisabled
   , [ (FRotation, VUInt a) | Just a <- [rotationAngle s] ]
   , [ (FScrollFactor, VDouble f) | Just f <- [scrollFactor s] ]
+  , [ (FMapToOutput, VText (encodeUtf8 o)) | Just o <- [mapToOutput s] ]
+  , [ (FRepeat, VPair r d) | Just (r, d) <- [keyRepeat s] ]
   ]
   where
     enumV f get code = [ (f, VUInt (code x)) | Just x <- [get s] ]
@@ -417,4 +433,4 @@ reconcile ready inflight sn explicit = foldr step (Outcome [] []) [minBound .. m
       FClickMethod -> v == 0 || v .&. snClickMethods sn /= 0
       FScrollMethod -> v == 0 || v .&. snScrollMethods sn /= 0
       _ -> True
-    allowed _ (VDouble _) = True
+    allowed _ _ = True

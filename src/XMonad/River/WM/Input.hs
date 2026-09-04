@@ -10,6 +10,7 @@ module XMonad.River.WM.Input
   , installInputConfig
   , setKeyboardLayout
   , setKeymap
+  , outputsChanged
   , inputDeviceCount
   , inputPendingCount
   ) where
@@ -32,7 +33,7 @@ import XMonad.River.Plan (KeyboardLayoutRequest(..))
 import XMonad.River.Protocol.InputManagement
 import XMonad.River.Protocol.LibinputConfig
 import XMonad.River.Protocol.XkbConfig
-import XMonad.River.Wire (ObjectId, bytesDouble, decodeUtf8, doubleBytes)
+import XMonad.River.Wire (ObjectId, bytesDouble, decodeUtf8, doubleBytes, nullObject)
 
 -- | One @river_input_device_v1@ and, once linked, its libinput object.
 data Device = Device
@@ -84,6 +85,8 @@ data InputRuntime = InputRuntime
     -- be switched.
   , irOnLayout   :: !(Maybe (Int, String) -> IO ())
     -- ^ Told the active layout whenever a keyboard reports one.
+  , irOutput     :: !(ByteString -> IO (Maybe ObjectId))
+    -- ^ The @wl_output@ bound for a connector name, if river has it.
   , irKeyboards  :: !(IORef (M.Map ObjectId XkbKeyboard))
   , irKeymap     :: !(IORef (Maybe ObjectId))
     -- ^ The @river_xkb_keymap_v1@ in force, set on every keyboard to come.
@@ -104,15 +107,16 @@ data InputRuntime = InputRuntime
 bindInput
   :: Connection -> ObjectId -> [Global]
   -> (Maybe (Int, String) -> IO ())  -- ^ told the active layout
+  -> (ByteString -> IO (Maybe ObjectId))  -- ^ a connector's @wl_output@
   -> IO InputRuntime
-bindInput conn registry globals onLayout = do
+bindInput conn registry globals onLayout output = do
   mManager <- bindGlobal conn registry globals
                 riverInputManagerV1Interface 2 riverInputManagerV1Version
   case mManager of
     Nothing -> do
       warn "river_input_manager_v1 is not offered at version 2; input devices \
            \are left as they are and layouts cannot be switched"
-      newInputRuntime conn warn onLayout Nothing Nothing Nothing
+      newInputRuntime conn warn onLayout output Nothing Nothing Nothing
     Just (im, _) -> do
       mConfig <- bindGlobal conn registry globals
                    riverLibinputConfigV1Interface 2 riverLibinputConfigV1Version
@@ -124,7 +128,7 @@ bindInput conn registry globals onLayout = do
       when (isNothing mXkb) $
         warn "river_xkb_config_v1 is not offered at version 2; layouts cannot \
              \be switched"
-      newInputRuntime conn warn onLayout (Just im) (fst <$> mConfig) (fst <$> mXkb)
+      newInputRuntime conn warn onLayout output (Just im) (fst <$> mConfig) (fst <$> mXkb)
   where
     warn = hPutStrLn stderr . ("xmonad-river: input: " ++)
 
@@ -133,12 +137,13 @@ newInputRuntime
   :: Connection
   -> (String -> IO ())              -- ^ where diagnostics go
   -> (Maybe (Int, String) -> IO ())  -- ^ told the active layout
+  -> (ByteString -> IO (Maybe ObjectId))  -- ^ a connector's @wl_output@
   -> Maybe ObjectId                 -- ^ input manager
   -> Maybe ObjectId                 -- ^ libinput config
   -> Maybe ObjectId                 -- ^ xkb config
   -> IO InputRuntime
-newInputRuntime conn warn onLayout mManager mConfig mXkb = do
-  rt <- InputRuntime conn mConfig mXkb onLayout
+newInputRuntime conn warn onLayout output mManager mConfig mXkb = do
+  rt <- InputRuntime conn mConfig mXkb onLayout output
           <$> newIORef M.empty <*> newIORef Nothing
           <*> newIORef M.empty <*> newIORef M.empty <*> newIORef M.empty
           <*> newIORef Nothing <*> newIORef 0 <*> pure warn <*> newIORef False
@@ -187,12 +192,9 @@ addDevice rt dev = do
     RiverInputDeviceV1Type t -> adjustDevice rt dev $ \d -> d { dvType = decodeType t }
     RiverInputDeviceV1Name n -> adjustDevice rt dev $ \d -> d { dvName = n }
     RiverInputDeviceV1Done -> do
-      -- 1.0 stands in for the scroll-factor default river does not report.
-      adjustDevice rt dev $ \d ->
-        if dvType d == Just Pointer
-          then d { dvSnapshot = (dvSnapshot d)
-                     { snDefaults = M.insert FScrollFactor (VDouble 1) (snDefaults (dvSnapshot d)) } }
-          else d
+      -- The defaults river does not report, by device type.
+      adjustDevice rt dev $ \d -> d { dvSnapshot = (dvSnapshot d)
+        { snDefaults = M.union (M.fromList (deviceDefaults (dvType d))) (snDefaults (dvSnapshot d)) } }
       -- The libinput object, if any, is in this batch: settled by the sync.
       syncThen conn $ do
         adjustDevice rt dev $ \d -> d { dvSynced = True }
@@ -207,6 +209,27 @@ addDevice rt dev = do
       | t == riverInputDeviceV1TypeTouch = Just Touch
       | t == riverInputDeviceV1TypeTablet = Just Tablet
       | otherwise = Nothing
+
+-- | What @river_input_device_v1@'s own settings default to, unreported.
+deviceDefaults :: Maybe InputType -> [(Field, Value)]
+deviceDefaults = \case
+  Just Pointer -> [(FScrollFactor, VDouble 1), (FMapToOutput, VText BC.empty)]
+  Just Touch -> [(FMapToOutput, VText BC.empty)]
+  Just Tablet -> [(FMapToOutput, VText BC.empty)]
+  Just Keyboard -> [(FRepeat, VPair 25 600)]
+  Nothing -> []
+
+-- | The input-device fields a device can take, by type.
+deviceFields :: Maybe InputType -> S.Set Field
+deviceFields = S.fromList . map fst . deviceDefaults
+
+-- | An output came or went: a mapping may now be sendable, or is gone with
+-- its object and has to be sent again if it comes back.
+outputsChanged :: InputRuntime -> IO ()
+outputsChanged rt = do
+  modifyIORef' (irDevices rt) $ M.map $ \d -> d
+    { dvSnapshot = (dvSnapshot d) { snCurrents = M.delete FMapToOutput (snCurrents (dvSnapshot d)) } }
+  readIORef (irDevices rt) >>= mapM_ (reconcileDevice rt) . M.keys
 
 -- | A setter that raced the removal gets no result and no @delete_id@: its
 -- entry is dropped and its id stays retired.
@@ -384,10 +407,9 @@ reconcileDevice rt dev = readIORef (irConfig rt) >>= \case
           facts = DeviceFacts (dvType d) (dvName d) (isTouchpad (dvType d) sn)
           libReady = dvSnapshotDone d
           -- Unlinked after the sync means libinput-less.
-          scrollReady = dvType d == Just Pointer
-                        && (libReady || (dvSynced d && isNothing (dvLib d)))
+          ownReady = libReady || (dvSynced d && isNothing (dvLib d))
           ready = (if libReady then libinputFields else S.empty)
-                  `S.union` (if scrollReady then S.singleton FScrollFactor else S.empty)
+                  `S.union` (if ownReady then deviceFields (dvType d) else S.empty)
           refused = if dvRefusedGen d == gen then dvRefused d else S.empty
           Outcome sends unsup = reconcile ready (S.union (dvInflight d) refused) sn
                                   (desiredValues cfg facts)
@@ -408,21 +430,27 @@ refuse rt dev gen f why = do
         { dvRefused = S.insert f known, dvRefusedGen = gen }
 
 send :: InputRuntime -> ObjectId -> Device -> Int -> Field -> Value -> IO ()
-send rt dev d gen f v = case f of
+send rt dev d gen f v = case (f, v) of
   -- No result and nothing reported back: what was sent is what is known.
-  FScrollFactor -> case v of
-    VDouble x -> do
-      riverInputDeviceV1SetScrollFactor conn dev x
-      adjustDevice rt dev $ \d' -> d' { dvSnapshot = (dvSnapshot d')
-        { snCurrents = M.insert f v (snCurrents (dvSnapshot d')) } }
-    VUInt _ -> pure ()
+  (FScrollFactor, VDouble x) -> riverInputDeviceV1SetScrollFactor conn dev x >> sent
+  (FRepeat, VPair r dl) -> riverInputDeviceV1SetRepeatInfo conn dev (fromIntegral r) (fromIntegral dl) >> sent
+  (FMapToOutput, VText name)
+    | BC.null name -> riverInputDeviceV1MapToOutput conn dev nullObject >> sent
+    -- Left unrecorded until the output is there; 'outputsChanged' retries.
+    | otherwise -> irOutput rt name >>= mapM_ (\o -> riverInputDeviceV1MapToOutput conn dev o >> sent)
+  (FScrollFactor, _) -> pure ()
+  (FRepeat, _) -> pure ()
+  (FMapToOutput, _) -> pure ()
   _ -> forM_ (dvLib d) $ \lib -> do
     mResult <- setter conn lib f v
     forM_ mResult $ \result -> do
       riverLibinputResultV1Listen conn result (onResult rt result)
       modifyIORef' (irPending rt) (M.insert result (Pending dev f v gen))
       adjustDevice rt dev $ \d' -> d' { dvInflight = S.insert f (dvInflight d') }
-  where conn = irConn rt
+  where
+    conn = irConn rt
+    sent = adjustDevice rt dev $ \d' -> d' { dvSnapshot = (dvSnapshot d')
+      { snCurrents = M.insert f v (snCurrents (dvSnapshot d')) } }
 
 -- | The setter and its result object; 'Nothing' for a value of the wrong kind.
 setter :: Connection -> ObjectId -> Field -> Value -> IO (Maybe ObjectId)
