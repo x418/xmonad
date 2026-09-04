@@ -121,6 +121,7 @@ this backend. That is the intended outcome, not a regression to be papered over.
 | Layer shell | Bound via `river_layer_shell_v1`, without which river closes every layer surface on sight. This is what makes prompts, notifications, wallpaper and bars appear at all, and its exclusive zones shrink the tiling area. |
 | Screens | Reconciled from river outputs every manage sequence, ordered by position so screen ids are stable across reconnects. |
 | Pointer warping | `river_seat_v1.pointer_warp`. |
+| Screen capture | Done by the portal over `ext-image-copy-capture`, not here. `river_window_v1`/`river_output_v1.capture_sessions` (version 5) are kept per object; `XMonad.River.captureSessions` and `capturedOutputs` answer them, `resetBorderColor` undoes a mark. |
 | Input devices | `XMonad.River.setInputConfig`: rules over `river_input_management_v1` and `river_libinput_config_v1` (both version 2), matched by the loop and reconciled to each device's advertised defaults. |
 | `M-q` | `sendRestart` throws an async exception into the event loop thread; the loop does `stop` → `finished` → `exec`. river keeps every client alive across the swap. |
 

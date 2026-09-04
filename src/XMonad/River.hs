@@ -71,6 +71,13 @@ module XMonad.River (
     -- | What @WM_TRANSIENT_FOR@ answered, under the name Wayland gives it.
     windowParent,
 
+    -- * Screen capture
+    --
+    -- | Capture is the portal's business, over @ext-image-copy-capture@;
+    -- river only reports how many sessions each window and output has, so
+    -- a config can mark what is being shared.
+    captureSessions, capturedOutputs, resetBorderColor,
+
     -- * Counting outputs before there is a window manager
     --
     -- | X11 let anything open a second connection and ask Xinerama how many
@@ -189,7 +196,7 @@ import XMonad.River.Ops (emitNow, emitOp)
 import XMonad.River.Plan (KeyboardLayoutRequest(..), Op(..))
 import XMonad.River.Runtime (RestartRequested(..), setMainThread, warnUnimplemented)
 import XMonad.River.Types
-import XMonad.River.State (Display'(..), InputCapture(..), RiverState(..), updatePlacement)
+import XMonad.River.State (Display'(..), InputCapture(..), RiverState(..), clearBorderColor, updatePlacement)
 import XMonad.River.Wire (decodeUtf8, encodeUtf8)
 import XMonad.River.Xkb (compileKeymap)
 
@@ -567,6 +574,23 @@ setInputConfig rules = case validateInputConfig rules of
 -- | The active xkb layout, index and name, as river last reported it.
 keyboardLayout :: X (Maybe (Int, String))
 keyboardLayout = io . readIORef =<< asks (riverKeyboardLayout . riverState)
+
+-- | Open capture sessions on a window; 0 for one river does not know.
+captureSessions :: Window -> X Word32
+captureSessions w = do
+    wins <- io . readIORef =<< asks (riverWindows . riverState)
+    pure (maybe 0 rwCaptureSessions (M.lookup w wins))
+
+-- | Connector names of the outputs with a capture session open.
+capturedOutputs :: X [String]
+capturedOutputs = do
+    outs <- io . readIORef =<< asks (riverOutputs . riverState)
+    pure [ decodeUtf8 n | o <- M.elems outs, roCaptureSessions o > 0, Just n <- [roName o] ]
+
+-- | Undo 'XMonad.Core.setWindowBorder': the render sequence colours the
+-- window from the plan again.
+resetBorderColor :: Window -> X ()
+resetBorderColor w = io . flip clearBorderColor w =<< asks (riverBorders . riverState)
 
 -- | The next layout of the keymap, wrapping, on every keyboard.
 nextKeyboardLayout :: X ()

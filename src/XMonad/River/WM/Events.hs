@@ -55,6 +55,7 @@ addWindow rt win = do
     , rwDimensions = (0, 0)
     , rwSizeHints = noSizeHints
     , rwClosed = False, rwFullscreen = False, rwHidden = False
+    , rwCaptureSessions = 0
     }
   riverWindowV1Listen conn win $ \case
     RiverWindowV1Closed        -> adjust ref win $ \w -> w { rwClosed = True }
@@ -62,6 +63,7 @@ addWindow rt win = do
     RiverWindowV1Title t       -> adjust ref win $ \w -> w { rwTitle = t }
     RiverWindowV1UnreliablePid p -> adjust ref win $ \w -> w { rwPid = Just p }
     RiverWindowV1Identifier i  -> adjust ref win $ \w -> w { rwIdentifier = Just i }
+    RiverWindowV1CaptureSessions n -> adjust ref win $ \w -> w { rwCaptureSessions = n }
     RiverWindowV1Parent p      -> adjust ref win $ \w ->
       w { rwParent = if isNullObject p then Nothing else Just p }
     -- The first of these is the map (river sends none before it).  Keyboard
@@ -111,12 +113,13 @@ addOutput rt out = do
   modifyIORef' ref $ M.insert out RiverOutput
     { roObject = out, roPosition = (0, 0), roSize = (0, 0), roRemoved = False
     , roLayerObject = mLayer, roLayerArea = Nothing
-    , roWlOutput = Nothing, roName = Nothing }
+    , roWlOutput = Nothing, roName = Nothing, roCaptureSessions = 0 }
   riverOutputV1Listen conn out $ \case
     RiverOutputV1Removed -> adjust ref out $ \o -> o { roRemoved = True }
     RiverOutputV1Position x y -> adjust ref out $ \o -> o { roPosition = (x, y) }
     RiverOutputV1Dimensions width height ->
       adjust ref out $ \o -> o { roSize = (width, height) }
+    RiverOutputV1CaptureSessions n -> adjust ref out $ \o -> o { roCaptureSessions = n }
     -- The wl_output behind this output, for its connector name.  Bound by
     -- registry name; the name event needs version 4.
     RiverOutputV1WlOutput name -> do

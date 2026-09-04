@@ -19,7 +19,7 @@ module XMonad.River.State
     -- * One-shot requests
   , queueOp, queueNow, takeOps, takeNowOps, nowOpsPending
     -- * Border overrides
-  , borderOverride, overrideBorderWidth, overrideBorderColor, forgetBorderOverride
+  , borderOverride, overrideBorderWidth, overrideBorderColor, clearBorderColor, forgetBorderOverride
   ) where
 
 import Control.Concurrent.STM (STM, TVar, atomically, check, modifyTVar', readTVar, stateTVar)
@@ -208,6 +208,11 @@ overrideBorderWidth ref w n = atomicModifyIORef' ref $ \m ->
 overrideBorderColor :: Borders -> Window -> BorderColor -> IO ()
 overrideBorderColor ref w c = atomicModifyIORef' ref $ \m ->
     (M.alter (\o -> Just (maybe Nothing fst o, Just c)) w m, ())
+
+-- | Back to the plan's colour, keeping a width override.
+clearBorderColor :: Borders -> Window -> IO ()
+clearBorderColor ref w = atomicModifyIORef' ref $ \m ->
+    (M.update (\(wd, _) -> (\d -> (Just d, Nothing)) <$> wd) w m, ())
 
 -- | Drop a window's overrides once it is gone: river recycles object ids.
 forgetBorderOverride :: Borders -> Window -> IO ()

@@ -289,6 +289,10 @@ data RiverWindow = RiverWindow
     -- so the answer has to be accumulated -- and each arrives before the
     -- manage sequence it triggers, which is what lets a manage hook ask.
   , rwHidden     :: !Bool
+  , rwCaptureSessions :: !Word32
+    -- ^ Screen-capture sessions open on the window, from
+    -- @river_window_v1.capture_sessions@ (version 5); river sends a change
+    -- before the manage sequence it schedules for it.
   } deriving (Eq, Show)
 
 data RiverOutput = RiverOutput
@@ -308,6 +312,9 @@ data RiverOutput = RiverOutput
   , roName        :: !(Maybe ByteString)
     -- ^ The connector name (@eDP-1@, @DP-3@), from @wl_output.name@; needs
     -- @wl_output@ version 4.
+  , roCaptureSessions :: !Word32
+    -- ^ Screen-capture sessions open on the output, from
+    -- @river_output_v1.capture_sessions@ (version 5).
   } deriving (Eq, Show)
 
 data RiverSeat = RiverSeat
