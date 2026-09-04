@@ -29,6 +29,7 @@ module XMonad.River.Xkb
   , modifierActive
   , defaultKeymapText
   , compileKeymap
+  , keymapLayoutNames
   ) where
 
 import Control.Monad (when)
@@ -63,6 +64,10 @@ foreign import ccall safe "xkb_keymap_new_from_names"
   c_keymap_new_from_names :: Ptr XkbContext -> Ptr () -> CInt -> IO (Ptr XkbKeymap)
 foreign import ccall safe "xkb_keymap_get_as_string"
   c_keymap_get_as_string :: Ptr XkbKeymap -> CInt -> IO CString
+foreign import ccall safe "xkb_keymap_num_layouts"
+  c_keymap_num_layouts :: Ptr XkbKeymap -> IO Word32
+foreign import ccall safe "xkb_keymap_layout_get_name"
+  c_keymap_layout_get_name :: Ptr XkbKeymap -> Word32 -> IO CString
 foreign import ccall safe "xkb_state_new"
   c_state_new :: Ptr XkbKeymap -> IO (Ptr XkbStateT)
 foreign import ccall safe "xkb_state_unref"
@@ -172,6 +177,23 @@ modifierActive x name = withCString name $ \cs -> do
 -- @XKB_KEYMAP_FORMAT_TEXT_V1@ text.  'Nothing' if xkb cannot compile it.
 compileKeymap :: String -> String -> String -> String -> String -> IO (Maybe String)
 compileKeymap rules model layouts variants options =
+  withKeymap rules model layouts variants options $ \km -> do
+    cs <- c_keymap_get_as_string km 1
+    if cs == nullPtr then pure Nothing else Just <$> peekCString cs
+
+-- | The layouts' names, in index order: what @xkb_keymap_layout_get_name@
+-- answers, e.g. @English (US)@.
+keymapLayoutNames :: String -> String -> String -> String -> String -> IO (Maybe [String])
+keymapLayoutNames rules model layouts variants options =
+  withKeymap rules model layouts variants options $ \km -> do
+    n <- c_keymap_num_layouts km
+    Just <$> mapM (\i -> c_keymap_layout_get_name km i >>= \cs ->
+                     if cs == nullPtr then pure "" else peekCString cs) [0 .. n - 1]
+
+-- | A keymap compiled from RMLVO, for the duration of the action; 'Nothing'
+-- if xkb cannot compile it.
+withKeymap :: String -> String -> String -> String -> String -> (Ptr XkbKeymap -> IO (Maybe a)) -> IO (Maybe a)
+withKeymap rules model layouts variants options k =
   withField rules $ \pr -> withField model $ \pm -> withField layouts $ \pl ->
   withField variants $ \pv -> withField options $ \po ->
   allocaBytes (5 * sizeOf pr) $ \names -> do
@@ -182,14 +204,13 @@ compileKeymap rules model layouts variants options =
       if km == nullPtr
         then c_context_unref ctx >> pure Nothing
         else do
-          cs <- c_keymap_get_as_string km 1
-          out <- if cs == nullPtr then pure Nothing else Just <$> peekCString cs
+          out <- k km
           c_keymap_unref km
           c_context_unref ctx
           pure out
   where
-    withField "" k = k nullPtr
-    withField s k = withCString s k
+    withField "" k' = k' nullPtr
+    withField s k' = withCString s k'
 
 defaultKeymapText :: IO (Maybe String)
 defaultKeymapText = do

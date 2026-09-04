@@ -153,7 +153,7 @@ module XMonad.River (
     keyboardLayout, nextKeyboardLayout, setKeyboardLayout, setKeyboardLayoutByName,
     -- | What @setxkbmap@ did: the keymap itself, on every keyboard present
     -- and to come.
-    setKeymap, Keymap(..), defaultKeymap,
+    setKeymap, Keymap(..), defaultKeymap, keymapLayoutNames,
     InputRule(..), InputMatch(..), defaultInputMatch, touchpads,
     NameMatch(..), InputType(..),
     InputSettings(..), defaultInputSettings,
@@ -198,6 +198,7 @@ import XMonad.River.Runtime (RestartRequested(..), setMainThread, warnUnimplemen
 import XMonad.River.Types
 import XMonad.River.State (Display'(..), InputCapture(..), RiverState(..), clearBorderColor, updatePlacement)
 import XMonad.River.Wire (decodeUtf8, encodeUtf8)
+import qualified XMonad.River.Xkb as Xkb
 import XMonad.River.Xkb (compileKeymap)
 
 -- | Run an action on the worker, from any thread.  It runs at the start of
@@ -607,6 +608,11 @@ setKeyboardLayoutByName = emitNow . OpKeyboardLayout . KeyboardLayoutName . enco
 -- | Compile the keymap with libxkbcommon, here on the worker, and have
 -- river set it on every keyboard.  Resets modifier state; the active layout
 -- index is kept.  A keymap xkb cannot compile is reported and not sent.
+-- | The keymap's layout names in index order, as river will report them.
+keymapLayoutNames :: Keymap -> IO (Maybe [String])
+keymapLayoutNames km = Xkb.keymapLayoutNames (keymapRules km) (keymapModel km) (keymapLayouts km)
+                         (keymapVariants km) (keymapOptions km)
+
 setKeymap :: Keymap -> X ()
 setKeymap km = do
     text <- io (compileKeymap (keymapRules km) (keymapModel km) (keymapLayouts km)
