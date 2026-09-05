@@ -14,7 +14,7 @@ module XMonad.River.WM.Sequence
   ) where
 
 import Control.Concurrent.STM
-import Control.Exception (SomeException, finally, handle)
+import Control.Exception (finally)
 import Control.Monad (forM, forM_, unless, void, when)
 import Control.Monad.Reader (ask, asks)
 import Control.Monad.State (get, gets, modify, put)
@@ -29,7 +29,7 @@ import System.Environment (lookupEnv)
 import System.IO (hPutStrLn, stderr)
 
 import XMonad.Core
-import XMonad.Operations (StateFile (..), floatLocation, getCleanedScreenInfo, isFixedSizeOrTransient, readStateFile, scaleRationalRect)
+import XMonad.Operations (floatLocation, getCleanedScreenInfo, isFixedSizeOrTransient, readStateFile, scaleRationalRect)
 import XMonad.River.Ops (emitOp)
 import XMonad.River.Plan
 import XMonad.River.Protocol.WindowManagement (riverWindowV1CapabilitiesFullscreen)
@@ -110,28 +110,13 @@ restoreState rt = do
     io (writeIORef (rtRestored rt) True)
     path <- asks (stateFileName . directories)
     exists <- io (doesFileExist path)
+    -- readStateFile parses once and notes how many windows resolved.
     when exists $ do
       xmc <- asks config
-      wanted <- io (windowsInStateFile path)
       mst <- readStateFile xmc
-      whenJust mst $ \st -> do
+      whenJust mst $ \st ->
         modify $ \s -> s { windowset = windowset st
                          , extensibleState = extensibleState st }
-        let restored = W.allWindows (windowset st)
-        -- The two numbers differing means the identifiers did not match what
-        -- river now reports; the symptom is windows back on the wrong
-        -- workspace, otherwise indistinguishable from a missing file.
-        io $ hPutStrLn stderr $ "xmonad-river: note: restored "
-          <> show (length restored) <> " of " <> show wanted
-          <> " windows from " <> path
-
--- | How many windows the state file claims, from the raw text.
-windowsInStateFile :: FilePath -> IO Int
-windowsInStateFile path = handle (\(_ :: SomeException) -> pure 0) $ do
-  raw <- readFile path
-  case reads raw of
-    [(sf, _)] -> pure (length (W.allWindows (sfWins sf)))
-    _         -> pure 0
 
 -- | Drop what river has closed from the 'WindowSet', and tell the config.
 -- The objects are destroyed by 'reapObjects' on the loop, afterwards.

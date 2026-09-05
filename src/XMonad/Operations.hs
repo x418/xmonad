@@ -78,14 +78,14 @@ import Data.Monoid          (Any(..))
 import Data.Ratio           ((%))
 import System.Directory     (removeFile)
 import System.Environment   (getArgs)
-import System.IO            (Handle, IOMode (ReadMode), hGetContents, withFile)
+import System.IO            (Handle, IOMode (ReadMode), hGetContents, hPutStrLn, stderr, withFile)
 import qualified Data.ByteString.Char8 as B8
 import qualified Data.Map as M
 import qualified Data.Set as S
 
 import Control.Monad.Reader
 import Control.Monad.State
-import Control.Monad (forM_, guard, join, unless, void, when)
+import Control.Monad (forM, forM_, guard, join, unless, void, when)
 
 -- | Whether a window should float on adoption: fixed size (equal minimum and
 -- maximum in @dimensions_hint@) or transient (@river_window_v1.parent@, the
@@ -373,48 +373,65 @@ retagWindows f (W.StackSet cur vis hid flt) = W.StackSet
 --
 -- Must run once river has advertised its windows, because the identifiers
 -- in the file are resolved against them: the first manage sequence, see
--- @restoreState@ in "XMonad.River.WM.Sequence".
+-- @restoreState@ in "XMonad.River.WM.Sequence".  Parsed once; the note
+-- compares what the file claimed with what resolved, because the two
+-- differing means the identifiers did not match what river now reports,
+-- and the symptom -- windows back on the wrong workspace -- is otherwise
+-- indistinguishable from a missing file.
 readStateFile :: XConfig Layout -> X (Maybe XState)
 readStateFile xmc = do
     path <- asks $ stateFileName . directories
+    msf <- parseStateFile path
+    forM msf $ \sf -> do
+        st <- restoreStateFile xmc sf
+        io $ hPutStrLn stderr $ "xmonad-river: note: restored "
+          <> show (length (W.allWindows (windowset st))) <> " of "
+          <> show (length (W.allWindows (sfWins sf))) <> " windows from " <> path
+        return st
 
+-- | The state file's contents, and the file removed.  'Nothing' if it does
+-- not parse, or cannot be read.
+parseStateFile :: FilePath -> X (Maybe StateFile)
+parseStateFile path = do
     -- I'm trying really hard here to make sure we read the entire
     -- contents of the file before it is removed from the file system.
     sf' <- userCode . io $ do
         raw <- withFile path ReadMode readStrict
         return $! maybeRead reads raw
-
     io (removeFile path)
+    return (join sf')
+  where
+    readStrict :: Handle -> IO String
+    readStrict h = hGetContents h >>= \s -> length s `seq` return s
 
+-- | The 'XState' a parsed state file describes, its window identifiers
+-- resolved against the windows river has advertised.
+restoreStateFile :: XConfig Layout -> StateFile -> X XState
+restoreStateFile xmc sf = do
     known <- io . readIORef =<< asks (riverWindows . riverState)
     let byIdent = M.fromList
           [ (B8.unpack i, rwObject w)
           | w <- M.elems known, Just i <- [rwIdentifier w] ]
-
-    return $ do
-      sf <- join sf'
-
-      let winset = retagWindows (`M.lookup` byIdent)
-                 . W.ensureTags layout (workspaces xmc)
-                 $ W.mapLayout (fromMaybe layout . maybeRead lreads) (sfWins sf)
-          extState = M.fromList . map (second Left) $ sfExt sf
-
-      return XState { windowset       = winset
-                    , numberlockMask  = 0
-                    , mapped          = S.empty
-                    , waitingUnmap    = M.empty
-                    , dragging        = Nothing
-                    , extensibleState = extState
-                    }
+        winset = retagWindows (`M.lookup` byIdent)
+               . W.ensureTags layout (workspaces xmc)
+               $ W.mapLayout (fromMaybe layout . maybeRead lreads) (sfWins sf)
+        extState = M.fromList . map (second Left) $ sfExt sf
+    return XState { windowset       = winset
+                  , numberlockMask  = 0
+                  , mapped          = S.empty
+                  , waitingUnmap    = M.empty
+                  , dragging        = Nothing
+                  , extensibleState = extState
+                  }
   where
     layout = layoutHook xmc
     lreads = readsLayout layout
-    maybeRead reads' s = case reads' s of
-                           [(x, "")] -> Just x
-                           _         -> Nothing
 
-    readStrict :: Handle -> IO String
-    readStrict h = hGetContents h >>= \s -> length s `seq` return s
+-- | A whole parse, and nothing left over.
+maybeRead :: ReadS a -> String -> Maybe a
+maybeRead reads' s = case reads' s of
+    [(x, "")] -> Just x
+    _         -> Nothing
 
 -- | @restart name resume@ restarts the window manager by executing @name@.
 --
