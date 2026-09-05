@@ -19,6 +19,12 @@
 -- calls a prompt needs, bound directly.  Marked @safe@ rather than @unsafe@:
 -- they are not hot -- one per keystroke -- and @xkb_keymap_new_from_string@
 -- parses a keymap that can run to tens of kilobytes.
+--
+-- Everything that crosses into C is a 'ByteString' of UTF-8, which is what
+-- xkb reads and writes.  'peekCString' and 'withCString' go through the
+-- locale encoding instead, so under a C locale a keymap with a byte above
+-- 0x7f would be corrupted and an @é@ typed into a prompt would arrive as
+-- mojibake.
 module XMonad.River.Xkb
   ( XkbState
   , newXkbState
@@ -33,13 +39,17 @@ module XMonad.River.Xkb
   ) where
 
 import Control.Monad (when)
+import Data.ByteString (ByteString)
+import qualified Data.ByteString as BS
 import Data.Word (Word32)
-import Foreign.C.String (CString, peekCString, withCString)
+import Foreign.C.String (CString, withCString)
 import Foreign.C.Types (CChar (..), CInt (..), CSize (..))
 import Foreign.ForeignPtr ()
 import Foreign.Marshal.Alloc (allocaBytes)
 import Foreign.Ptr (Ptr, nullPtr, plusPtr)
 import Foreign.Storable (poke, sizeOf)
+
+import XMonad.River.Wire (decodeUtf8, encodeUtf8)
 
 data XkbContext
 data XkbKeymap
@@ -81,6 +91,9 @@ foreign import ccall safe "xkb_state_update_mask"
                 -> Word32 -> Word32 -> Word32 -> IO CInt
 foreign import ccall safe "xkb_state_mod_name_is_active"
   c_mod_name_is_active :: Ptr XkbStateT -> CString -> CInt -> IO CInt
+-- @xkb_keymap_get_as_string@ hands its result to the caller to free.
+foreign import ccall unsafe "stdlib.h free"
+  c_free :: Ptr a -> IO ()
 
 -- | Parse the keymap the compositor sent.
 --
@@ -88,11 +101,11 @@ foreign import ccall safe "xkb_state_mod_name_is_active"
 -- 'Nothing' if it will not parse, which should not happen and is not worth
 -- crashing over: a prompt that cannot read the keyboard is better than a
 -- window manager that exits.
-newXkbState :: String -> IO (Maybe XkbState)
+newXkbState :: ByteString -> IO (Maybe XkbState)
 newXkbState keymapText = do
   ctx <- c_context_new 0
   if ctx == nullPtr then pure Nothing else do
-    km <- withCString keymapText $ \s ->
+    km <- BS.useAsCString keymapText $ \s ->
       -- 1 is XKB_KEYMAP_FORMAT_TEXT_V1; 0 is no compile flags.
       c_keymap_new ctx s 1 0
     if km == nullPtr
@@ -126,7 +139,9 @@ keycodeToKeysym x code = c_get_one_sym (xkbState x) (code + 8)
 keycodeToUtf8 :: XkbState -> Word32 -> IO String
 keycodeToUtf8 x code = allocaBytes 64 $ \buf -> do
   n <- c_get_utf8 (xkbState x) (code + 8) buf 64
-  if n <= 0 then pure "" else peekCString buf
+  if n <= 0 || n >= 64
+    then pure ""
+    else decodeUtf8 <$> BS.packCStringLen (buf, fromIntegral n)
 
 -- | Track the modifier state the compositor reports.
 --
@@ -175,11 +190,9 @@ modifierActive x name = withCString name $ \cs -> do
 -- | A keymap compiled from RMLVO names -- rules, model, layouts, variants,
 -- options, comma-separated as xkb takes them, empty for its default -- as
 -- @XKB_KEYMAP_FORMAT_TEXT_V1@ text.  'Nothing' if xkb cannot compile it.
-compileKeymap :: String -> String -> String -> String -> String -> IO (Maybe String)
+compileKeymap :: String -> String -> String -> String -> String -> IO (Maybe ByteString)
 compileKeymap rules model layouts variants options =
-  withKeymap rules model layouts variants options $ \km -> do
-    cs <- c_keymap_get_as_string km 1
-    if cs == nullPtr then pure Nothing else Just <$> peekCString cs
+  withKeymap rules model layouts variants options keymapAsText
 
 -- | The layouts' names, in index order: what @xkb_keymap_layout_get_name@
 -- answers, e.g. @English (US)@.
@@ -188,7 +201,17 @@ keymapLayoutNames rules model layouts variants options =
   withKeymap rules model layouts variants options $ \km -> do
     n <- c_keymap_num_layouts km
     Just <$> mapM (\i -> c_keymap_layout_get_name km i >>= \cs ->
-                     if cs == nullPtr then pure "" else peekCString cs) [0 .. n - 1]
+                     if cs == nullPtr then pure "" else decodeUtf8 <$> BS.packCString cs) [0 .. n - 1]
+
+-- | A keymap as @XKB_KEYMAP_FORMAT_TEXT_V1@ text, copied out of the C string
+-- xkb allocates for it.
+keymapAsText :: Ptr XkbKeymap -> IO (Maybe ByteString)
+keymapAsText km = do
+  cs <- c_keymap_get_as_string km 1
+  if cs == nullPtr then pure Nothing else do
+    out <- BS.packCString cs
+    c_free cs
+    pure (Just out)
 
 -- | A keymap compiled from RMLVO, for the duration of the action; 'Nothing'
 -- if xkb cannot compile it.
@@ -210,9 +233,9 @@ withKeymap rules model layouts variants options k =
           pure out
   where
     withField "" k' = k' nullPtr
-    withField s k' = withCString s k'
+    withField s k' = BS.useAsCString (encodeUtf8 s) k'
 
-defaultKeymapText :: IO (Maybe String)
+defaultKeymapText :: IO (Maybe ByteString)
 defaultKeymapText = do
   ctx <- c_context_new 0
   if ctx == nullPtr then pure Nothing else do
@@ -220,8 +243,7 @@ defaultKeymapText = do
     if km == nullPtr
       then c_context_unref ctx >> pure Nothing
       else do
-        cs <- c_keymap_get_as_string km 1  -- XKB_KEYMAP_FORMAT_TEXT_V1
-        out <- if cs == nullPtr then pure Nothing else Just <$> peekCString cs
+        out <- keymapAsText km
         c_keymap_unref km
         c_context_unref ctx
         pure out

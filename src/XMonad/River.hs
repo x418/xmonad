@@ -620,7 +620,7 @@ setKeymap km = do
     case text of
         Nothing -> io $ hPutStrLn stderr
             ("xmonad-river: setKeymap: xkb cannot compile " ++ show km)
-        Just t -> emitNow (OpSetKeymap (encodeUtf8 t))
+        Just t -> emitNow (OpSetKeymap t)
 
 -- | Claim the next capture generation.
 nextGeneration :: IORef Int -> IO Int

@@ -276,6 +276,7 @@ executable river-submap-spec
   main-is:        river-submap-spec.hs
   hs-source-dirs: tests
   build-depends:  base
+                , bytestring
                 , containers
                 , unix
                 , xmonad

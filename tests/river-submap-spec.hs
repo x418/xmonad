@@ -34,6 +34,7 @@ import System.Exit (exitFailure)
 import System.IO
 import System.Posix.IO (OpenMode (ReadWrite), defaultFileFlags, openFd)
 import qualified Control.Exception as E
+import qualified Data.ByteString as BS
 import qualified Data.Map as M
 
 import XMonad
@@ -185,11 +186,11 @@ uploadKeymap conn kb path = defaultKeymapText >>= \case
   Nothing -> hPutStrLn stderr "river-submap-spec: no xkb keymap available"
   Just text -> do
     let km = path ++ ".keymap"
-    writeFile km text
+    BS.writeFile km text
     fd <- openFd km ReadWrite defaultFileFlags
     -- 1 is XKB_KEYMAP_FORMAT_TEXT_V1.  The size includes the terminator, which
     -- libxkbcommon expects to find.
-    zwpVirtualKeyboardV1Keymap conn kb 1 fd (fromIntegral (length text + 1))
+    zwpVirtualKeyboardV1Keymap conn kb 1 fd (fromIntegral (BS.length text + 1))
     -- No closeFd here: 'flush' closes every descriptor it hands over, on the
     -- grounds that the compositor holds its own now.  Closing it again is
     -- EBADF, which as an exception on this thread means no key is ever sent.

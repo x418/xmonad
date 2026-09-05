@@ -93,6 +93,7 @@ import Data.IORef
 import Data.List (intercalate)
 import Data.Maybe (isJust, isNothing)
 import Data.Word (Word32)
+import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BC
 
@@ -103,7 +104,7 @@ import qualified XMonad.River.Mailbox as MB
 import XMonad.River.Protocol.Core
 import XMonad.River.Protocol.LayerShellClient
 import XMonad.River.Types (KeyMask, shiftMask, controlMask, mod1Mask, mod3Mask, mod4Mask, mod5Mask)
-import XMonad.River.Wire (ObjectId, nullObject, decodeUtf8)
+import XMonad.River.Wire (ObjectId, nullObject)
 import qualified Data.Map.Strict as M
 import System.IO.Unsafe (unsafePerformIO)
 import XMonad.River.Xkb
@@ -533,14 +534,14 @@ guarded what act = act `E.catch` \e -> hPutStrLn stderr
 -- Bytes, not text, until the whole thing has arrived: a keymap is UTF-8 and a
 -- chunked read can land mid-sequence, so decoding per chunk would corrupt any
 -- keysym name outside ASCII.
-readFdText :: Fd -> Int -> IO String
+readFdText :: Fd -> Int -> IO ByteString
 readFdText (Fd fd) size
-  | size <= 0 = pure ""
+  | size <= 0 = pure BS.empty
   | otherwise = allocaBytes size $ \buf -> do
       got <- go buf 0
-      -- The advertised size counts the terminator, and an interior NUL in a
-      -- Haskell String is a trap waiting for whoever marshals it back out.
-      decodeUtf8 . BS.takeWhile (/= 0) <$> BS.packCStringLen (buf, got)
+      -- The advertised size counts the terminator, and an interior NUL would
+      -- end the text early once it is marshalled back out to xkb.
+      BS.takeWhile (/= 0) <$> BS.packCStringLen (buf, got)
   where
     go buf got
       | got >= size = pure got

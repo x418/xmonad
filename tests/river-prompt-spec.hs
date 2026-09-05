@@ -43,7 +43,6 @@ import System.Posix.IO (closeFd)
 import System.Posix.IO.ByteString (fdRead)
 import System.Posix.Types (Fd)
 import qualified Data.ByteString as BS
-import qualified Data.ByteString.Char8 as BC
 import qualified XMonad.River.Connection as C
 
 main :: IO ()
@@ -65,7 +64,7 @@ main = do
 -- a headless seat has no keyboard and cannot exhibit it at all.
 --
 -- Before the fix the second number is 0.  After it, both are the keymap's size.
-keymapProbe :: (Fd -> Int -> IO String) -> String -> IO ()
+keymapProbe :: (Fd -> Int -> IO BS.ByteString) -> String -> IO ()
 keymapProbe reader label = do
   a <- keymapBytes reader
   b <- keymapBytes reader
@@ -82,8 +81,8 @@ keymapProbe reader label = do
 -- Run it against a live compositor with @--keymap-probe-sequential@ and the
 -- second number comes back 0: the first read moved the shared file offset to
 -- end-of-file and there is nothing left for anyone else.
-readSequential :: Fd -> Int -> IO String
-readSequential fd size = BC.unpack <$> go size BS.empty
+readSequential :: Fd -> Int -> IO BS.ByteString
+readSequential fd size = go size BS.empty
   where
     go 0 acc = pure acc
     go n acc = do
@@ -254,7 +253,7 @@ seatHasKeyboard = do
 --
 -- Calls the shipped reader, because "does a second prompt get the keymap" is
 -- exactly the question, and the answer depends on how it reads.
-keymapBytes :: (Fd -> Int -> IO String) -> IO Int
+keymapBytes :: (Fd -> Int -> IO BS.ByteString) -> IO Int
 keymapBytes reader = do
   conn <- C.connect
   (registry, globals) <- C.getRegistry conn
@@ -270,7 +269,7 @@ keymapBytes reader = do
             WlKeyboardKeymap _fmt fd size -> do
               text <- reader fd (fromIntegral size)
               closeFd fd
-              writeIORef got (length text)
+              writeIORef got (BS.length text)
             _ -> pure ()
         _ -> pure ()
       C.roundtrip conn
