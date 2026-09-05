@@ -324,7 +324,20 @@ noteEvent ev sn = case ev of
   RiverLibinputDeviceV1RotationCurrent v -> cur FRotation (VUInt v)
   RiverLibinputDeviceV1CalibrationMatrixDefault bs -> maybe sn (dflt FCalibration . VFloats) (bytesFloats bs)
   RiverLibinputDeviceV1CalibrationMatrixCurrent bs -> maybe sn (cur FCalibration . VFloats) (bytesFloats bs)
-  _ -> sn
+  -- Boolean support flags say only that the *_default that follows is
+  -- meaningful; the rest are lifecycle, handled by the listener.
+  RiverLibinputDeviceV1ThreeFingerDragSupport{} -> sn
+  RiverLibinputDeviceV1CalibrationMatrixSupport{} -> sn
+  RiverLibinputDeviceV1NaturalScrollSupport{} -> sn
+  RiverLibinputDeviceV1LeftHandedSupport{} -> sn
+  RiverLibinputDeviceV1MiddleEmulationSupport{} -> sn
+  RiverLibinputDeviceV1DwtSupport{} -> sn
+  RiverLibinputDeviceV1DwtpSupport{} -> sn
+  RiverLibinputDeviceV1RotationSupport{} -> sn
+  RiverLibinputDeviceV1InputDevice{} -> sn
+  RiverLibinputDeviceV1Removed -> sn
+  RiverLibinputDeviceV1Done -> sn
+  RiverLibinputDeviceV1Unknown{} -> sn
   where
     dflt f v = sn { snDefaults = M.insert f v (snDefaults sn) }
     cur f v = sn { snCurrents = M.insert f v (snCurrents sn) }
@@ -494,28 +507,42 @@ send rt dev d gen f v = case (f, v) of
 
 -- | The setter and its result object; 'Nothing' for a value of the wrong kind.
 setter :: Connection -> ObjectId -> Field -> Value -> IO (Maybe ObjectId)
-setter conn lib f v = case (f, v) of
-  (FSendEvents, VUInt x) -> Just <$> riverLibinputDeviceV1SetSendEvents conn lib x
-  (FTap, VUInt x) -> Just <$> riverLibinputDeviceV1SetTap conn lib x
-  (FTapButtonMap, VUInt x) -> Just <$> riverLibinputDeviceV1SetTapButtonMap conn lib x
-  (FDrag, VUInt x) -> Just <$> riverLibinputDeviceV1SetDrag conn lib x
-  (FDragLock, VUInt x) -> Just <$> riverLibinputDeviceV1SetDragLock conn lib x
-  (FThreeFingerDrag, VUInt x) -> Just <$> riverLibinputDeviceV1SetThreeFingerDrag conn lib x
-  (FAccelProfile, VUInt x) -> Just <$> riverLibinputDeviceV1SetAccelProfile conn lib x
-  (FAccelSpeed, VDouble x) -> Just <$> riverLibinputDeviceV1SetAccelSpeed conn lib (doubleBytes x)
-  (FNaturalScroll, VUInt x) -> Just <$> riverLibinputDeviceV1SetNaturalScroll conn lib x
-  (FLeftHanded, VUInt x) -> Just <$> riverLibinputDeviceV1SetLeftHanded conn lib x
-  (FClickMethod, VUInt x) -> Just <$> riverLibinputDeviceV1SetClickMethod conn lib x
-  (FClickfingerButtonMap, VUInt x) -> Just <$> riverLibinputDeviceV1SetClickfingerButtonMap conn lib x
-  (FMiddleEmulation, VUInt x) -> Just <$> riverLibinputDeviceV1SetMiddleEmulation conn lib x
-  (FScrollMethod, VUInt x) -> Just <$> riverLibinputDeviceV1SetScrollMethod conn lib x
-  (FScrollButton, VUInt x) -> Just <$> riverLibinputDeviceV1SetScrollButton conn lib x
-  (FScrollButtonLock, VUInt x) -> Just <$> riverLibinputDeviceV1SetScrollButtonLock conn lib x
-  (FDwt, VUInt x) -> Just <$> riverLibinputDeviceV1SetDwt conn lib x
-  (FDwtp, VUInt x) -> Just <$> riverLibinputDeviceV1SetDwtp conn lib x
-  (FRotation, VUInt x) -> Just <$> riverLibinputDeviceV1SetRotation conn lib x
-  (FCalibration, VFloats fs) -> Just <$> riverLibinputDeviceV1SetCalibrationMatrix conn lib (floatsBytes fs)
-  _ -> pure Nothing
+setter conn lib f v = case f of
+  FSendEvents -> uint riverLibinputDeviceV1SetSendEvents
+  FTap -> uint riverLibinputDeviceV1SetTap
+  FTapButtonMap -> uint riverLibinputDeviceV1SetTapButtonMap
+  FDrag -> uint riverLibinputDeviceV1SetDrag
+  FDragLock -> uint riverLibinputDeviceV1SetDragLock
+  FThreeFingerDrag -> uint riverLibinputDeviceV1SetThreeFingerDrag
+  FAccelProfile -> uint riverLibinputDeviceV1SetAccelProfile
+  FAccelSpeed -> case v of
+    VDouble x -> Just <$> riverLibinputDeviceV1SetAccelSpeed conn lib (doubleBytes x)
+    _ -> pure Nothing
+  FNaturalScroll -> uint riverLibinputDeviceV1SetNaturalScroll
+  FLeftHanded -> uint riverLibinputDeviceV1SetLeftHanded
+  FClickMethod -> uint riverLibinputDeviceV1SetClickMethod
+  FClickfingerButtonMap -> uint riverLibinputDeviceV1SetClickfingerButtonMap
+  FMiddleEmulation -> uint riverLibinputDeviceV1SetMiddleEmulation
+  FScrollMethod -> uint riverLibinputDeviceV1SetScrollMethod
+  FScrollButton -> uint riverLibinputDeviceV1SetScrollButton
+  FScrollButtonLock -> uint riverLibinputDeviceV1SetScrollButtonLock
+  FDwt -> uint riverLibinputDeviceV1SetDwt
+  FDwtp -> uint riverLibinputDeviceV1SetDwtp
+  FRotation -> uint riverLibinputDeviceV1SetRotation
+  FCalibration -> case v of
+    VFloats fs -> Just <$> riverLibinputDeviceV1SetCalibrationMatrix conn lib (floatsBytes fs)
+    _ -> pure Nothing
+  -- Not libinput settings: 'send' answers these before asking here.
+  FAccelCustom -> pure Nothing
+  FScrollFactor -> pure Nothing
+  FMapToOutput -> pure Nothing
+  FRepeat -> pure Nothing
+  FMapToRectangle -> pure Nothing
+  FSeat -> pure Nothing
+  where
+    uint k = case v of
+      VUInt x -> Just <$> k conn lib x
+      _ -> pure Nothing
 
 -- | The event destroys the object; the id comes back with @delete_id@.
 onResult :: InputRuntime -> ObjectId -> RiverLibinputResultV1Event -> IO ()

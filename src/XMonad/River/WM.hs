@@ -503,7 +503,22 @@ sendNow rt = \case
   OpKeyboardLayout req -> setKeyboardLayout (rtInput rt) req
   OpSetKeymap text -> setKeymap (rtInput rt) text
   OpDeclareSubmapPrefixes ks -> writeIORef (rtPrefixKeys rt) (S.fromList ks)
-  _ -> pure ()
+  -- Manage-sequence ops never reach here: 'takeNowOps' hands out only what
+  -- 'emitNow' queued.  Listed so that a new constructor is a warning, not a
+  -- silent drop.
+  OpClose{} -> pure ()
+  OpWarpPointer{} -> pure ()
+  OpPointerOpStart{} -> pure ()
+  OpPointerOpEnd{} -> pure ()
+  OpUseDecorations{} -> pure ()
+  OpSetCapabilities{} -> pure ()
+  OpInformFullscreen{} -> pure ()
+  OpInformResize{} -> pure ()
+  OpSetPosition{} -> pure ()
+  OpProposeDimensions{} -> pure ()
+  OpGrabKeys{} -> pure ()
+  OpUngrabKeys -> pure ()
+  OpCaptureInput{} -> pure ()
   where conn = rtConn rt
 
 onManagerEvent :: Runtime -> RiverWindowManagerV1Event -> IO ()
@@ -558,7 +573,7 @@ onManagerEvent rt = \case
     rtSubmit rt (void (broadcastEvent (SeatAdded seat)))
   RiverWindowManagerV1SessionLocked   -> rtSubmit rt (void (broadcastEvent SessionLocked))
   RiverWindowManagerV1SessionUnlocked -> rtSubmit rt (void (broadcastEvent SessionUnlocked))
-  _ -> pure ()
+  RiverWindowManagerV1Unknown{} -> pure ()
   where
     conn = rtConn rt
     rs = rtState rt
