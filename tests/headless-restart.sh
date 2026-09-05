@@ -113,7 +113,11 @@ chmod +x "$RT/init.sh"
 echo "headless-restart: wm=$WM"
 echo "headless-restart: client=$CLIENT"
 
+# The successor is exec'd by name on PATH (XMonad.River.WM.restartTarget),
+# so the build under test goes first: a host with an X11 xmonad installed
+# would otherwise restart into that one.
 timeout 60 env \
+    PATH="$(dirname "$WM"):$PATH" \
     XDG_RUNTIME_DIR="$RT" \
     XMONAD_DATA_DIR="$DATA" \
     XMONAD_CONFIG_DIR="$DATA" \
