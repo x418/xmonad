@@ -259,13 +259,22 @@ transmitManage rt plan = do
     -- compositor focuses on map, so that is the only order clients have met.
     -- The keyboard stays where it is; the first dimensions event asks for the
     -- sequence that sends this ('XMonad.River.WM.Events.addWindow').
-    forM_ (M.elems seats) $ \s ->
-      unless (layerHasFocus (rsLayerFocus s)) $
-        case planFocus plan of
-          FocusWindow win | Just rw <- M.lookup win known ->
-            when (rwDimensions rw /= (0, 0)) $
-              riverSeatV1FocusWindow conn (rsObject s) win
-          _ -> riverSeatV1ClearFocus conn (rsObject s)
+    --
+    -- Sent when it differs from what this seat was last told: river keeps
+    -- the focus between sequences, and restating it every sequence for
+    -- every seat was the one request that never diffed.
+    lastFocus <- readIORef (rtLastFocus rt)
+    forM_ (liveSeats seats) $ \s ->
+      unless (layerHasFocus (rsLayerFocus s)) $ do
+        let target = case planFocus plan of
+              FocusWindow win | Just rw <- M.lookup win known, rwDimensions rw /= (0, 0) ->
+                FocusWindow win
+              _ -> ClearFocus
+        unless (M.lookup (rsObject s) lastFocus == Just target) $ do
+          case target of
+            FocusWindow win -> riverSeatV1FocusWindow conn (rsObject s) win
+            ClearFocus -> riverSeatV1ClearFocus conn (rsObject s)
+          modifyIORef' (rtLastFocus rt) (M.insert (rsObject s) target)
   where
     conn = rtConn rt
     sh = rtShared rt

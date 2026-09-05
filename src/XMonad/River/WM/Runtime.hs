@@ -37,7 +37,7 @@ import qualified Data.Set as S
 import XMonad.Core
 import XMonad.River.Connection (Connection, Global)
 import qualified XMonad.River.Mailbox as MB
-import XMonad.River.Plan (Border)
+import XMonad.River.Plan (Border, FocusTarget)
 import XMonad.River.Protocol.WindowManagement
 import XMonad.River.State (InputCapture(..), Shared(..))
 import XMonad.River.Types
@@ -146,6 +146,10 @@ data Runtime = Runtime
     -- leaves it, so the next order with a new node in that slot is sent.
   , rtLastOverlayPos :: !(IORef (M.Map ObjectId (Position, Position)))
     -- ^ Where each listed overlay was last put.
+  , rtLastFocus      :: !(IORef (M.Map ObjectId FocusTarget))
+    -- ^ Per seat, the focus last sent.  Forgotten for a seat whose keyboard
+    -- went to a layer surface and came back, and for a reaped window's
+    -- target, so the next sequence restates it.
   , rtLastRendered   :: !(IORef RenderInput)
     -- ^ What the last render sequence was given.  A render sequence given
     -- the same again -- river starts one whenever a client changes its own

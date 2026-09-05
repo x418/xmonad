@@ -25,7 +25,7 @@ import XMonad.Operations (focus, mouseMoveWindow)
 import XMonad.River (mouseResizeWindowEdges)
 import XMonad.River.Connection
 import XMonad.River.Ops (emitOp)
-import XMonad.River.Plan (Op(..))
+import XMonad.River.Plan (FocusTarget(..), Op(..))
 import XMonad.River.Protocol.Core
 import XMonad.River.Protocol.LayerShell
 import XMonad.River.Protocol.WindowManagement
@@ -145,8 +145,12 @@ addSeat rt seat = do
       case ev of
         RiverLayerShellSeatV1FocusExclusive    -> set LayerFocusExclusive
         RiverLayerShellSeatV1FocusNonExclusive -> set LayerFocusNonExclusive
-        RiverLayerShellSeatV1FocusNone         -> set LayerFocusNone
-        _ -> pure ()
+        -- The keyboard is back from the layer surface with whatever focus
+        -- river left it; what was last sent no longer describes it.
+        RiverLayerShellSeatV1FocusNone         -> do
+          set LayerFocusNone
+          modifyIORef' (rtLastFocus rt) (M.delete seat)
+        RiverLayerShellSeatV1Unknown{} -> pure ()
     pure ls
 
   -- The object @ensure_next_key_eaten@ is requested on.  Once per seat (twice
@@ -244,6 +248,7 @@ reapObjects rt = do
     modifyIORef' (rtLastManage rt) (M.delete (rwObject w))
     modifyIORef' (rtLastRender rt) (M.delete (rwObject w))
     modifyIORef' (rtLastStack rt) (filter (/= rwNode w))
+    modifyIORef' (rtLastFocus rt) (M.filter (/= FocusWindow (rwObject w)))
     atomicModifyIORef' (shHovered sh) (\h -> (if h == Just (rwObject w) then Nothing else h, ()))
 
   let outRef = shOutputs sh
@@ -263,6 +268,7 @@ reapObjects rt = do
     riverSeatV1Destroy conn (rsObject s)
     modifyIORef' seatRef (M.delete (rsObject s))
     modifyIORef' (rtBoundSeats rt) (S.delete (rsObject s))
+    modifyIORef' (rtLastFocus rt) (M.delete (rsObject s))
   where
     conn = rtConn rt
     sh = rtShared rt
