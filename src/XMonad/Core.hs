@@ -876,9 +876,14 @@ compile dirs method =
     cwd :: FilePath
     cwd = cfgDir dirs
 
+    -- @-threaded@: the river backend's loop and worker are two OS-level
+    -- threads (safe FFI in "XMonad.River.Xkb", 'throwTo' for restart and
+    -- panic, 'xfork'); the non-threaded runtime serialises them behind one
+    -- blocking foreign call.
     ghcArgs :: [String]
     ghcArgs = [ "--make"
               , "xmonad.hs"
+              , "-threaded"
               , "-i" -- only look in @lib@
               , "-ilib"
               , "-fforce-recomp"
