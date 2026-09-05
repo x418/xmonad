@@ -54,7 +54,7 @@ import XMonad.River.Protocol.LayerShell
 import XMonad.River.Protocol.WindowManagement
 import XMonad.River.Protocol.XkbBindings
 import XMonad.River.Runtime (RestartRequested(..), exitLoopWith, sendRestart, setMainThread)
-import XMonad.River.State (Display'(..), RiverState(..), nowOpsPending, takeNowOps)
+import XMonad.River.State
 import XMonad.River.Types
 import XMonad.River.WM.Events
 import XMonad.River.WM.Input (InputRuntime, bindInput, installInputConfig, setKeyboardLayout, setKeymap)
@@ -104,67 +104,86 @@ run :: Connection -> ObjectId -> M.Map Word32 Global -> ObjectId -> ObjectId -> 
     -> Maybe ObjectId -> Maybe ObjectId -> Maybe ObjectId -> [Global] -> XConfig Layout
     -> Directories -> IO ()
 run conn registry named manager bindings bindingsVer layerShell compositor shm globals userConfig dirs = do
-  rs <- do
+  sh <- do
     windowsRef  <- newIORef M.empty
     outputsRef  <- newIORef M.empty
     seatsRef    <- newIORef M.empty
+    hovered     <- newIORef Nothing
+    kbLayout    <- newIORef Nothing
     dirtyVar    <- newTVarIO False
-    manageRef   <- newIORef False
-    restartRef  <- newIORef Nothing
     mailbox     <- MB.newMailbox
     loopJobs    <- MB.newMailbox
-    placeRef    <- newIORef []
+    nowOps      <- newTVarIO []
+    plan        <- newTVarIO emptyPlan
+    seqDone     <- newTVarIO 0
+    ops         <- newIORef []
+    captureRef  <- newIORef Nothing
     extraKeys   <- newIORef (0, [])
-    restackRef  <- newIORef []
     overlayRef  <- newIORef []
     overlayPos  <- newIORef M.empty
-    captureRef  <- newIORef Nothing
+    restartRef  <- newIORef Nothing
+    moved       <- newIORef False
+    pure Shared
+      { shManager        = manager
+      , shBindings       = bindings
+      , shXkbVersion     = bindingsVer
+      , shBorderWidth    = borderWidth userConfig
+      , shCompositor     = compositor
+      , shShm            = shm
+      , shLayerShell     = layerShell
+      , shWindows        = windowsRef
+      , shOutputs        = outputsRef
+      , shSeats          = seatsRef
+      , shHovered        = hovered
+      , shKeyboardLayout = kbLayout
+      , shDirty          = dirtyVar
+      , shMailbox        = mailbox
+      , shLoopJobs       = loopJobs
+      , shNowOps         = nowOps
+      , shPlan           = plan
+      , shSeqDone        = seqDone
+      , shOps            = ops
+      , shCapture        = captureRef
+      , shExtraKeys      = extraKeys
+      , shOverlays       = overlayRef
+      , shOverlayPos     = overlayPos
+      , shRestart        = restartRef
+      , shLayoutMoved    = moved
+      }
+  wstate <- do
+    manageRef   <- newIORef False
+    placeRef    <- newIORef []
+    geometry    <- newIORef M.empty
+    restackRef  <- newIORef []
     dragOrigin  <- newIORef (0, 0)
     afterLayout <- newIORef []
-    geometry    <- newIORef M.empty
+    unsized     <- newIORef S.empty
     -- True from the start: the initial set has never been announced, and
     -- X11's launch ran 'windows' once for that reason.  A bar that only
     -- learns the workspaces from the log hook would otherwise show nothing
     -- until the first window changed the set.
     logDue      <- newIORef True
-    unsized     <- newIORef S.empty
     borders     <- newIORef M.empty
     submapGen   <- newIORef 0
-    ops         <- newIORef []
-    nowOps      <- newTVarIO []
-    kbLayout    <- newIORef Nothing
-    pure RiverState
-      { riverManager     = manager
-      , riverBindings    = bindings
-      , riverXkbVersion  = bindingsVer
-      , riverBorderWidth = borderWidth userConfig
-      , riverCompositor  = compositor
-      , riverShm         = shm
-      , riverWindows     = windowsRef
-      , riverOutputs     = outputsRef
-      , riverSeats       = seatsRef
-      , riverDirty       = dirtyVar
-      , inManageSeq      = manageRef
-      , riverRestart     = restartRef
-      , riverMailbox     = mailbox
-      , riverLoopJobs    = loopJobs
-      , riverPlacements  = placeRef
-      , riverExtraKeys   = extraKeys
-      , riverRestack     = restackRef
-      , riverOverlays    = overlayRef
-      , riverOverlayPos  = overlayPos
-      , riverCapture     = captureRef
-      , riverDragOrigin  = dragOrigin
-      , riverAfterLayout = afterLayout
-      , riverGeometry    = geometry
-      , riverUnsized     = unsized
-      , riverLogDue      = logDue
-      , riverBorders     = borders
-      , riverSubmapGen   = submapGen
-      , riverOps         = ops
-      , riverNowOps      = nowOps
-      , riverKeyboardLayout = kbLayout
+    adopted     <- newIORef S.empty
+    restored    <- newIORef False
+    floatSizes  <- newIORef M.empty
+    pure WorkerState
+      { wsInManageSeq = manageRef
+      , wsPlacements  = placeRef
+      , wsGeometry    = geometry
+      , wsRestack     = restackRef
+      , wsDragOrigin  = dragOrigin
+      , wsAfterLayout = afterLayout
+      , wsUnsized     = unsized
+      , wsLogDue      = logDue
+      , wsBorders     = borders
+      , wsSubmapGen   = submapGen
+      , wsAdopted     = adopted
+      , wsRestored    = restored
+      , wsFloatSizes  = floatSizes
       }
+  let rs = RiverState sh wstate
 
   when (null (workspaces userConfig)) $ hPutStrLn stderr
     "xmonad-river: the config has no workspaces; using a single one named \"1\""
@@ -253,7 +272,6 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm g
       pure (listToMaybe [ wl | o <- M.elems outs, not (roRemoved o)
                              , roName o == Just name, Just wl <- [roWlOutput o] ]))
 
-  sh <- Shared <$> newTVarIO emptyPlan <*> newTVarIO 0
   rt <- do
     pending    <- newIORef []
     dirtySent  <- newIORef False
@@ -272,7 +290,6 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm g
     armed      <- newIORef []
     armedGen   <- newIORef 0
     disarm     <- newIORef False
-    hovered    <- newIORef Nothing
     layerDef   <- newIORef Nothing
     startup    <- newIORef False
     modWatcher <- newIORef Nothing
@@ -285,27 +302,20 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm g
     lastStack  <- newIORef []
     lastOvPos  <- newIORef M.empty
     lastGiven  <- newIORef (-1, -1, [], M.empty)
-    adopted    <- newIORef S.empty
-    restored   <- newIORef False
-    floatSizes <- newIORef M.empty
-    moved      <- newIORef False
     pure Runtime
       { rtConn = conn
       , rtRegistry = registry
       , rtManager = manager
       , rtBindingsGlobal = bindings
       , rtXkbVersion = bindingsVer
-      , rtLayerShell = layerShell
       , rtInput = input
       , rtFollowsMouse = focusFollowsMouse userConfig
       , rtKeyActions = keyActions xconf
       , rtButtonActions = buttonActions xconf
       , rtSubmit = submit
-      , rtState = rs
       , rtShared = sh
       , rtPending = pending
       , rtDirtySent = dirtySent
-      , rtJobs = riverLoopJobs rs
       , rtSeqNo = seqNo
       , rtSent = sent
       , rtAsked = asked
@@ -321,7 +331,6 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm g
       , rtArmed = armed
       , rtArmedGen = armedGen
       , rtDisarm = disarm
-      , rtHovered = hovered
       , rtLayerDefault = layerDef
       , rtStartupSent = startup
       , rtModWatcher = modWatcher
@@ -334,10 +343,6 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm g
       , rtLastStack = lastStack
       , rtLastOverlayPos = lastOvPos
       , rtLastRendered = lastGiven
-      , rtAdopted = adopted
-      , rtRestored = restored
-      , rtFloatSizes = floatSizes
-      , rtLayoutMoved = moved
       }
 
   riverWindowManagerV1Listen conn manager (onManagerEvent rt)
@@ -369,13 +374,13 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm g
       -- a plan that landed after its sequence was answered.
       signals sent asked =
                 MB.awaitMail mailbox
-        `orElse` MB.awaitMail (rtJobs rt)
+        `orElse` MB.awaitMail (shLoopJobs sh)
         `orElse` (readTVar (riverDirty rs) >>= check)
         `orElse` nowOpsPending rs
         `orElse` (readTVar (shPlan sh) >>= \p -> check (planSerial p > max sent asked))
       loop = do
         MB.drain mailbox >>= queueActions rt
-        MB.drain (rtJobs rt) >>= sequence_
+        MB.drain (shLoopJobs sh) >>= sequence_
         dirty <- atomically (swapTVar (riverDirty rs) False)
         sent <- readIORef (rtSent rt)
         asked <- readIORef (rtAsked rt)
@@ -425,8 +430,9 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm g
       onWayland e = do
         hPutStrLn stderr ("xmonad-river: the connection to river is gone: " ++ show e)
         Ctl.answerRestart (Ctl.Refused "the connection to river is gone")
+        -- The worker's own sequence bookkeeping is its own: manageSequence
+        -- lowers its flag on the way out, kill included.
         void . timeout restartGraceMicros $ readIORef workerRef >>= killThread
-        writeIORef (inManageSeq rs) False
         runX' writeStateToFile `catch` \(_ :: SomeException) -> pure ()
         exitWith (ExitFailure 1)
   let onRestart = do
@@ -457,7 +463,6 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm g
               -- between here and river's @finished@ are still answered with
               -- a plan rather than by a loop with nobody behind it.
               readIORef workerRef >>= killThread
-              writeIORef (inManageSeq rs) False
               runX' writeStateToFile
               spawnWorker
             atomicWriteIORef (riverRestart rs) (Just (exe, args))
@@ -497,7 +502,7 @@ sendNow rt = \case
   OpExitSession -> riverWindowManagerV1ExitSession conn (rtManager rt)
   OpStop -> riverWindowManagerV1Stop conn (rtManager rt)
   OpSetXcursorTheme s name size -> do
-    seats <- readIORef (riverSeats (rtState rt))
+    seats <- readIORef (shSeats (rtShared rt))
     when (M.member s seats) $ riverSeatV1SetXcursorTheme conn s name size
   OpInstallInputConfig cfg -> installInputConfig (rtInput rt) cfg
   OpKeyboardLayout req -> setKeyboardLayout (rtInput rt) req
@@ -528,14 +533,14 @@ onManagerEvent rt = \case
     exitFailure
   -- river has released this window manager; a successor may connect.  Exec'd
   -- in place, with no shell in between, which is what makes M-q a restart.
-  RiverWindowManagerV1Finished -> readIORef (riverRestart rs) >>= \case
+  RiverWindowManagerV1Finished -> readIORef (shRestart sh) >>= \case
     Nothing  -> exitSuccess
     Just (prog, as) -> executeFile prog True as Nothing
   RiverWindowManagerV1ManageStart -> do
     writeIORef (rtDirtySent rt) False
     n <- atomicModifyIORef' (rtSeqNo rt) (\k -> (k + 1, k + 1))
     acts <- atomicModifyIORef' (rtPending rt) (\as -> ([], reverse as))
-    rtSubmit rt (manageSequence rt n acts)
+    rtSubmit rt (manageSequence n acts)
     -- Bounded: an action that finishes in time has its result in this
     -- sequence; one that overruns leaves the sequence to be answered with the
     -- plan in hand, and its own plan is transmitted when it lands (see the
@@ -576,13 +581,13 @@ onManagerEvent rt = \case
   RiverWindowManagerV1Unknown{} -> pure ()
   where
     conn = rtConn rt
-    rs = rtState rt
+    sh = rtShared rt
 
 -- | Wait, briefly, for the worker to finish the given manage sequence.
 --
 -- The bound is what makes the thread split safe: river holds every input
 -- event for the seat until the sequence is answered.
-awaitPlan :: Shared -> Int -> Int -> IO Bool
+awaitPlan :: Shared X -> Int -> Int -> IO Bool
 awaitPlan sh wanted micros = do
   -- The common case, a worker already done, registers no timer.
   done <- readTVarIO (shSeqDone sh)

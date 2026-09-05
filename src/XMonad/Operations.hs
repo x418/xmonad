@@ -64,7 +64,7 @@ module XMonad.Operations (
 import XMonad.Core
 import XMonad.River.Ops (emitNow, emitOp)
 import XMonad.River.Plan (Op(..))
-import XMonad.River.State (RiverState(..), overrideBorderColor, updatePlacement)
+import XMonad.River.State
 import XMonad.River.Types
 import XMonad.River.Protocol.WindowManagement
 import qualified XMonad.StackSet as W

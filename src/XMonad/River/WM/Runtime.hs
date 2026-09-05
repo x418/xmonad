@@ -8,8 +8,8 @@
 -- The compositor's view -- windows, outputs, seats -- lives in 'RiverState',
 -- written by the loop and read by both.
 module XMonad.River.WM.Runtime
-  ( Shared(..)
-  , Runtime(..)
+  ( Runtime(..)
+  , Shared(..)
   , queueAction
   , queueActions
   , claimCapture
@@ -22,7 +22,6 @@ module XMonad.River.WM.Runtime
   , linuxButton
   ) where
 
-import Control.Concurrent.STM (TVar)
 import Control.Monad.Reader (asks)
 import Data.IORef
 import Data.Int (Int32)
@@ -34,22 +33,14 @@ import qualified Data.Set as S
 import XMonad.Core
 import XMonad.River.Connection (Connection, Global)
 import qualified XMonad.River.Mailbox as MB
-import XMonad.River.Plan (Plan)
 import XMonad.River.Protocol.WindowManagement
-import XMonad.River.State (InputCapture(..), RiverState(..))
+import XMonad.River.State (InputCapture(..), Shared(..))
 import XMonad.River.Types
 import XMonad.River.WM.Input (InputRuntime)
 import XMonad.River.Wire (ObjectId)
 import qualified XMonad.StackSet as W
 
 -- | What the worker publishes and the loop waits on.  Worker-written only.
-data Shared = Shared
-  { shPlan    :: !(TVar Plan)
-    -- ^ The last plan the layout produced.  'planSerial' is monotonic.
-  , shSeqDone :: !(TVar Int)
-    -- ^ The highest manage-sequence number the worker has finished.
-  }
-
 -- | The loop's state.  Each field has one writing thread; the comment says
 -- which when it is not the loop.
 data Runtime = Runtime
@@ -61,7 +52,6 @@ data Runtime = Runtime
   , rtXkbVersion     :: !Word32
     -- ^ Negotiated @river_xkb_bindings_v1@ version; @get_seat@ and
     -- @ensure_next_key_eaten@ arrived in 2.
-  , rtLayerShell     :: !(Maybe ObjectId)
   , rtInput          :: !InputRuntime
     -- ^ Input devices and their configuration; loop only, see
     -- "XMonad.River.WM.Input".
@@ -70,9 +60,10 @@ data Runtime = Runtime
   , rtButtonActions  :: !(M.Map (KeyMask, Button) (Window -> X ()))
   , rtSubmit         :: !(X () -> IO ())
     -- ^ Hand an action to the worker.
-    -- shared with the X monad
-  , rtState          :: !(RiverState X)
-  , rtShared         :: !Shared
+  , rtShared         :: !(Shared X)
+    -- ^ What the worker sees too.  The worker's own state is not here: the
+    -- loop holds 'X' actions but never evaluates one, and cannot name what
+    -- only they may touch.
     -- loop only
   , rtPending        :: !(IORef [X ()])
     -- ^ Binding actions awaiting the next manage sequence, newest first.
@@ -80,8 +71,6 @@ data Runtime = Runtime
     -- ^ A @manage_dirty@ has gone out and its @manage_start@ has not yet
     -- arrived.  One request per wait: river starts one sequence for any
     -- number of them, and a second only adds a round trip.
-  , rtJobs           :: !(MB.Mailbox (IO ()))
-    -- ^ Work other threads want done on the loop.
   , rtSeqNo          :: !(IORef Int)
   , rtSent           :: !(IORef Int)
     -- ^ 'planSerial' of the last plan transmitted in a manage sequence.
@@ -113,7 +102,6 @@ data Runtime = Runtime
   , rtDisarm         :: !(IORef Bool)
     -- ^ A capture ended and its bindings are still installed; torn down in
     -- the next manage sequence, the only place @enable@ is legal.
-  , rtHovered        :: !(IORef (Maybe Window))
   , rtLayerDefault   :: !(IORef (Maybe ObjectId))
     -- ^ The output last nominated for layer surfaces that name none.
   , rtStartupSent    :: !(IORef Bool)
@@ -151,16 +139,6 @@ data Runtime = Runtime
     -- overlays and their positions.  A render sequence given the same again
     -- -- river starts one whenever a client changes its own size -- sends
     -- nothing.
-    -- worker only
-  , rtAdopted        :: !(IORef (S.Set Window))
-    -- ^ Windows the manage hook has run for.
-  , rtRestored       :: !(IORef Bool)
-  , rtFloatSizes     :: !(IORef (M.Map Window (Int32, Int32)))
-    -- ^ Each float's size as last seen, so a size the client changed itself
-    -- can be told from one this side proposed and is waiting on.
-  , rtLayoutMoved    :: !(IORef Bool)
-    -- ^ The last layout pass moved a window.  Worker writes, loop takes; the
-    -- next @pointer_enter@ is then the layout's doing, not the pointer's.
   }
 
 -- | Queue an action for the next manage sequence.  Loop thread only.
@@ -182,7 +160,7 @@ queueActions rt acts = modifyIORef' (rtPending rt) (reverse acts ++)
 -- | Take the open capture if it is the one of the given generation, leaving
 -- it otherwise.  Whoever takes it owns its teardown.  Loop thread only.
 claimCapture :: Runtime -> Int -> IO (Maybe (InputCapture X))
-claimCapture rt gen = atomicModifyIORef' (riverCapture (rtState rt)) $ \case
+claimCapture rt gen = atomicModifyIORef' (shCapture (rtShared rt)) $ \case
   Just cap | icGeneration cap == gen -> (Nothing, Just cap)
   other -> (other, Nothing)
 

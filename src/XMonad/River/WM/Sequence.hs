@@ -33,46 +33,55 @@ import XMonad.Operations (floatLocation, getCleanedScreenInfo, isFixedSizeOrTran
 import XMonad.River.Ops (emitOp)
 import XMonad.River.Plan
 import XMonad.River.Protocol.WindowManagement (riverWindowV1CapabilitiesFullscreen)
-import XMonad.River.State (RiverState(..), forgetBorderOverride)
+import XMonad.River.State
 import XMonad.River.Types
-import XMonad.River.WM.Runtime
+import XMonad.River.WM.Runtime (broadcastEvent, screensOf)
+import XMonad.River.Wire (ObjectId)
 import qualified XMonad.StackSet as W
 
-manageSequence :: Runtime -> Int -> [X ()] -> X ()
-manageSequence rt n acts = do
+-- | The worker cannot name the loop's state: this takes the sequence number
+-- and the actions, and everything else comes through 'riverState'.
+manageSequence :: Int -> [X ()] -> X ()
+manageSequence n acts = do
   c <- ask
   st <- get
-  let inSeq = inManageSeq (rtState rt)
+  rs <- asks riverState
+  let inSeq = inManageSeq rs
       -- Whatever becomes of the body, the flag comes down and the loop is
       -- told the sequence is over.  An asynchronous exception -- the worker
       -- being killed -- would otherwise leave every later 'windows' believing
       -- it is inside a sequence, and never asking for one.
       finished = do
         writeIORef inSeq False
-        atomically (modifyTVar' (shSeqDone (rtShared rt)) (max n))
+        atomically (modifyTVar' (shSeqDone (rsShared rs)) (max n))
   io (writeIORef inSeq True)
   (_, st') <- io (runX c st (body `catchX` pure ()) `finally` finished)
   put st'
   where
     body = do
+      rs <- asks riverState
       before <- gets windowset
-      restoreState rt
-      reapClosed rt
+      restoreState
+      reapClosed
       syncScreens
-      nominateLayerOutput rt
-      adoptNewWindows rt
-      settleFloats rt
+      layerDefault <- nominateLayerOutput
+      adoptNewWindows
+      settleFloats
       mapM_ userCode acts
       -- Before every output's usable area is known the layout would cover
       -- the bar and be undone a sequence later, resizing every window twice;
-      -- river follows the area with a sequence of its own.
-      ready <- areasKnown rt
-      when ready (applyLayout rt)
+      -- river follows the area with a sequence of its own.  The plan is
+      -- written once either way.
+      ready <- areasKnown
+      if ready
+        then applyLayout layerDefault
+        else io $ atomically $ modifyTVar' (shPlan (rsShared rs)) $ \p ->
+               p { planLayerDefault = layerDefault }
       -- The log hook, once: for every 'windows' the actions ran, which X11
       -- ran it after each of, and for a set that changed on its own -- a
       -- window opening or closing, a restore, a rescreen.
       after <- gets windowset
-      let logDue = riverLogDue (rtState rt)
+      let logDue = riverLogDue rs
       due <- io (readIORef logDue)
       io (writeIORef logDue False)
       when (due || not (sameWindows before after)) $
@@ -80,11 +89,11 @@ manageSequence rt n acts = do
 
 -- | Every live output has reported its @non_exclusive_area@, or there is no
 -- layer shell to report one.
-areasKnown :: Runtime -> X Bool
-areasKnown rt = case rtLayerShell rt of
+areasKnown :: X Bool
+areasKnown = asks (rsShared . riverState) >>= \sh -> case shLayerShell sh of
   Nothing -> pure True
   Just _ -> do
-    outs <- io (readIORef (riverOutputs (rtState rt)))
+    outs <- io (readIORef (shOutputs sh))
     pure $ and [ roLayerArea o /= Nothing
                | o <- M.elems outs, not (roRemoved o)
                , let (w, h) = roSize o, w > 0 && h > 0 ]
@@ -103,11 +112,12 @@ sameWindows a b =
 -- file.  First in the first sequence and never again: river sends every
 -- existing window, identifier included, before the first @manage_start@, so
 -- that is the earliest the file's identifiers can be resolved.
-restoreState :: Runtime -> X ()
-restoreState rt = do
-  done <- io (readIORef (rtRestored rt))
+restoreState :: X ()
+restoreState = do
+  restored <- asks (wsRestored . rsWorker . riverState)
+  done <- io (readIORef restored)
   unless done $ do
-    io (writeIORef (rtRestored rt) True)
+    io (writeIORef restored True)
     path <- asks (stateFileName . directories)
     exists <- io (doesFileExist path)
     -- readStateFile parses once and notes how many windows resolved.
@@ -120,12 +130,13 @@ restoreState rt = do
 
 -- | Drop what river has closed from the 'WindowSet', and tell the config.
 -- The objects are destroyed by 'reapObjects' on the loop, afterwards.
-reapClosed :: Runtime -> X ()
-reapClosed rt = do
+reapClosed :: X ()
+reapClosed = do
+  rs <- asks riverState
   ws <- io (readIORef (riverWindows rs))
   forM_ [ w | w <- M.elems ws, rwClosed w ] $ \w -> do
     modify $ \st -> st { windowset = W.delete (rwObject w) (windowset st) }
-    io $ modifyIORef' (rtAdopted rt) (S.delete (rwObject w))
+    io $ modifyIORef' (wsAdopted (rsWorker rs)) (S.delete (rwObject w))
     io $ modifyIORef' (riverUnsized rs) (S.delete (rwObject w))
     -- river recycles ids; an override left behind would land on an
     -- unrelated window.
@@ -141,7 +152,6 @@ reapClosed rt = do
   -- A drag's @op_release@ never arrives once its seat is gone; end it here
   -- or every later drag is ignored.
   unless (null gone) $ gets dragging >>= mapM_ snd
-  where rs = rtState rt
 
 -- | Nominate the output layer surfaces that name none go to: the one under
 -- the current screen, so a launcher opens where the work is.  Matched by
@@ -149,10 +159,13 @@ reapClosed rt = do
 -- whose area contains the screen's origin.  Containment rather than
 -- equality, because the screen rectangle is the layer shell's usable area
 -- when there is one, and a bar on the left or top edge moves its origin off
--- the output's.
-nominateLayerOutput :: Runtime -> X ()
-nominateLayerOutput rt = forM_ (rtLayerShell rt) $ \_ -> do
-  outs <- io (readIORef (riverOutputs (rtState rt)))
+-- the output's.  Returns the choice; 'applyLayout' publishes it with the
+-- rest of the plan.
+nominateLayerOutput :: X (Maybe (ObjectId, Maybe ObjectId))
+nominateLayerOutput = asks (rsShared . riverState) >>= \sh -> case shLayerShell sh of
+ Nothing -> pure Nothing
+ Just _ -> do
+  outs <- io (readIORef (shOutputs sh))
   ws <- gets windowset
   let SD current = W.screenDetail (W.current ws)
       live = filter (not . roRemoved) (M.elems outs)
@@ -167,8 +180,7 @@ nominateLayerOutput rt = forM_ (rtLayerShell rt) $ \_ -> do
         []    -> case sortOn roPosition live of
           (o:_) -> Just o
           []    -> Nothing
-  io $ atomically $ modifyTVar' (shPlan (rtShared rt)) $ \p ->
-    p { planLayerDefault = (\o -> (roObject o, roLayerObject o)) <$> chosen }
+  pure ((\o -> (roObject o, roLayerObject o)) <$> chosen)
 
 -- | Reconcile the 'WindowSet'\'s screens with river's outputs: xmonad's
 -- @rescreen@, driven by the output list.  Outputs are ordered by position so
@@ -220,16 +232,18 @@ rescreen rects ws = ws
 -- | Run the manage hook for windows river has told us about since the last
 -- sequence, and insert them.  Before the window has been rendered, which is
 -- the ordering guarantee xmonad's manage hook has always had.
-adoptNewWindows :: Runtime -> X ()
-adoptNewWindows rt = do
-  ws <- io (readIORef (riverWindows (rtState rt)))
-  adopted <- io (readIORef (rtAdopted rt))
+adoptNewWindows :: X ()
+adoptNewWindows = do
+  rs <- asks riverState
+  let adoptedRef = wsAdopted (rsWorker rs)
+  ws <- io (readIORef (riverWindows rs))
+  adopted <- io (readIORef adoptedRef)
   let fresh = [ w | w <- M.elems ws, not (rwClosed w)
                   , not (S.member (rwObject w) adopted) ]
   -- Once, not per window: a restart brings every window at once.
   managed <- gets (S.fromList . W.allWindows . windowset)
   forM_ fresh $ \w -> do
-    io $ modifyIORef' (rtAdopted rt) (S.insert (rwObject w))
+    io $ modifyIORef' adoptedRef (S.insert (rwObject w))
     -- river's default is CSD.  Asked before the manage hook, so a hook can
     -- override it; a CSD-only client ignores it, which river documents.
     emitOp (OpUseDecorations (rwObject w) True)
@@ -263,7 +277,7 @@ adoptNewWindows rt = do
             case M.lookup (rwObject w) (W.floating final) of
               Just (W.RationalRect _ _ fw' fh') -> (fw', fh') == (fw, fh)
               Nothing -> False
-      when unsized $ io $ modifyIORef' (riverUnsized (rtState rt)) (S.insert (rwObject w))
+      when unsized $ io $ modifyIORef' (riverUnsized rs) (S.insert (rwObject w))
       modify $ \st -> st { windowset = final }
       void (broadcastEvent (WindowAdded (rwObject w)))
 
@@ -272,8 +286,10 @@ adoptNewWindows rt = do
 -- window, in the sequence its first @dimensions@ event asks for
 -- ("XMonad.River.WM.Events"); a window sunk meanwhile is left alone.  Plain
 -- 'modify', not 'windows': floats are not the log hook's business.
-settleFloats :: Runtime -> X ()
-settleFloats rt = do
+settleFloats :: X ()
+settleFloats = do
+  rs <- asks riverState
+  let sizesRef = wsFloatSizes (rsWorker rs)
   pending <- io (readIORef (riverUnsized rs))
   known <- io (readIORef (riverWindows rs))
   forM_ (S.toList pending) $ \w -> forM_ (M.lookup w known) $ \rw ->
@@ -291,7 +307,7 @@ settleFloats rt = do
   -- this side proposed is the placement's already, and the client's report
   -- of it is not a change of mind.
   geometry <- io (readIORef (riverGeometry rs))
-  seen <- io (readIORef (rtFloatSizes rt))
+  seen <- io (readIORef sizesRef)
   floats <- gets (M.keys . W.floating . windowset)
   let sized = [ (w, rwDimensions rw) | w <- floats, Just rw <- [M.lookup w known]
               , rwDimensions rw /= (0, 0), not (S.member w pending) ]
@@ -302,9 +318,8 @@ settleFloats rt = do
           scr <- screenOf w
           let r' = r { rect_width = fromIntegral dw, rect_height = fromIntegral dh }
           modify $ \st -> st { windowset = W.float w (relativeRect (screenRect (W.screenDetail scr)) r') (windowset st) }
-  io (writeIORef (rtFloatSizes rt) (M.fromList sized))
+  io (writeIORef sizesRef (M.fromList sized))
   where
-    rs = rtState rt
     screenOf :: Window -> X (W.Screen WorkspaceId (Layout Window) Window ScreenId ScreenDetail)
     screenOf w = do
       ws <- gets windowset
@@ -330,8 +345,9 @@ runStartupHook = do
 -- | Run the layout for every visible screen and publish the result as a
 -- 'Plan'.  Floats are withheld from the layout and placed from the rectangles
 -- 'XMonad.Operations.float' recorded, first, which is upstream's order.
-applyLayout :: Runtime -> X ()
-applyLayout rt = do
+applyLayout :: Maybe (ObjectId, Maybe ObjectId) -> X ()
+applyLayout layerDefault = do
+  rs <- asks riverState
   ws <- gets windowset
   perScreen <- forM (screensOf ws) $ \scr -> do
     let wsp = W.workspace scr
@@ -341,10 +357,10 @@ applyLayout rt = do
         tiled = W.stack wsp >>= W.filter (`M.notMember` floats)
         flt = [ (fw, scaleRationalRect rect rr)
               | fw <- onWs, Just rr <- [M.lookup fw floats] ]
-    (rs, mLayout) <- userCodeDef ([], Nothing) (runLayout wsp { W.stack = tiled } rect)
+    (rects, mLayout) <- userCodeDef ([], Nothing) (runLayout wsp { W.stack = tiled } rect)
     forM_ mLayout $ \l' -> modify $ \st ->
       st { windowset = updateLayout (W.tag wsp) l' (windowset st) }
-    pure (flt ++ rs, map fst flt)
+    pure (flt ++ rects, map fst flt)
 
   let placements = concatMap fst perScreen
       floating = S.fromList (concatMap snd perScreen)
@@ -358,7 +374,7 @@ applyLayout rt = do
   bw <- asks (borderWidth . config)
   focusedCol <- asks focusedBorder
   normalCol <- asks normalBorder
-  overrides <- io (readIORef (riverBorders (rtState rt)))
+  overrides <- io (readIORef (riverBorders rs))
   let borders = M.fromList
         [ (win, (fromMaybe bw mWidth, rgba))
         | (win, _) <- placements
@@ -379,16 +395,17 @@ applyLayout rt = do
 
   placeRef <- asks (riverPlacements . riverState)
   old <- io (readIORef placeRef)
-  io (atomicWriteIORef (rtLayoutMoved rt) (old /= placements))
+  io (atomicWriteIORef (shLayoutMoved (rsShared rs)) (old /= placements))
   io (atomicWriteIORef placeRef placements)
   -- What 'getWindowAttributes' answers from; the attributes themselves are
   -- built when asked, in "XMonad.Core".  Forced: a map left as a thunk
   -- keeps the previous pass alive until somebody reads it.
-  io (atomicWriteIORef (riverGeometry (rtState rt)) $! placedMap)
+  io (atomicWriteIORef (riverGeometry rs) $! placedMap)
 
-  unsized <- io (readIORef (riverUnsized (rtState rt)))
-  io $ atomically $ modifyTVar' (shPlan (rtShared rt)) $ \p -> p
+  unsized <- io (readIORef (riverUnsized rs))
+  io $ atomically $ modifyTVar' (shPlan (rsShared rs)) $ \p -> p
     { planSerial     = planSerial p + 1
+    , planLayerDefault = layerDefault
     , planPlacements = placements
     , planFloating   = floating
     , planUnsized    = S.filter (`S.member` floating) unsized

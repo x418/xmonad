@@ -51,7 +51,7 @@ import XMonad.River.Wire (decodeUtf8)
 import qualified Data.Map as M
 
 import XMonad.Core
-import XMonad.River.State (RiverState(..))
+import XMonad.River.State (riverWindows)
 import XMonad.River.Types
 import XMonad.Operations (floatLocation, isFixedSizeOrTransient, reveal)
 import qualified XMonad.StackSet as W

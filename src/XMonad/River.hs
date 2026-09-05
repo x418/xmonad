@@ -196,7 +196,7 @@ import XMonad.River.Ops (emitNow, emitOp)
 import XMonad.River.Plan (KeyboardLayoutRequest(..), Op(..))
 import XMonad.River.Runtime (RestartRequested(..), setMainThread, warnUnimplemented)
 import XMonad.River.Types
-import XMonad.River.State (Display'(..), InputCapture(..), RiverState(..), clearBorderColor, updatePlacement)
+import XMonad.River.State
 import XMonad.River.Wire (decodeUtf8, encodeUtf8)
 import qualified XMonad.River.Xkb as Xkb
 import XMonad.River.Xkb (compileKeymap)

@@ -30,7 +30,7 @@ import XMonad.River.Protocol.Core
 import XMonad.River.Protocol.LayerShell
 import XMonad.River.Protocol.WindowManagement
 import XMonad.River.Protocol.XkbBindings
-import XMonad.River.State (InputCapture(..), RiverState(..))
+import XMonad.River.State (InputCapture(..), Shared(..), riverDragOrigin)
 import XMonad.River.Types
 import XMonad.River.WM.Input (outputsChanged)
 import XMonad.River.WM.Runtime
@@ -46,7 +46,7 @@ import qualified XMonad.StackSet as W
 addWindow :: Runtime -> ObjectId -> IO ()
 addWindow rt win = do
   node <- riverWindowV1GetNode conn win
-  let ref = riverWindows (rtState rt)
+  let ref = shWindows (rtShared rt)
   modifyIORef' (rtWindowsGen rt) (+ 1)
   modifyIORef' ref $ M.insert win RiverWindow
     { rwObject = win, rwNode = node
@@ -72,7 +72,7 @@ addWindow rt win = do
     RiverWindowV1Dimensions width height -> do
       first <- (== Just (0, 0)) . fmap rwDimensions . M.lookup win <$> readIORef ref
       adjust ref win $ \w -> w { rwDimensions = (width, height) }
-      when first $ atomically (writeTVar (riverDirty (rtState rt)) True)
+      when first $ atomically (writeTVar (shDirty (rtShared rt)) True)
     -- A bound of zero or less means the window did not state one.
     RiverWindowV1DimensionsHint minW minH maxW maxH ->
       adjust ref win $ \w -> w { rwSizeHints = SizeHints
@@ -99,15 +99,15 @@ addWindow rt win = do
 
 addOutput :: Runtime -> ObjectId -> IO ()
 addOutput rt out = do
-  let ref = riverOutputs (rtState rt)
-  mLayer <- forM (rtLayerShell rt) $ \shell -> do
+  let ref = shOutputs (rtShared rt)
+  mLayer <- forM (shLayerShell (rtShared rt)) $ \shell -> do
     lo <- riverLayerShellV1GetOutput conn shell out
     riverLayerShellOutputV1Listen conn lo $ \case
       RiverLayerShellOutputV1NonExclusiveArea x y width height -> do
         adjust ref out $ \o -> o { roLayerArea = Just (Rectangle x y
           (fromIntegral width) (fromIntegral height)) }
         -- river follows this with a manage_start; asked for anyway.
-        atomically (writeTVar (riverDirty (rtState rt)) True)
+        atomically (writeTVar (shDirty (rtShared rt)) True)
       _ -> pure ()
     pure lo
   modifyIORef' ref $ M.insert out RiverOutput
@@ -137,8 +137,8 @@ addOutput rt out = do
 
 addSeat :: Runtime -> ObjectId -> IO ()
 addSeat rt seat = do
-  let ref = riverSeats rs
-  mLayer <- forM (rtLayerShell rt) $ \shell -> do
+  let ref = shSeats sh
+  mLayer <- forM (shLayerShell (rtShared rt)) $ \shell -> do
     ls <- riverLayerShellV1GetSeat conn shell seat
     riverLayerShellSeatV1Listen conn ls $ \ev -> do
       let set f = adjust ref seat $ \s -> s { rsLayerFocus = f }
@@ -187,19 +187,19 @@ addSeat rt seat = do
     -- layout's doing -- Magnifier enlarging the focused window would
     -- otherwise refocus its displaced neighbour, forever.
     RiverSeatV1PointerEnter win -> do
-      writeIORef (rtHovered rt) (Just win)
-      byLayout <- atomicModifyIORef' (rtLayoutMoved rt) (\m -> (False, m))
+      atomicWriteIORef (shHovered sh) (Just win)
+      byLayout <- atomicModifyIORef' (shLayoutMoved sh) (\m -> (False, m))
       when (rtFollowsMouse rt && not byLayout) $ queueAction rt $ do
         -- Runs a sequence later: the pointer may have moved on, a drag owns
         -- the focus, and a window on a hidden workspace cannot really be
         -- entered (a restart shows every window until the successor's first
         -- sequence hides them).
-        stillThere <- io ((== Just win) <$> readIORef (rtHovered rt))
+        stillThere <- io ((== Just win) <$> readIORef (shHovered sh))
         drag <- gets dragging
         onScreen <- gets (elem win . concatMap (W.integrate' . W.stack . W.workspace)
                             . screensOf . windowset)
         when (stillThere && isNothing drag && onScreen) (focus win)
-    RiverSeatV1PointerLeave -> writeIORef (rtHovered rt) Nothing
+    RiverSeatV1PointerLeave -> atomicWriteIORef (shHovered sh) Nothing
     -- A click, or a touch or tablet tool, on a window: X11's ButtonPress on an
     -- unfocused client.  Focus follows it whatever 'focusFollowsMouse' says.
     RiverSeatV1WindowInteraction win -> queueAction rt (focus win)
@@ -225,7 +225,7 @@ addSeat rt seat = do
     _ -> pure ()
   where
     conn = rtConn rt
-    rs = rtState rt
+    sh = rtShared rt
 
 -- | Destroy the protocol objects for everything river has closed.
 --
@@ -233,15 +233,15 @@ addSeat rt seat = do
 -- before a plan is transmitted, so that transmitting filters them out.
 reapObjects :: Runtime -> IO ()
 reapObjects rt = do
-  let winRef = riverWindows rs
+  let winRef = shWindows sh
   ws <- readIORef winRef
   forM_ [ w | w <- M.elems ws, rwClosed w ] $ \w -> do
     riverNodeV1Destroy conn (rwNode w)
     riverWindowV1Destroy conn (rwObject w)
     modifyIORef' winRef (M.delete (rwObject w))
-    modifyIORef' (rtHovered rt) (\h -> if h == Just (rwObject w) then Nothing else h)
+    atomicModifyIORef' (shHovered sh) (\h -> (if h == Just (rwObject w) then Nothing else h, ()))
 
-  let outRef = riverOutputs rs
+  let outRef = shOutputs sh
   outs <- readIORef outRef
   forM_ [ o | o <- M.elems outs, roRemoved o ] $ \o -> do
     forM_ (roLayerObject o) (riverLayerShellOutputV1Destroy conn)
@@ -250,7 +250,7 @@ reapObjects rt = do
     modifyIORef' outRef (M.delete (roObject o))
   unless (null [ () | o <- M.elems outs, roRemoved o ]) $ outputsChanged (rtInput rt)
 
-  let seatRef = riverSeats rs
+  let seatRef = shSeats sh
   seats <- readIORef seatRef
   forM_ [ s | s <- M.elems seats, rsRemoved s ] $ \s -> do
     forM_ (rsLayerObject s) (riverLayerShellSeatV1Destroy conn)
@@ -260,4 +260,4 @@ reapObjects rt = do
     modifyIORef' (rtBoundSeats rt) (S.delete (rsObject s))
   where
     conn = rtConn rt
-    rs = rtState rt
+    sh = rtShared rt

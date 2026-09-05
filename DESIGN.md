@@ -56,46 +56,38 @@ exists: `river_input_manager_v1` is bound first.
 
 ### Ownership
 
-One writer per field.  Where two threads meet, the mechanism says how.
+One writer per field, and the type says which.  `XMonad.River.State` has
+two records: `Shared`, what both threads may reach, with each field's writer
+and the other side's mechanism stated on the field; and `WorkerState`, the
+worker's alone.  The loop's own state is `XMonad.River.WM.Runtime.Runtime`,
+which holds a `Shared` and cannot name a `WorkerState`; the worker reaches
+both halves through `riverState` on `XConf`, and `manageSequence` takes a
+sequence number and the actions, never the `Runtime`.  The rule the split
+enforces is that the loop holds `X ()` values but never evaluates one: an
+action the loop queues runs on the worker, where the worker's state is in
+scope, and nothing on the loop can read it.
+
+The mechanisms, by group of `Shared`:
 
 ```
-riverWindows / riverOutputs / riverSeats   loop writes, worker reads   IORef
-rtBindings, rtPointerBind, rtArmed,
-  rtArmedGen, rtGrabbed, rtDisarm,
-  rtModWatcher, rtModWatched, rtHovered,
-  rtPending, rtDirtySent, rtSeqNo, rtSent,
-  rtAsked, rtWindowsGen, rtLast*            loop only                   IORef
-riverCapture                               worker installs; the loop   atomicWriteIORef / atomicModifyIORef'
-                                           claims it, by generation
-riverExtraKeys                             worker writes (generation,  atomicWriteIORef; the loop fires a
-                                           table), loop reads          binding only for its own generation
-riverOverlays, riverOverlayPos             contrib writes, loop reads  atomicModifyIORef' (XMonad.Util.XUtils)
-riverRestack                               worker only                 IORef
-rtLayoutMoved                              worker writes, loop reads   atomicWriteIORef / atomicModifyIORef'
-rtInput (devices, links, pending
-  results, the installed rules)            loop only                   IORef
-riverPlacements, riverGeometry,
-  rtFloatSizes,
-  riverBorders, riverAfterLayout,
-  riverDragOrigin, riverLogDue, riverUnsized,
-  riverSubmapGen, inManageSeq, rtAdopted,
-  rtRestored                               worker only                 IORef
-riverRestart                               worker (restart) or loop    atomicWriteIORef; read by the loop on
-                                           (--restart) writes          finished, long after either
-stateRef (the XState)                      worker only, except the     plain IORef; the loop reads it only
-                                           restart path                after killing the worker
-riverDirty                                 worker sets, loop swaps     TVar Bool   (wakes the loop)
-riverMailbox, rtJobs                       any thread posts            TVar [a]    (wakes the loop)
-shPlan, shSeqDone                          worker publishes            TVar        (wakes the loop)
-riverNowOps                                worker queues               TVar [Op]   (wakes the loop)
-riverOps                                   worker queues, loop drains  atomic IORef; drained by the next
-                                           sequence, so an emitOp outside one
-                                           needs a manageDirty after it
-connection outgoing requests               any thread queues, loop    TQueue (Encoded, [Fd]); bytes and
-                                           drains                     descriptors are one atomic item
-client registry                            client threads update and   atomicModifyIORef'; shutdown swaps
-                                           shutdown drains             the registry before killing clients
+fixed for the connection's life    globals, negotiated versions, the      plain fields
+                                   config's border width
+loop writes, worker reads          windows, outputs, seats, the hovered   IORef; the writes are whole
+                                   window, the keyboard layout            values, read between sequences
+transactional                      dirty flag, mailbox, loop jobs,        TVar / Mailbox; a write wakes
+                                   now-ops, the plan, the sequence done   the loop
+atomic, either side                ops (worker queues, loop drains),      atomicModifyIORef'; the capture
+                                   the capture, the grab table, the       is claimed by generation, the
+                                   overlays contrib records, the restart  grab table fired only for its
+                                   target, "the layout moved"             own generation
 ```
+
+`Runtime` is loop-only throughout: bindings, captures, the modifier watch,
+the registry, and what the last transmission said (`rtLast*`) so the next
+sends only what changed.  `stateRef` (the `XState`) is the worker's; the
+loop reads it only on the restart path, after killing the worker.  The
+connection's outgoing side is one atomic record (see below); the client
+registry is updated by client threads and swapped out by shutdown.
 
 The `Connection`'s request path (`request`, `requestNew`, `setListener`) is
 atomic, so the worker may create surfaces for decorations; reading,

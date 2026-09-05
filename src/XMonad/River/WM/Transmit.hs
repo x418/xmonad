@@ -30,7 +30,7 @@ import XMonad.River.Plan
 import XMonad.River.Protocol.LayerShell
 import XMonad.River.Protocol.WindowManagement
 import XMonad.River.Protocol.XkbBindings
-import XMonad.River.State (InputCapture(..), RiverState(..), takeOps)
+import XMonad.River.State (InputCapture(..), Shared(..))
 import XMonad.River.Types
 import XMonad.River.WM.Input (installInputConfig, setKeyboardLayout, setKeymap)
 import XMonad.River.WM.Runtime
@@ -66,7 +66,7 @@ bindSeat rt seat = do
     riverPointerBindingV1Listen conn b $ \case
       RiverPointerBindingV1Pressed -> do
         acts <- readIORef (rtPointerBind rt)
-        mHover <- readIORef (rtHovered rt)
+        mHover <- readIORef (shHovered (rtShared rt))
         forM_ ((,) <$> M.lookup b acts <*> mHover) $ \(a, win) ->
           queueAction rt (a win)
       RiverPointerBindingV1Released -> pure ()
@@ -92,8 +92,12 @@ bindPanic rt seat = do
       -- other way a capture ends.  river sends this press in the batch that
       -- precedes a @manage_start@, so that is this sequence.  Tearing down
       -- here instead would leave the capture's own bindings alive and its
-      -- keys eaten from every client for the rest of the session.
-      atomicWriteIORef (riverCapture (rtState rt)) Nothing
+      -- keys eaten from every client for the rest of the session.  Claimed
+      -- by generation like every other end: a capture the config armed
+      -- since the bindings were installed is not this one's to drop.
+      gen <- readIORef (rtArmedGen rt)
+      taken <- claimCapture rt gen
+      forM_ taken $ \cap -> queueAction rt (icOnEnd cap)
       writeIORef (rtDisarm rt) True
       hPutStrLn stderr $ "xmonad-river: panic: closed " <> show n
         <> " prompt(s); the config's bindings return with this sequence"
@@ -110,8 +114,8 @@ bindPanic rt seat = do
 -- protocol error that disconnects the window manager.
 transmitManage :: Runtime -> Plan -> IO ()
 transmitManage rt plan = do
-  known <- readIORef (riverWindows rs)
-  seats <- readIORef (riverSeats rs)
+  known <- readIORef (shWindows sh)
+  seats <- readIORef (shSeats sh)
 
   -- Seats that appeared since the last sequence get the config's bindings.
   bound <- readIORef (rtBoundSeats rt)
@@ -153,7 +157,7 @@ transmitManage rt plan = do
       writeIORef (rtLayerDefault rt) (Just out)
 
   -- One-shot requests, drained: each is an effect river performs once.
-  ops <- takeOps rs
+  ops <- atomicModifyIORef' (shOps sh) (\os -> ([], reverse os))
   forM_ ops $ \case
     OpClose w -> when (M.member w known) $ riverWindowV1Close conn w
     OpWarpPointer s x y -> when (M.member s seats) $ riverSeatV1PointerWarp conn s x y
@@ -263,7 +267,7 @@ transmitManage rt plan = do
           _ -> riverSeatV1ClearFocus conn (rsObject s)
   where
     conn = rtConn rt
-    rs = rtState rt
+    sh = rtShared rt
 
 -- | Take the keyboard for a submap or a hold-to-cycle, disabling the config's
 -- own bindings meanwhile (river leaves it to policy which of two bindings for
@@ -330,7 +334,7 @@ armCapture rt seats ks mods oneShot gen = do
   -- work is posted to the loop; this thread touches no connection.
   void $ forkIO $ do
     threadDelay captureDeadlineMicros
-    MB.post (rtJobs rt) $ do
+    MB.post (shLoopJobs (rtShared rt)) $ do
       taken <- claim
       forM_ taken $ \cap -> do
         hPutStrLn stderr
@@ -357,7 +361,7 @@ bindGrabbedSeat rt seat gen ks =
            seat keysym (riverModifiers mask)
     riverXkbBindingV1SetLayoutOverride conn b firstLayout
     let fire pick = do
-          (tableGen, acts) <- readIORef (riverExtraKeys rs)
+          (tableGen, acts) <- readIORef (shExtraKeys sh)
           when (tableGen == gen) $
             forM_ (take 1 (drop i acts)) (queueAction rt . pick)
     -- @stop_repeat@ -- another key went down while this one is held -- is
@@ -372,7 +376,7 @@ bindGrabbedSeat rt seat gen ks =
     pure b
   where
     conn = rtConn rt
-    rs = rtState rt
+    sh = rtShared rt
 
 bindCaptureSeat
   :: Runtime -> ObjectId -> [(KeyMask, KeySym)] -> Bool -> Int -> IO [ObjectId]
@@ -387,10 +391,10 @@ bindCaptureSeat rt seat ks oneShot gen =
             writeIORef (rtDisarm rt) True
             queueAction rt (icOnKey cap True i)
         | otherwise -> do
-            held <- readIORef (riverCapture rs)
+            held <- readIORef (shCapture sh)
             forM_ held $ \cap -> queueAction rt (icOnKey cap True i)
       RiverXkbBindingV1Released | not oneShot -> do
-        held <- readIORef (riverCapture rs)
+        held <- readIORef (shCapture sh)
         forM_ held $ \cap -> queueAction rt (icOnKey cap False i)
       RiverXkbBindingV1Released -> pure ()
       RiverXkbBindingV1StopRepeat -> pure ()
@@ -399,14 +403,14 @@ bindCaptureSeat rt seat ks oneShot gen =
     pure b
   where
     conn = rtConn rt
-    rs = rtState rt
+    sh = rtShared rt
     claim = claimCapture rt gen
 
 reconcileAddedSeat :: Runtime -> RiverSeat -> IO ()
 reconcileAddedSeat rt seat = do
   readIORef (rtGrabbedKeys rt) >>= mapM_ (\(gen, ks) ->
     bindGrabbedSeat rt (rsObject seat) gen ks >>= modifyIORef' (rtGrabbed rt) . (++))
-  active <- readIORef (riverCapture rs)
+  active <- readIORef (shCapture sh)
   forM_ active $ \cap -> do
     globals <- readIORef (rtBindings rt)
     forM_ (M.keys globals) (riverXkbBindingV1Disable conn)
@@ -423,7 +427,7 @@ reconcileAddedSeat rt seat = do
         modifyIORef' (rtEatGenerations rt) (M.insert x (icGeneration cap))
   where
     conn = rtConn rt
-    rs = rtState rt
+    sh = rtShared rt
 
 captureDeadlineMicros :: Int
 captureDeadlineMicros = 60 * 1000 * 1000
@@ -432,11 +436,11 @@ captureDeadlineMicros = 60 * 1000 * 1000
 -- stacking, then the window manager's own surfaces above the windows.
 transmitRender :: Runtime -> IO ()
 transmitRender rt = do
-  plan <- readTVarIO (shPlan (rtShared rt))
-  let winRef = riverWindows rs
+  plan <- readTVarIO (shPlan sh)
+  let winRef = shWindows sh
   known <- readIORef winRef
-  overlays <- readIORef (riverOverlays rs)
-  positions <- readIORef (riverOverlayPos rs)
+  overlays <- readIORef (shOverlays sh)
+  positions <- readIORef (shOverlayPos sh)
   windowsGen <- readIORef (rtWindowsGen rt)
 
   -- river starts a render sequence of its own whenever a client changes its
@@ -450,7 +454,7 @@ transmitRender rt = do
     atomicWriteIORef (rtLastRendered rt) $! given
     renderPlan rt plan known overlays positions
   where
-    rs = rtState rt
+    sh = rtShared rt
 
 -- | The rendering half of a plan, against the windows river has.
 renderPlan :: Runtime -> Plan -> M.Map ObjectId RiverWindow -> [ObjectId]
@@ -504,4 +508,4 @@ renderPlan rt plan known overlays positions = do
   atomicWriteIORef (rtLastOverlayPos rt) $! M.restrictKeys positions (S.fromList overlays)
   where
     conn = rtConn rt
-    winRef = riverWindows (rtState rt)
+    winRef = shWindows (rtShared rt)

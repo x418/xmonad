@@ -130,7 +130,7 @@ import qualified Data.Set as S
 import XMonad.River.Connection (Connection)
 import XMonad.River.Keysym
 import XMonad.River.Mailbox (Mailbox)
-import XMonad.River.State (RiverState(..), Display'(..), overrideBorderColor, overrideBorderWidth)
+import XMonad.River.State
 import XMonad.River.Runtime (sendRestart)
 import XMonad.River.Types
 import XMonad.River.Wire (ObjectId, nullObject)
