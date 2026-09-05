@@ -22,6 +22,7 @@ module XMonad.River.Buffer
   , bufferSize
   ) where
 
+import Control.Exception (bracketOnError)
 import Control.Monad (when)
 import Data.ByteString (ByteString)
 import Data.Word (Word8)
@@ -29,7 +30,7 @@ import Foreign.C.Error (throwErrnoIf, throwErrnoIfNull, throwErrnoIfMinus1_)
 import Foreign.C.String (CString, withCString)
 import Foreign.C.Types (CInt (..), CSize (..))
 import Foreign.Ptr (Ptr, castPtr, plusPtr)
-import System.Posix.IO (fdWriteBuf)
+import System.Posix.IO (closeFd, fdWriteBuf)
 import System.Posix.Types (Fd (..))
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Unsafe as BSU
@@ -46,13 +47,15 @@ foreign import ccall unsafe "hs_wl_seal"
 -- | A sealed memfd holding the bytes: what @river_xkb_config_v1.create_keymap@
 -- wants.  The caller owns the descriptor.
 sealedMemfd :: String -> ByteString -> IO Fd
-sealedMemfd name bytes = do
-  fd <- withCString name $ \n ->
-    throwErrnoIf (< 0) "sealedMemfd: memfd_create" (c_memfd n (fromIntegral (BS.length bytes)))
-  BSU.unsafeUseAsCStringLen bytes $ \(p, len) -> writeAll (Fd fd) (castPtr p) (fromIntegral len)
-  _ <- throwErrnoIf (< 0) "sealedMemfd: seal" (c_seal fd)
-  pure (Fd fd)
+sealedMemfd name bytes = bracketOnError create closeFd $ \fd@(Fd raw) -> do
+  BSU.unsafeUseAsCStringLen bytes $ \(p, len) -> writeAll fd (castPtr p) (fromIntegral len)
+  _ <- throwErrnoIf (< 0) "sealedMemfd: seal" (c_seal raw)
+  pure fd
   where
+    -- The descriptor is closed if the write or the seal throws; a caller
+    -- that gets one owns it.
+    create = withCString name $ \n -> Fd <$>
+      throwErrnoIf (< 0) "sealedMemfd: memfd_create" (c_memfd n (fromIntegral (BS.length bytes)))
     writeAll fd p n
       | n <= 0 = pure ()
       | otherwise = do

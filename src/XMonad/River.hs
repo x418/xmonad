@@ -174,7 +174,7 @@ import Data.IORef (IORef, atomicModifyIORef', atomicWriteIORef, modifyIORef', re
 import Data.Maybe (fromMaybe, isJust, isNothing)
 import Data.Word (Word32)
 import Control.Concurrent (forkIO, threadDelay)
-import Control.Exception (SomeException, evaluate, handle)
+import Control.Exception (SomeException, bracket, evaluate, handle)
 import Control.Monad (forM, forM_, unless, void, when)
 import Control.Monad.IO.Class (MonadIO)
 import Control.Monad.Reader (ask, asks)
@@ -330,10 +330,9 @@ windowUnderPointer = pointerPosition >>= \case
 -- a config calling @countScreens@ in @main@, before xmonad starts.  @0@ if
 -- there is no compositor to ask.
 countOutputs :: MonadIO m => m Int
-countOutputs = io $ handle (\(_ :: SomeException) -> pure 0) $ do
-    conn <- C.connect
+countOutputs = io $ handle (\(_ :: SomeException) -> pure 0) $
+  bracket C.connect C.disconnect $ \conn -> do
     (_, globals) <- C.getRegistry conn
-    C.disconnect conn
     pure $ length [ () | g <- globals, C.globalInterface g == BC.pack "wl_output" ]
 
 -- | Capture these keys until 'ungrabKeys', running the action for each.
