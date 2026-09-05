@@ -97,9 +97,13 @@ client registry                            client threads update and   atomicMod
                                            shutdown drains             the registry before killing clients
 ```
 
-The `Connection`'s request path (`request`, `newObject`, `setListener`) is
+The `Connection`'s request path (`request`, `requestNew`, `setListener`) is
 atomic, so the worker may create surfaces for decorations; reading,
-dispatching and flushing are the loop's alone.  The one sequence-bound
+dispatching and flushing are the loop's alone.  A request that creates an
+object allocates its id and queues its bytes in one step (`requestNew`, which
+the generated protocol modules use): libwayland refuses a new id that is not
+the next one it expects, so a worker that allocated 100 while the loop
+allocated and sent 101 would have been disconnected.  The one sequence-bound
 request contrib made from the worker, `set_position` on a shell surface, is
 recorded in `riverOverlayPos` and applied by the render sequence.
 

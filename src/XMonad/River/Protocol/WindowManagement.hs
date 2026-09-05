@@ -188,10 +188,7 @@ riverWindowManagerV1RenderFinish conn self =
 -- | @river_window_manager_v1.get_shell_surface@
 riverWindowManagerV1GetShellSurface :: Connection -> ObjectId -> ObjectId -> IO ObjectId
 riverWindowManagerV1GetShellSurface conn self surface =
-  do
-    id_ <- newObject conn
-    request conn self 5 (argObject id_ <> argObject surface)
-    pure id_
+  requestNew conn self 5 (\id_ -> argObject id_ <> argObject surface)
 
 -- | @river_window_manager_v1.exit_session@
 -- Since version 4.
@@ -328,10 +325,7 @@ riverWindowV1Close conn self =
 -- | @river_window_v1.get_node@
 riverWindowV1GetNode :: Connection -> ObjectId -> IO ObjectId
 riverWindowV1GetNode conn self =
-  do
-    id_ <- newObject conn
-    request conn self 2 (argObject id_)
-    pure id_
+  requestNew conn self 2 (\id_ -> argObject id_)
 
 -- | @river_window_v1.propose_dimensions@
 riverWindowV1ProposeDimensions :: Connection -> ObjectId -> Int32 -> Int32 -> IO ()
@@ -371,18 +365,12 @@ riverWindowV1SetTiled conn self edges =
 -- | @river_window_v1.get_decoration_above@
 riverWindowV1GetDecorationAbove :: Connection -> ObjectId -> ObjectId -> IO ObjectId
 riverWindowV1GetDecorationAbove conn self surface =
-  do
-    id_ <- newObject conn
-    request conn self 10 (argObject id_ <> argObject surface)
-    pure id_
+  requestNew conn self 10 (\id_ -> argObject id_ <> argObject surface)
 
 -- | @river_window_v1.get_decoration_below@
 riverWindowV1GetDecorationBelow :: Connection -> ObjectId -> ObjectId -> IO ObjectId
 riverWindowV1GetDecorationBelow conn self surface =
-  do
-    id_ <- newObject conn
-    request conn self 11 (argObject id_ <> argObject surface)
-    pure id_
+  requestNew conn self 11 (\id_ -> argObject id_ <> argObject surface)
 
 -- | @river_window_v1.inform_resize_start@
 riverWindowV1InformResizeStart :: Connection -> ObjectId -> IO ()
@@ -588,10 +576,7 @@ riverShellSurfaceV1Destroy conn self =
 -- | @river_shell_surface_v1.get_node@
 riverShellSurfaceV1GetNode :: Connection -> ObjectId -> IO ObjectId
 riverShellSurfaceV1GetNode conn self =
-  do
-    id_ <- newObject conn
-    request conn self 1 (argObject id_)
-    pure id_
+  requestNew conn self 1 (\id_ -> argObject id_)
 
 -- | @river_shell_surface_v1.sync_next_commit@
 riverShellSurfaceV1SyncNextCommit :: Connection -> ObjectId -> IO ()
@@ -807,10 +792,7 @@ riverSeatV1OpEnd conn self =
 -- | @river_seat_v1.get_pointer_binding@
 riverSeatV1GetPointerBinding :: Connection -> ObjectId -> Word32 -> Word32 -> IO ObjectId
 riverSeatV1GetPointerBinding conn self button modifiers =
-  do
-    id_ <- newObject conn
-    request conn self 6 (argObject id_ <> argUInt button <> argUInt modifiers)
-    pure id_
+  requestNew conn self 6 (\id_ -> argObject id_ <> argUInt button <> argUInt modifiers)
 
 -- | @river_seat_v1.set_xcursor_theme@
 -- Since version 2.

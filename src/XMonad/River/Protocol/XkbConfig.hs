@@ -87,10 +87,7 @@ riverXkbConfigV1Destroy conn self =
 -- | @river_xkb_config_v1.create_keymap@
 riverXkbConfigV1CreateKeymap :: Connection -> ObjectId -> Fd -> Word32 -> IO ObjectId
 riverXkbConfigV1CreateKeymap conn self fd format =
-  do
-    id_ <- newObject conn
-    requestWithFds conn self 2 (argObject id_ <> mempty <> argUInt format) [fd]
-    pure id_
+  requestNewWithFds conn self 2 (\id_ -> argObject id_ <> mempty <> argUInt format) [fd]
 
 -- | Events delivered to a @river_xkb_config_v1@.
 data RiverXkbConfigV1Event

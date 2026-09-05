@@ -413,20 +413,25 @@ renderRequest i m =
       [] -> "mempty"
       as -> intercalate " <> " (map argEncoder as)
     fdArgs = [ a | a <- msgArgs m, argType a == TFd ]
+    fdList = "[" ++ intercalate ", " (map (safeVar . argName) fdArgs) ++ "]"
     send = case fdArgs of
       [] -> "request conn self " ++ show (msgOpcode m) ++ " (" ++ encoded ++ ")"
-      as -> "requestWithFds conn self " ++ show (msgOpcode m) ++ " (" ++ encoded
-              ++ ") [" ++ intercalate ", " (map (safeVar . argName) as) ++ "]"
+      _  -> "requestWithFds conn self " ++ show (msgOpcode m) ++ " (" ++ encoded
+              ++ ") " ++ fdList
+    -- The id is allocated and the request queued in one step by the
+    -- connection, which is what keeps two threads' new ids in order; the
+    -- encoder is a function of the id for that reason.
+    sendNew nid = case fdArgs of
+      [] -> "requestNew conn self " ++ show (msgOpcode m)
+              ++ " (\\" ++ safeVar (argName nid) ++ " -> " ++ encoded ++ ")"
+      _  -> "requestNewWithFds conn self " ++ show (msgOpcode m)
+              ++ " (\\" ++ safeVar (argName nid) ++ " -> " ++ encoded ++ ") " ++ fdList
     body = case newIdArgs of
       [] ->
         [ "  " ++ send ]
         ++ [ "    >> freeObject conn self" | msgDestructor m ]
       (nid:_) ->
-        [ "  do"
-        , "    " ++ safeVar (argName nid) ++ " <- newObject conn"
-        , "    " ++ send
-        , "    pure " ++ safeVar (argName nid)
-        ]
+        [ "  " ++ sendNew nid ]
 
 renderEventType :: Interface -> [String]
 renderEventType i =

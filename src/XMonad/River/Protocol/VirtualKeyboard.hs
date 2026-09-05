@@ -99,10 +99,7 @@ zwpVirtualKeyboardManagerV1ErrorUnauthorized = 0
 -- | @zwp_virtual_keyboard_manager_v1.create_virtual_keyboard@
 zwpVirtualKeyboardManagerV1CreateVirtualKeyboard :: Connection -> ObjectId -> ObjectId -> IO ObjectId
 zwpVirtualKeyboardManagerV1CreateVirtualKeyboard conn self seat =
-  do
-    id_ <- newObject conn
-    request conn self 0 (argObject seat <> argObject id_)
-    pure id_
+  requestNew conn self 0 (\id_ -> argObject seat <> argObject id_)
 
 -- | Events delivered to a @zwp_virtual_keyboard_manager_v1@.
 data ZwpVirtualKeyboardManagerV1Event

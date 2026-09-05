@@ -148,10 +148,7 @@ riverLibinputConfigV1Destroy conn self =
 -- | @river_libinput_config_v1.create_accel_config@
 riverLibinputConfigV1CreateAccelConfig :: Connection -> ObjectId -> Word32 -> IO ObjectId
 riverLibinputConfigV1CreateAccelConfig conn self profile =
-  do
-    id_ <- newObject conn
-    request conn self 2 (argObject id_ <> argUInt profile)
-    pure id_
+  requestNew conn self 2 (\id_ -> argObject id_ <> argUInt profile)
 
 -- | Events delivered to a @river_libinput_config_v1@.
 data RiverLibinputConfigV1Event
@@ -401,170 +398,107 @@ riverLibinputDeviceV1Destroy conn self =
 -- | @river_libinput_device_v1.set_send_events@
 riverLibinputDeviceV1SetSendEvents :: Connection -> ObjectId -> Word32 -> IO ObjectId
 riverLibinputDeviceV1SetSendEvents conn self mode =
-  do
-    result <- newObject conn
-    request conn self 1 (argObject result <> argUInt mode)
-    pure result
+  requestNew conn self 1 (\result -> argObject result <> argUInt mode)
 
 -- | @river_libinput_device_v1.set_tap@
 riverLibinputDeviceV1SetTap :: Connection -> ObjectId -> Word32 -> IO ObjectId
 riverLibinputDeviceV1SetTap conn self state =
-  do
-    result <- newObject conn
-    request conn self 2 (argObject result <> argUInt state)
-    pure result
+  requestNew conn self 2 (\result -> argObject result <> argUInt state)
 
 -- | @river_libinput_device_v1.set_tap_button_map@
 riverLibinputDeviceV1SetTapButtonMap :: Connection -> ObjectId -> Word32 -> IO ObjectId
 riverLibinputDeviceV1SetTapButtonMap conn self buttonMap =
-  do
-    result <- newObject conn
-    request conn self 3 (argObject result <> argUInt buttonMap)
-    pure result
+  requestNew conn self 3 (\result -> argObject result <> argUInt buttonMap)
 
 -- | @river_libinput_device_v1.set_drag@
 riverLibinputDeviceV1SetDrag :: Connection -> ObjectId -> Word32 -> IO ObjectId
 riverLibinputDeviceV1SetDrag conn self state =
-  do
-    result <- newObject conn
-    request conn self 4 (argObject result <> argUInt state)
-    pure result
+  requestNew conn self 4 (\result -> argObject result <> argUInt state)
 
 -- | @river_libinput_device_v1.set_drag_lock@
 riverLibinputDeviceV1SetDragLock :: Connection -> ObjectId -> Word32 -> IO ObjectId
 riverLibinputDeviceV1SetDragLock conn self state =
-  do
-    result <- newObject conn
-    request conn self 5 (argObject result <> argUInt state)
-    pure result
+  requestNew conn self 5 (\result -> argObject result <> argUInt state)
 
 -- | @river_libinput_device_v1.set_three_finger_drag@
 riverLibinputDeviceV1SetThreeFingerDrag :: Connection -> ObjectId -> Word32 -> IO ObjectId
 riverLibinputDeviceV1SetThreeFingerDrag conn self state =
-  do
-    result <- newObject conn
-    request conn self 6 (argObject result <> argUInt state)
-    pure result
+  requestNew conn self 6 (\result -> argObject result <> argUInt state)
 
 -- | @river_libinput_device_v1.set_calibration_matrix@
 riverLibinputDeviceV1SetCalibrationMatrix :: Connection -> ObjectId -> ByteString -> IO ObjectId
 riverLibinputDeviceV1SetCalibrationMatrix conn self matrix =
-  do
-    result <- newObject conn
-    request conn self 7 (argObject result <> argArray matrix)
-    pure result
+  requestNew conn self 7 (\result -> argObject result <> argArray matrix)
 
 -- | @river_libinput_device_v1.set_accel_profile@
 riverLibinputDeviceV1SetAccelProfile :: Connection -> ObjectId -> Word32 -> IO ObjectId
 riverLibinputDeviceV1SetAccelProfile conn self profile =
-  do
-    result <- newObject conn
-    request conn self 8 (argObject result <> argUInt profile)
-    pure result
+  requestNew conn self 8 (\result -> argObject result <> argUInt profile)
 
 -- | @river_libinput_device_v1.set_accel_speed@
 riverLibinputDeviceV1SetAccelSpeed :: Connection -> ObjectId -> ByteString -> IO ObjectId
 riverLibinputDeviceV1SetAccelSpeed conn self speed =
-  do
-    result <- newObject conn
-    request conn self 9 (argObject result <> argArray speed)
-    pure result
+  requestNew conn self 9 (\result -> argObject result <> argArray speed)
 
 -- | @river_libinput_device_v1.apply_accel_config@
 riverLibinputDeviceV1ApplyAccelConfig :: Connection -> ObjectId -> ObjectId -> IO ObjectId
 riverLibinputDeviceV1ApplyAccelConfig conn self config =
-  do
-    result <- newObject conn
-    request conn self 10 (argObject result <> argObject config)
-    pure result
+  requestNew conn self 10 (\result -> argObject result <> argObject config)
 
 -- | @river_libinput_device_v1.set_natural_scroll@
 riverLibinputDeviceV1SetNaturalScroll :: Connection -> ObjectId -> Word32 -> IO ObjectId
 riverLibinputDeviceV1SetNaturalScroll conn self state =
-  do
-    result <- newObject conn
-    request conn self 11 (argObject result <> argUInt state)
-    pure result
+  requestNew conn self 11 (\result -> argObject result <> argUInt state)
 
 -- | @river_libinput_device_v1.set_left_handed@
 riverLibinputDeviceV1SetLeftHanded :: Connection -> ObjectId -> Word32 -> IO ObjectId
 riverLibinputDeviceV1SetLeftHanded conn self state =
-  do
-    result <- newObject conn
-    request conn self 12 (argObject result <> argUInt state)
-    pure result
+  requestNew conn self 12 (\result -> argObject result <> argUInt state)
 
 -- | @river_libinput_device_v1.set_click_method@
 riverLibinputDeviceV1SetClickMethod :: Connection -> ObjectId -> Word32 -> IO ObjectId
 riverLibinputDeviceV1SetClickMethod conn self method =
-  do
-    result <- newObject conn
-    request conn self 13 (argObject result <> argUInt method)
-    pure result
+  requestNew conn self 13 (\result -> argObject result <> argUInt method)
 
 -- | @river_libinput_device_v1.set_clickfinger_button_map@
 riverLibinputDeviceV1SetClickfingerButtonMap :: Connection -> ObjectId -> Word32 -> IO ObjectId
 riverLibinputDeviceV1SetClickfingerButtonMap conn self buttonMap =
-  do
-    result <- newObject conn
-    request conn self 14 (argObject result <> argUInt buttonMap)
-    pure result
+  requestNew conn self 14 (\result -> argObject result <> argUInt buttonMap)
 
 -- | @river_libinput_device_v1.set_middle_emulation@
 riverLibinputDeviceV1SetMiddleEmulation :: Connection -> ObjectId -> Word32 -> IO ObjectId
 riverLibinputDeviceV1SetMiddleEmulation conn self state =
-  do
-    result <- newObject conn
-    request conn self 15 (argObject result <> argUInt state)
-    pure result
+  requestNew conn self 15 (\result -> argObject result <> argUInt state)
 
 -- | @river_libinput_device_v1.set_scroll_method@
 riverLibinputDeviceV1SetScrollMethod :: Connection -> ObjectId -> Word32 -> IO ObjectId
 riverLibinputDeviceV1SetScrollMethod conn self method =
-  do
-    result <- newObject conn
-    request conn self 16 (argObject result <> argUInt method)
-    pure result
+  requestNew conn self 16 (\result -> argObject result <> argUInt method)
 
 -- | @river_libinput_device_v1.set_scroll_button@
 riverLibinputDeviceV1SetScrollButton :: Connection -> ObjectId -> Word32 -> IO ObjectId
 riverLibinputDeviceV1SetScrollButton conn self button =
-  do
-    result <- newObject conn
-    request conn self 17 (argObject result <> argUInt button)
-    pure result
+  requestNew conn self 17 (\result -> argObject result <> argUInt button)
 
 -- | @river_libinput_device_v1.set_scroll_button_lock@
 riverLibinputDeviceV1SetScrollButtonLock :: Connection -> ObjectId -> Word32 -> IO ObjectId
 riverLibinputDeviceV1SetScrollButtonLock conn self state =
-  do
-    result <- newObject conn
-    request conn self 18 (argObject result <> argUInt state)
-    pure result
+  requestNew conn self 18 (\result -> argObject result <> argUInt state)
 
 -- | @river_libinput_device_v1.set_dwt@
 riverLibinputDeviceV1SetDwt :: Connection -> ObjectId -> Word32 -> IO ObjectId
 riverLibinputDeviceV1SetDwt conn self state =
-  do
-    result <- newObject conn
-    request conn self 19 (argObject result <> argUInt state)
-    pure result
+  requestNew conn self 19 (\result -> argObject result <> argUInt state)
 
 -- | @river_libinput_device_v1.set_dwtp@
 riverLibinputDeviceV1SetDwtp :: Connection -> ObjectId -> Word32 -> IO ObjectId
 riverLibinputDeviceV1SetDwtp conn self state =
-  do
-    result <- newObject conn
-    request conn self 20 (argObject result <> argUInt state)
-    pure result
+  requestNew conn self 20 (\result -> argObject result <> argUInt state)
 
 -- | @river_libinput_device_v1.set_rotation@
 riverLibinputDeviceV1SetRotation :: Connection -> ObjectId -> Word32 -> IO ObjectId
 riverLibinputDeviceV1SetRotation conn self angle =
-  do
-    result <- newObject conn
-    request conn self 21 (argObject result <> argUInt angle)
-    pure result
+  requestNew conn self 21 (\result -> argObject result <> argUInt angle)
 
 -- | Events delivered to a @river_libinput_device_v1@.
 data RiverLibinputDeviceV1Event
@@ -783,10 +717,7 @@ riverLibinputAccelConfigV1Destroy conn self =
 -- | @river_libinput_accel_config_v1.set_points@
 riverLibinputAccelConfigV1SetPoints :: Connection -> ObjectId -> Word32 -> ByteString -> ByteString -> IO ObjectId
 riverLibinputAccelConfigV1SetPoints conn self type_ step points =
-  do
-    result <- newObject conn
-    request conn self 1 (argObject result <> argUInt type_ <> argArray step <> argArray points)
-    pure result
+  requestNew conn self 1 (\result -> argObject result <> argUInt type_ <> argArray step <> argArray points)
 
 -- | Events delivered to a @river_libinput_accel_config_v1@.
 data RiverLibinputAccelConfigV1Event

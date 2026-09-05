@@ -57,18 +57,12 @@ riverLayerShellV1Destroy conn self =
 -- | @river_layer_shell_v1.get_output@
 riverLayerShellV1GetOutput :: Connection -> ObjectId -> ObjectId -> IO ObjectId
 riverLayerShellV1GetOutput conn self output =
-  do
-    id_ <- newObject conn
-    request conn self 1 (argObject id_ <> argObject output)
-    pure id_
+  requestNew conn self 1 (\id_ -> argObject id_ <> argObject output)
 
 -- | @river_layer_shell_v1.get_seat@
 riverLayerShellV1GetSeat :: Connection -> ObjectId -> ObjectId -> IO ObjectId
 riverLayerShellV1GetSeat conn self seat =
-  do
-    id_ <- newObject conn
-    request conn self 2 (argObject id_ <> argObject seat)
-    pure id_
+  requestNew conn self 2 (\id_ -> argObject id_ <> argObject seat)
 
 -- | Events delivered to a @river_layer_shell_v1@.
 data RiverLayerShellV1Event

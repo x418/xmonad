@@ -95,10 +95,7 @@ zwlrLayerShellV1LayerOverlay = 3
 -- | @zwlr_layer_shell_v1.get_layer_surface@
 zwlrLayerShellV1GetLayerSurface :: Connection -> ObjectId -> ObjectId -> ObjectId -> Word32 -> ByteString -> IO ObjectId
 zwlrLayerShellV1GetLayerSurface conn self surface output layer namespace =
-  do
-    id_ <- newObject conn
-    request conn self 0 (argObject id_ <> argObject surface <> argObject output <> argUInt layer <> argString (Just namespace))
-    pure id_
+  requestNew conn self 0 (\id_ -> argObject id_ <> argObject surface <> argObject output <> argUInt layer <> argString (Just namespace))
 
 -- | @zwlr_layer_shell_v1.destroy@
 -- Since version 3.

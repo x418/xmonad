@@ -312,18 +312,12 @@ wlCompositorVersion = 7
 -- | @wl_compositor.create_surface@
 wlCompositorCreateSurface :: Connection -> ObjectId -> IO ObjectId
 wlCompositorCreateSurface conn self =
-  do
-    id_ <- newObject conn
-    request conn self 0 (argObject id_)
-    pure id_
+  requestNew conn self 0 (\id_ -> argObject id_)
 
 -- | @wl_compositor.create_region@
 wlCompositorCreateRegion :: Connection -> ObjectId -> IO ObjectId
 wlCompositorCreateRegion conn self =
-  do
-    id_ <- newObject conn
-    request conn self 1 (argObject id_)
-    pure id_
+  requestNew conn self 1 (\id_ -> argObject id_)
 
 -- | @wl_compositor.release@
 -- Since version 7.
@@ -369,10 +363,7 @@ wlShmPoolErrorInvalidStride = 1
 -- | @wl_shm_pool.create_buffer@
 wlShmPoolCreateBuffer :: Connection -> ObjectId -> Int32 -> Int32 -> Int32 -> Int32 -> Word32 -> IO ObjectId
 wlShmPoolCreateBuffer conn self offset width height stride format =
-  do
-    id_ <- newObject conn
-    request conn self 0 (argObject id_ <> argInt offset <> argInt width <> argInt height <> argInt stride <> argUInt format)
-    pure id_
+  requestNew conn self 0 (\id_ -> argObject id_ <> argInt offset <> argInt width <> argInt height <> argInt stride <> argUInt format)
 
 -- | @wl_shm_pool.destroy@
 wlShmPoolDestroy :: Connection -> ObjectId -> IO ()
@@ -1018,10 +1009,7 @@ wlShmFormatXyyy2101010 = 876695641
 -- | @wl_shm.create_pool@
 wlShmCreatePool :: Connection -> ObjectId -> Fd -> Int32 -> IO ObjectId
 wlShmCreatePool conn self fd size =
-  do
-    id_ <- newObject conn
-    requestWithFds conn self 0 (argObject id_ <> mempty <> argInt size) [fd]
-    pure id_
+  requestNewWithFds conn self 0 (\id_ -> argObject id_ <> mempty <> argInt size) [fd]
 
 -- | @wl_shm.release@
 -- Since version 2.
@@ -1136,10 +1124,7 @@ wlSurfaceDamage conn self x y width height =
 -- | @wl_surface.frame@
 wlSurfaceFrame :: Connection -> ObjectId -> IO ObjectId
 wlSurfaceFrame conn self =
-  do
-    callback <- newObject conn
-    request conn self 3 (argObject callback)
-    pure callback
+  requestNew conn self 3 (\callback -> argObject callback)
 
 -- | @wl_surface.set_opaque_region@
 wlSurfaceSetOpaqueRegion :: Connection -> ObjectId -> ObjectId -> IO ()
@@ -1184,10 +1169,7 @@ wlSurfaceOffset conn self x y =
 -- Since version 7.
 wlSurfaceGetRelease :: Connection -> ObjectId -> IO ObjectId
 wlSurfaceGetRelease conn self =
-  do
-    callback <- newObject conn
-    request conn self 11 (argObject callback)
-    pure callback
+  requestNew conn self 11 (\callback -> argObject callback)
 
 -- | Events delivered to a @wl_surface@.
 data WlSurfaceEvent
@@ -1246,26 +1228,17 @@ wlSeatErrorMissingCapability = 0
 -- | @wl_seat.get_pointer@
 wlSeatGetPointer :: Connection -> ObjectId -> IO ObjectId
 wlSeatGetPointer conn self =
-  do
-    id_ <- newObject conn
-    request conn self 0 (argObject id_)
-    pure id_
+  requestNew conn self 0 (\id_ -> argObject id_)
 
 -- | @wl_seat.get_keyboard@
 wlSeatGetKeyboard :: Connection -> ObjectId -> IO ObjectId
 wlSeatGetKeyboard conn self =
-  do
-    id_ <- newObject conn
-    request conn self 1 (argObject id_)
-    pure id_
+  requestNew conn self 1 (\id_ -> argObject id_)
 
 -- | @wl_seat.get_touch@
 wlSeatGetTouch :: Connection -> ObjectId -> IO ObjectId
 wlSeatGetTouch conn self =
-  do
-    id_ <- newObject conn
-    request conn self 2 (argObject id_)
-    pure id_
+  requestNew conn self 2 (\id_ -> argObject id_)
 
 -- | @wl_seat.release@
 -- Since version 5.

@@ -24,6 +24,8 @@ module XMonad.River.Connection
     -- * Requests
   , request
   , requestWithFds
+  , requestNew
+  , requestNewWithFds
   , takeFd
   , takeFdOrFail
   , newObject
@@ -99,14 +101,9 @@ decode p body = either (throwIO . DecodeError . show) pure (decodeBody p body)
 
 data Connection = Connection
   { connSocket    :: !N.Socket
-  , connNextId    :: !(IORef Word32)
-  , connFreeIds   :: !(IORef [Word32])
-    -- ^ Ids reclaimed via @wl_display.delete_id@, reused before allocating new
-    -- ones as the protocol requires.
-  , connOut       :: !(IORef (Encoded, [Fd]))
-    -- ^ Pending request bytes and their descriptors. They share one atomic
-    -- queue because Wayland matches ancillary descriptors to fd arguments by
-    -- position; observing one without the other corrupts the request stream.
+  , connOut       :: !(IORef OutState)
+    -- ^ Everything a request touches, behind one atomic update: see
+    -- 'OutState'.
   , connIn        :: !(IORef ByteString)
     -- ^ Bytes read but not yet forming a complete message.
   , connInFds     :: !(IORef [Fd])
@@ -115,6 +112,28 @@ data Connection = Connection
   , connRecvBuf   :: !(ForeignPtr Word8)
     -- ^ 'recvBufSize' pinned bytes every read lands in; what arrived is
     -- copied out at its own length.
+  }
+
+-- | The outgoing side of a connection.  One record, one 'IORef', because a
+-- request that creates an object must allocate its id and queue its bytes
+-- in the same step: libwayland refuses a new id that is not the next one
+-- it expects, so two threads that each allocated and then queued could
+-- send 101 before 100 and be disconnected for it.  The window manager's
+-- loop and worker are exactly those two threads.
+--
+-- The descriptors share the record for the same reason bytes and ids do:
+-- the server pairs each one with the next fd argument it decodes, so they
+-- must be observed together with the bytes that carry the argument.
+data OutState = OutState
+  { osNextId :: !Word32
+    -- ^ The next never-used client id.
+  , osFree   :: ![Word32]
+    -- ^ Ids reclaimed via @wl_display.delete_id@, reused before new ones as
+    -- the protocol requires.
+  , osOut    :: !Encoded
+    -- ^ Request bytes not yet flushed.
+  , osFds    :: ![Fd]
+    -- ^ Their descriptors, in argument order.
   }
 
 -- | One read's worth.  river answers a manage sequence with a burst of
@@ -165,14 +184,12 @@ connectSocket = newConnection
 newConnection :: N.Socket -> IO Connection
 newConnection sock = do
   -- Client ids start at 2; 1 is wl_display.
-  nextId    <- newIORef 2
-  freeIds   <- newIORef []
-  out       <- newIORef (mempty, [])
+  out       <- newIORef (OutState 2 [] mempty [])
   inBuf     <- newIORef BS.empty
   inFds     <- newIORef []
   listeners <- newIORef IM.empty
   recvBuf   <- mallocForeignPtrBytes recvBufSize
-  let conn = Connection sock nextId freeIds out inBuf inFds listeners recvBuf
+  let conn = Connection sock out inBuf inFds listeners recvBuf
   setListener conn displayId (displayListener conn)
   pure conn
 
@@ -200,21 +217,26 @@ displayListener conn opcode body = case opcode of
   1 -> do
     i <- decode getWord32 body
     clearListener conn (ObjectId i)
-    atomicModifyIORef' (connFreeIds conn) (\is -> (i : is, ()))
+    atomicModifyIORef' (connOut conn) (\os -> (os { osFree = i : osFree os }, ()))
   _ -> pure ()
 
 --------------------------------------------------------------------------------
 -- Objects and requests
 
--- | Allocate a client-side object id.
+-- | Allocate a client-side object id and nothing else.
+--
+-- For an id that no request will carry -- a test's stand-in object.  A
+-- request that creates an object goes through 'requestNew', which allocates
+-- and queues in one step; allocating here and queueing with 'request'
+-- afterwards is the two-thread race 'OutState' exists to close.
 newObject :: Connection -> IO ObjectId
-newObject conn = do
-  reused <- atomicModifyIORef' (connFreeIds conn) $ \case
-    (i:rest) -> (rest, Just i)
-    []       -> ([], Nothing)
-  case reused of
-    Just i  -> pure (ObjectId i)
-    Nothing -> ObjectId <$> atomicModifyIORef' (connNextId conn) (\i -> (i + 1, i))
+newObject conn = atomicModifyIORef' (connOut conn) allocate
+
+-- | The next id: a reclaimed one first, as the protocol requires.
+allocate :: OutState -> (OutState, ObjectId)
+allocate os = case osFree os of
+  (i:rest) -> (os { osFree = rest }, ObjectId i)
+  []       -> (os { osNextId = osNextId os + 1 }, ObjectId (osNextId os))
 
 -- | Drop a destroyed object's listener. The id itself is only reusable once
 -- the server confirms with @delete_id@, so it is not returned to the free list
@@ -225,8 +247,22 @@ freeObject = clearListener
 -- | Queue a request. Nothing is written to the socket until 'flush'.
 request :: Connection -> ObjectId -> Word16 -> Encoded -> IO ()
 request conn oid opcode args =
-  atomicModifyIORef' (connOut conn) $ \(out, fds) ->
-    ((out <> encodeMessage oid opcode args, fds), ())
+  atomicModifyIORef' (connOut conn) $ \os ->
+    (os { osOut = osOut os <> encodeMessage oid opcode args }, ())
+
+-- | Queue a request that creates an object, and return the object's id.
+--
+-- The id is allocated and the request queued in one atomic step, so that a
+-- second thread doing the same cannot slip its request in between: the
+-- server sees new ids in the order they were allocated, which is the order
+-- it insists on.  The encoder is given the id, since the request carries it.
+--
+-- The caller's listener for the new object is installed afterwards, and an
+-- event for it can only arrive once this request has been flushed and
+-- answered, on the dispatching thread; a listener set in the same breath as
+-- the call is in place by then.
+requestNew :: Connection -> ObjectId -> Word16 -> (ObjectId -> Encoded) -> IO ObjectId
+requestNew conn oid opcode args = requestNewWithFds conn oid opcode args []
 
 -- | Queue a request that carries file descriptors.
 --
@@ -243,8 +279,20 @@ request conn oid opcode args =
 -- descriptor.
 requestWithFds :: Connection -> ObjectId -> Word16 -> Encoded -> [Fd] -> IO ()
 requestWithFds conn oid opcode args newFds =
-  atomicModifyIORef' (connOut conn) $ \(out, fds) ->
-    ((out <> encodeMessage oid opcode args, fds ++ newFds), ())
+  atomicModifyIORef' (connOut conn) $ \os ->
+    (os { osOut = osOut os <> encodeMessage oid opcode args
+        , osFds = osFds os ++ newFds }, ())
+
+-- | 'requestNew' for a request that also carries descriptors; ownership as
+-- for 'requestWithFds'.
+requestNewWithFds
+  :: Connection -> ObjectId -> Word16 -> (ObjectId -> Encoded) -> [Fd] -> IO ObjectId
+requestNewWithFds conn oid opcode args newFds =
+  atomicModifyIORef' (connOut conn) $ \os ->
+    let (os', new) = allocate os
+    in ( os' { osOut = osOut os' <> encodeMessage oid opcode (args new)
+             , osFds = osFds os' ++ newFds }
+       , new )
 
 -- | Take the next descriptor delivered alongside an event.
 --
@@ -287,7 +335,8 @@ clearListener conn (ObjectId i) =
 -- byte is copied twice on its way out.
 flush :: Connection -> IO ()
 flush conn = do
-  (pending, fds) <- atomicModifyIORef' (connOut conn) $ \p -> ((mempty, []), p)
+  (pending, fds) <- atomicModifyIORef' (connOut conn) $ \os ->
+    (os { osOut = mempty, osFds = [] }, (osOut os, osFds os))
   -- Nothing queued is the common case between events; no bytes to build.
   unless (encodedLength pending == 0 && null fds) $
     -- The compositor holds its own descriptors now, so ours are dead weight
@@ -347,10 +396,9 @@ dispatchPending conn = do
 roundtrip :: Connection -> IO ()
 roundtrip conn = do
   done <- newIORef False
-  cb <- newObject conn
-  setListener conn cb $ \_ _ -> writeIORef done True
   -- wl_display.sync(new_id wl_callback)
-  request conn displayId 0 (argObject cb)
+  cb <- requestNew conn displayId 0 argObject
+  setListener conn cb $ \_ _ -> writeIORef done True
   let loop = do
         d <- readIORef done
         unless d (dispatch conn >> loop)
@@ -361,10 +409,9 @@ roundtrip conn = do
 -- dispatching thread.  Nothing waits.
 syncThen :: Connection -> IO () -> IO ()
 syncThen conn act = do
-  cb <- newObject conn
+  cb <- requestNew conn displayId 0 argObject
   -- @done@ destroys the callback; @delete_id@ returns the id.
   setListener conn cb $ \_ _ -> clearListener conn cb >> act
-  request conn displayId 0 (argObject cb)
 
 --------------------------------------------------------------------------------
 -- Registry
@@ -380,7 +427,8 @@ data Global = Global
 -- returns.
 getRegistry :: Connection -> IO (ObjectId, [Global])
 getRegistry conn = do
-  reg <- newObject conn
+  -- wl_display.get_registry(new_id wl_registry)
+  reg <- requestNew conn displayId 1 argObject
   acc <- newIORef []
   setListener conn reg $ \opcode body -> case opcode of
     -- global(name, interface, version)
@@ -390,8 +438,6 @@ getRegistry conn = do
       modifyIORef' acc (Global name iface ver :)
     -- global_remove(name); nothing we bind is expected to vanish
     _ -> pure ()
-  -- wl_display.get_registry(new_id wl_registry)
-  request conn displayId 1 (argObject reg)
   roundtrip conn
   globals <- reverse <$> readIORef acc
   pure (reg, globals)
@@ -413,9 +459,7 @@ listenRegistry conn reg added removed =
 bindNamed :: Connection -> ObjectId -> Global -> Word32 -> IO ObjectId
 bindNamed conn reg g maxVersion = do
   let ver = min maxVersion (globalVersion g)
-  oid <- newObject conn
-  request conn reg 0 (argUInt (globalName g) <> argNewIdAny (globalInterface g) ver oid)
-  pure oid
+  requestNew conn reg 0 (\oid -> argUInt (globalName g) <> argNewIdAny (globalInterface g) ver oid)
 
 -- | Bind a global, clamping to the version the server offers. Returns
 -- 'Nothing' if the interface is absent or older than @minVersion@.
@@ -434,7 +478,6 @@ bindGlobal conn reg globals iface minVersion maxVersion =
       | globalVersion g < minVersion -> pure Nothing
       | otherwise -> do
           let ver = min maxVersion (globalVersion g)
-          oid <- newObject conn
           -- wl_registry.bind(name, new_id)
-          request conn reg 0 (argUInt (globalName g) <> argNewIdAny iface ver oid)
+          oid <- requestNew conn reg 0 (\o -> argUInt (globalName g) <> argNewIdAny iface ver o)
           pure (Just (oid, ver))

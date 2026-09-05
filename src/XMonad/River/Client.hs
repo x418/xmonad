@@ -18,9 +18,10 @@
 --
 -- == One connection, one thread
 --
--- 'Connection' buffers requests in 'IORef's and is not thread-safe.  Two
--- connections now exist -- the window manager's and this one -- and the rule
--- that keeps that safe is that each is touched by exactly one thread.
+-- 'Connection' queues requests atomically, but only one thread may read
+-- from a connection and dispatch its events.  Two connections now exist --
+-- the window manager's and this one -- and the rule that keeps that safe is
+-- that each is dispatched by exactly one thread.
 --
 -- That rule is enforced by construction rather than by comment.  'startClient'
 -- forks a thread that owns 'clConn' outright, and nothing in this module's

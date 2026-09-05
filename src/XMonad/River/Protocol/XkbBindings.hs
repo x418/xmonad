@@ -61,19 +61,13 @@ riverXkbBindingsV1Destroy conn self =
 -- | @river_xkb_bindings_v1.get_xkb_binding@
 riverXkbBindingsV1GetXkbBinding :: Connection -> ObjectId -> ObjectId -> Word32 -> Word32 -> IO ObjectId
 riverXkbBindingsV1GetXkbBinding conn self seat keysym modifiers =
-  do
-    id_ <- newObject conn
-    request conn self 1 (argObject seat <> argObject id_ <> argUInt keysym <> argUInt modifiers)
-    pure id_
+  requestNew conn self 1 (\id_ -> argObject seat <> argObject id_ <> argUInt keysym <> argUInt modifiers)
 
 -- | @river_xkb_bindings_v1.get_seat@
 -- Since version 2.
 riverXkbBindingsV1GetSeat :: Connection -> ObjectId -> ObjectId -> IO ObjectId
 riverXkbBindingsV1GetSeat conn self seat =
-  do
-    id_ <- newObject conn
-    request conn self 2 (argObject id_ <> argObject seat)
-    pure id_
+  requestNew conn self 2 (\id_ -> argObject id_ <> argObject seat)
 
 -- | Events delivered to a @river_xkb_bindings_v1@.
 data RiverXkbBindingsV1Event
