@@ -53,7 +53,11 @@ bindSeat rt seat = do
         forM_ (M.lookup b acts) (queueAction rt)
         prefixes <- readIORef (rtPrefixKeys rt)
         when (S.member (mask, keysym) prefixes) $ writeIORef (rtPrefixPressed rt) True
-      _ -> pure ()
+      -- A binding's action runs once per press; nothing repeats it, so there
+      -- is nothing for @stop_repeat@ to stop.
+      RiverXkbBindingV1Released -> pure ()
+      RiverXkbBindingV1StopRepeat -> pure ()
+      RiverXkbBindingV1Unknown{} -> pure ()
     riverXkbBindingV1Enable conn b
   forM_ (M.toList (rtButtonActions rt)) $ \((mask, button), action) -> do
     b <- riverSeatV1GetPointerBinding conn seat (linuxButton button)
@@ -65,7 +69,8 @@ bindSeat rt seat = do
         mHover <- readIORef (rtHovered rt)
         forM_ ((,) <$> M.lookup b acts <*> mHover) $ \(a, win) ->
           queueAction rt (a win)
-      _ -> pure ()
+      RiverPointerBindingV1Released -> pure ()
+      RiverPointerBindingV1Unknown{} -> pure ()
     riverPointerBindingV1Enable conn b
   where conn = rtConn rt
 
@@ -92,7 +97,9 @@ bindPanic rt seat = do
       writeIORef (rtDisarm rt) True
       hPutStrLn stderr $ "xmonad-river: panic: closed " <> show n
         <> " prompt(s); the config's bindings return with this sequence"
-    _ -> pure ()
+    RiverXkbBindingV1Released -> pure ()
+    RiverXkbBindingV1StopRepeat -> pure ()
+    RiverXkbBindingV1Unknown{} -> pure ()
   riverXkbBindingV1Enable conn b
   where conn = rtConn rt
 
@@ -353,10 +360,14 @@ bindGrabbedSeat rt seat gen ks =
           (tableGen, acts) <- readIORef (riverExtraKeys rs)
           when (tableGen == gen) $
             forM_ (take 1 (drop i acts)) (queueAction rt . pick)
+    -- @stop_repeat@ -- another key went down while this one is held -- is
+    -- not a release and is not surfaced: the config's pair is press and
+    -- release, and a hold-to-cycle ends on the release alone.
     riverXkbBindingV1Listen conn b $ \case
       RiverXkbBindingV1Pressed  -> fire fst
       RiverXkbBindingV1Released -> fire snd
-      _ -> pure ()
+      RiverXkbBindingV1StopRepeat -> pure ()
+      RiverXkbBindingV1Unknown{} -> pure ()
     riverXkbBindingV1Enable conn b
     pure b
   where
@@ -381,7 +392,9 @@ bindCaptureSeat rt seat ks oneShot gen =
       RiverXkbBindingV1Released | not oneShot -> do
         held <- readIORef (riverCapture rs)
         forM_ held $ \cap -> queueAction rt (icOnKey cap False i)
-      _ -> pure ()
+      RiverXkbBindingV1Released -> pure ()
+      RiverXkbBindingV1StopRepeat -> pure ()
+      RiverXkbBindingV1Unknown{} -> pure ()
     riverXkbBindingV1Enable conn b
     pure b
   where

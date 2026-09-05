@@ -78,11 +78,14 @@ data XkbKeyboard = XkbKeyboard
 
 data InputRuntime = InputRuntime
   { irConn       :: !Connection
-  , irManager    :: !(Maybe ObjectId)
-  , irLibinput   :: !(Maybe ObjectId)
+  , irManager    :: !(IORef (Maybe ObjectId))
+    -- ^ @river_input_manager_v1@ at version 2.  Each of the three is
+    -- 'Nothing' when river did not offer it, and again once river has sent
+    -- @finished@ on it: the object is destroyed and its requests dropped.
+  , irLibinput   :: !(IORef (Maybe ObjectId))
     -- ^ @river_libinput_config_v1@ at version 2, with the input manager;
     -- 'Nothing' and devices are left alone.
-  , irXkb        :: !(Maybe ObjectId)
+  , irXkb        :: !(IORef (Maybe ObjectId))
     -- ^ @river_xkb_config_v1@ at version 2; 'Nothing' and layouts cannot
     -- be switched.
   , irOnLayout   :: !(Maybe (Int, String) -> IO ())
@@ -147,23 +150,43 @@ newInputRuntime
   -> Maybe ObjectId                 -- ^ xkb config
   -> IO InputRuntime
 newInputRuntime conn warn onLayout output mManager mConfig mXkb = do
-  rt <- InputRuntime conn mManager mConfig mXkb onLayout output
+  manager <- newIORef mManager
+  libinput <- newIORef mConfig
+  xkb <- newIORef mXkb
+  rt <- InputRuntime conn manager libinput xkb onLayout output
           <$> newIORef M.empty <*> newIORef S.empty <*> newIORef Nothing
           <*> newIORef M.empty <*> newIORef M.empty <*> newIORef M.empty
           <*> newIORef Nothing <*> newIORef 0 <*> pure warn <*> newIORef False
   forM_ mManager $ \im ->
     riverInputManagerV1Listen conn im $ \case
       RiverInputManagerV1InputDevice dev -> addDevice rt dev
-      _ -> pure ()
+      RiverInputManagerV1Finished ->
+        finished rt "river_input_manager_v1" manager im riverInputManagerV1Destroy
+      RiverInputManagerV1Unknown{} -> pure ()
   forM_ mConfig $ \lc ->
     riverLibinputConfigV1Listen conn lc $ \case
       RiverLibinputConfigV1LibinputDevice lib -> addLibinputDevice rt lib
-      _ -> pure ()
+      RiverLibinputConfigV1Finished ->
+        finished rt "river_libinput_config_v1" libinput lc riverLibinputConfigV1Destroy
+      RiverLibinputConfigV1Unknown{} -> pure ()
   forM_ mXkb $ \xk ->
     riverXkbConfigV1Listen conn xk $ \case
       RiverXkbConfigV1XkbKeyboard kb -> addKeyboard rt kb
-      _ -> pure ()
+      RiverXkbConfigV1Finished ->
+        finished rt "river_xkb_config_v1" xkb xk riverXkbConfigV1Destroy
+      RiverXkbConfigV1Unknown{} -> pure ()
   pure rt
+
+-- | river will send nothing more on the object: destroy it and forget it, so
+-- that later requests take the path of a global that was never offered.
+-- Happens once, when river releases this window manager, hence a note.
+finished
+  :: InputRuntime -> String -> IORef (Maybe ObjectId) -> ObjectId
+  -> (Connection -> ObjectId -> IO ()) -> IO ()
+finished rt name ref obj destroy = do
+  writeIORef ref Nothing
+  destroy (irConn rt) obj
+  irWarn rt ("note: " ++ name ++ " finished; its requests are dropped from here")
 
 inputDeviceCount :: InputRuntime -> IO Int
 inputDeviceCount rt = M.size <$> readIORef (irDevices rt)
@@ -173,7 +196,7 @@ inputPendingCount rt = M.size <$> readIORef (irPending rt)
 
 -- | A new generation of rules, reconciled against every device.
 installInputConfig :: InputRuntime -> InputConfig -> IO ()
-installInputConfig rt cfg = case irLibinput rt of
+installInputConfig rt cfg = readIORef (irLibinput rt) >>= \case
   Nothing -> do
     warned <- atomicModifyIORef' (irWarnedOff rt) (\w -> (True, w))
     unless warned $ irWarn rt "input rules ignored: the protocols are unavailable"
@@ -182,7 +205,8 @@ installInputConfig rt cfg = case irLibinput rt of
     writeIORef (irConfig rt) (Just (gen, cfg))
     -- Seats before devices, so an assignment finds its seat; a seat no rule
     -- names any more goes, its devices back to the default.
-    forM_ (irManager rt) $ \im -> do
+    manager <- readIORef (irManager rt)
+    forM_ manager $ \im -> do
       have <- readIORef (irSeats rt)
       let want = S.fromList (inputSeats cfg)
       forM_ (S.toList (S.difference want have)) (riverInputManagerV1CreateSeat (irConn rt) im)
@@ -372,7 +396,7 @@ report rt kb = readIORef (irKeyboards rt) >>= mapM_ tell . M.lookup kb
 -- @create_keymap@; on success the keymap is set on every keyboard, present
 -- and to come, and the previous one destroyed.
 setKeymap :: InputRuntime -> ByteString -> IO ()
-setKeymap rt text = case irXkb rt of
+setKeymap rt text = readIORef (irXkb rt) >>= \case
   Nothing -> irWarn rt "keymap ignored: river_xkb_config_v1 is unavailable"
   Just xk -> do
     fd <- sealedMemfd "xmonad-keymap" text
@@ -402,7 +426,7 @@ applyKeymap rt kb km = do
 
 -- | Make a layout active on every keyboard.  Legal outside a sequence.
 setKeyboardLayout :: InputRuntime -> KeyboardLayoutRequest -> IO ()
-setKeyboardLayout rt req = case irXkb rt of
+setKeyboardLayout rt req = readIORef (irXkb rt) >>= \case
   Nothing -> irWarn rt "layout request ignored: river_xkb_config_v1 is unavailable"
   Just _ -> readIORef (irKeyboards rt) >>= mapM_ one . M.toList
   where
@@ -477,7 +501,8 @@ send rt dev d gen f v = case (f, v) of
   (FSeat, _) -> pure ()
   -- A config object per apply: points, apply, destroy; the apply's result
   -- is the field's.  libinput copies the config, so the object is free.
-  (FAccelCustom, VCurves cs) -> forM_ ((,) <$> dvLib d <*> irLibinput rt) $ \(lib, lc) -> do
+  (FAccelCustom, VCurves cs) -> readIORef (irLibinput rt) >>= \mLc ->
+    forM_ ((,) <$> dvLib d <*> mLc) $ \(lib, lc) -> do
     cfg <- riverLibinputConfigV1CreateAccelConfig conn lc riverLibinputDeviceV1AccelProfileCustom
     forM_ cs $ \c -> do
       r <- riverLibinputAccelConfigV1SetPoints conn cfg (accelType (curveType c))

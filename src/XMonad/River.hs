@@ -346,6 +346,10 @@ grabKeys :: M.Map (KeyMask, KeySym) (X ()) -> X ()
 grabKeys keymap = grabKeysUpDown (M.map (, pure ()) keymap)
 
 -- | As 'grabKeys', with an action for the key going up as well as down.
+--
+-- Up means released.  river also reports @stop_repeat@ -- another key was
+-- pressed while this one is held -- and that is not surfaced: a hold ends
+-- on the release, and no action here repeats while the key is down.
 grabKeysUpDown :: M.Map (KeyMask, KeySym) (X (), X ()) -> X ()
 grabKeysUpDown keymap = do
     conf <- ask
