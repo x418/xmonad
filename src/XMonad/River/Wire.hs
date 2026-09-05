@@ -34,6 +34,7 @@ module XMonad.River.Wire
     -- * Encoded bytes
   , Encoded
   , runEncoded
+  , encodedLength
   , argInt
   , argUInt
   , argFixed
@@ -250,6 +251,10 @@ instance Monoid Encoded where
 -- | Materialise into a 'ByteString', allocating exactly once.
 runEncoded :: Encoded -> ByteString
 runEncoded (Encoded n p) = unsafeEncodeWith p n
+
+-- | How many bytes 'runEncoded' would produce; free to ask.
+encodedLength :: Encoded -> Int
+encodedLength (Encoded n _) = n
 
 -- | @int@
 argInt :: Int32 -> Encoded

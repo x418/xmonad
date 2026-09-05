@@ -19,6 +19,7 @@
 module XMonad.River.Socket
   ( sendWithFds
   , recvWithFds
+  , recvWithFdsInto
   ) where
 
 import Control.Monad (when)
@@ -26,6 +27,7 @@ import Data.Word (Word8)
 import Foreign.C.Error (throwErrnoIfMinus1RetryMayBlock)
 import Foreign.C.Types (CInt (..), CSize (..))
 import GHC.Conc (threadWaitRead, threadWaitWrite)
+import Foreign.ForeignPtr (ForeignPtr, withForeignPtr)
 import Foreign.Marshal.Alloc (alloca, allocaBytes)
 import Foreign.Marshal.Array (allocaArray, peekArray, withArrayLen)
 import Foreign.Ptr (Ptr, castPtr)
@@ -76,9 +78,17 @@ sendWithFds sock bs fds = do
 -- @spawn@, and a buffer descriptor leaking into a child would keep the shared
 -- mapping alive past its owner.
 recvWithFds :: N.Socket -> Int -> IO (BS.ByteString, [Fd])
-recvWithFds sock n =
+recvWithFds sock n = allocaBytes n $ \buf -> recvWithFdsBuf sock buf n
+
+-- | As 'recvWithFds', into a buffer the caller keeps: a connection reads
+-- into the same pinned block every time rather than allocating one per
+-- read, and only the bytes that arrived are copied out.
+recvWithFdsInto :: N.Socket -> ForeignPtr Word8 -> Int -> IO (BS.ByteString, [Fd])
+recvWithFdsInto sock fptr n = withForeignPtr fptr $ \buf -> recvWithFdsBuf sock buf n
+
+recvWithFdsBuf :: N.Socket -> Ptr Word8 -> Int -> IO (BS.ByteString, [Fd])
+recvWithFdsBuf sock buf n =
   N.withFdSocket sock $ \fd ->
-    allocaBytes n $ \buf ->
       allocaArray maxFds $ \fdp ->
         alloca $ \nfdsp -> do
           -- As sendWithFds: an empty socket answers EAGAIN rather than

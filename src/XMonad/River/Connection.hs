@@ -50,11 +50,12 @@ module XMonad.River.Connection
   , WaylandError(..)
   ) where
 
-import Control.Exception (Exception, throwIO)
+import Control.Exception (Exception, finally, throwIO)
 import Control.Monad (unless, when)
 import Data.ByteString (ByteString)
 import Data.IORef
-import Data.Word (Word16, Word32)
+import Data.Word (Word16, Word32, Word8)
+import Foreign.ForeignPtr (ForeignPtr, mallocForeignPtrBytes)
 import System.Environment (lookupEnv)
 import qualified Data.ByteString as BS
 import qualified Data.IntMap.Strict as IM
@@ -66,7 +67,7 @@ import Data.Store.Core (Peek)
 import System.Posix.IO (closeFd)
 import System.Posix.Types (Fd)
 
-import XMonad.River.Socket (recvWithFds, sendWithFds)
+import XMonad.River.Socket (recvWithFdsInto, sendWithFds)
 import XMonad.River.Wire
 
 --------------------------------------------------------------------------------
@@ -111,7 +112,15 @@ data Connection = Connection
   , connInFds     :: !(IORef [Fd])
     -- ^ Descriptors received but not yet claimed by a decoded event.
   , connListeners :: !(IORef (IM.IntMap Listener))
+  , connRecvBuf   :: !(ForeignPtr Word8)
+    -- ^ 'recvBufSize' pinned bytes every read lands in; what arrived is
+    -- copied out at its own length.
   }
+
+-- | One read's worth.  river answers a manage sequence with a burst of
+-- events for every window; 4 KiB was a system call per hundred of them.
+recvBufSize :: Int
+recvBufSize = 65536
 
 -- | The @wl_display@ object always has id 1.
 displayId :: ObjectId
@@ -162,7 +171,8 @@ newConnection sock = do
   inBuf     <- newIORef BS.empty
   inFds     <- newIORef []
   listeners <- newIORef IM.empty
-  let conn = Connection sock nextId freeIds out inBuf inFds listeners
+  recvBuf   <- mallocForeignPtrBytes recvBufSize
+  let conn = Connection sock nextId freeIds out inBuf inFds listeners recvBuf
   setListener conn displayId (displayListener conn)
   pure conn
 
@@ -278,12 +288,13 @@ clearListener conn (ObjectId i) =
 flush :: Connection -> IO ()
 flush conn = do
   (pending, fds) <- atomicModifyIORef' (connOut conn) $ \p -> ((mempty, []), p)
-  let bs = runEncoded pending
-  unless (BS.null bs && null fds) $ sendAllWithFds conn bs fds
-  -- The compositor holds its own descriptors now, so ours are dead weight --
-  -- and a window manager forks constantly, so keeping them would leak a
-  -- mapping into every subsequent child.
-  mapM_ closeFd fds
+  -- Nothing queued is the common case between events; no bytes to build.
+  unless (encodedLength pending == 0 && null fds) $
+    -- The compositor holds its own descriptors now, so ours are dead weight
+    -- -- and a window manager forks constantly, so keeping them would leak a
+    -- mapping into every subsequent child.  Closed even when the send
+    -- throws: a disconnect must not leak them either.
+    sendAllWithFds conn (runEncoded pending) fds `finally` mapM_ closeFd fds
 
 -- | Write every byte, keeping the descriptors on the first message.
 --
@@ -303,7 +314,7 @@ sendAllWithFds conn = go
 dispatch :: Connection -> IO ()
 dispatch conn = do
   flush conn
-  (chunk, fds) <- recvWithFds (connSocket conn) 4096
+  (chunk, fds) <- recvWithFdsInto (connSocket conn) (connRecvBuf conn) recvBufSize
   unless (null fds) $ modifyIORef' (connInFds conn) (++ fds)
   when (BS.null chunk) $ throwIO Disconnected
   -- ByteString's append short-circuits when either side is empty, so this is
