@@ -12,6 +12,7 @@ module XMonad.River.Protocol.VirtualKeyboard
   , zwpVirtualKeyboardV1Key
   , zwpVirtualKeyboardV1Modifiers
   , zwpVirtualKeyboardV1Destroy
+  , zwpVirtualKeyboardV1DestroySince
   , zwpVirtualKeyboardV1ErrorNoKeymap
   , ZwpVirtualKeyboardManagerV1Event(..)
   , zwpVirtualKeyboardManagerV1Interface
@@ -65,6 +66,10 @@ zwpVirtualKeyboardV1Destroy :: Connection -> ObjectId -> IO ()
 zwpVirtualKeyboardV1Destroy conn self =
   request conn self 3 (mempty)
     >> freeObject conn self
+
+-- | The version @zwp_virtual_keyboard_v1.destroy@ arrived in.
+zwpVirtualKeyboardV1DestroySince :: Word32
+zwpVirtualKeyboardV1DestroySince = 1
 
 -- | Events delivered to a @zwp_virtual_keyboard_v1@.
 data ZwpVirtualKeyboardV1Event

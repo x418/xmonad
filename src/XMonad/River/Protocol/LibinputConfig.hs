@@ -39,6 +39,7 @@ module XMonad.River.Protocol.LibinputConfig
   , riverLibinputDeviceV1SetDwt
   , riverLibinputDeviceV1SetDwtp
   , riverLibinputDeviceV1SetRotation
+  , riverLibinputDeviceV1DoneSince
   , riverLibinputDeviceV1ErrorInvalidArg
   , riverLibinputDeviceV1SendEventsModesEnabled
   , riverLibinputDeviceV1SendEventsModesDisabled
@@ -563,6 +564,10 @@ data RiverLibinputDeviceV1Event
     -- a newer version of the protocol. Ignoring these is what keeps a
     -- client forward compatible.
   deriving (Eq, Show)
+
+-- | The version @river_libinput_device_v1.done@ arrived in.
+riverLibinputDeviceV1DoneSince :: Word32
+riverLibinputDeviceV1DoneSince = 2
 
 -- | Attach an event handler to a @river_libinput_device_v1@ object.
 riverLibinputDeviceV1Listen :: Connection -> ObjectId -> (RiverLibinputDeviceV1Event -> IO ()) -> IO ()

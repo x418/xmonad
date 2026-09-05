@@ -11,6 +11,7 @@ module XMonad.River.Protocol.XkbBindings
   , riverXkbBindingsV1Destroy
   , riverXkbBindingsV1GetXkbBinding
   , riverXkbBindingsV1GetSeat
+  , riverXkbBindingsV1GetSeatSince
   , riverXkbBindingsV1ErrorObjectAlreadyCreated
   , RiverXkbBindingV1Event(..)
   , riverXkbBindingV1Interface
@@ -20,6 +21,7 @@ module XMonad.River.Protocol.XkbBindings
   , riverXkbBindingV1SetLayoutOverride
   , riverXkbBindingV1Enable
   , riverXkbBindingV1Disable
+  , riverXkbBindingV1StopRepeatSince
   , RiverXkbBindingsSeatV1Event(..)
   , riverXkbBindingsSeatV1Interface
   , riverXkbBindingsSeatV1Version
@@ -28,6 +30,12 @@ module XMonad.River.Protocol.XkbBindings
   , riverXkbBindingsSeatV1EnsureNextKeyEaten
   , riverXkbBindingsSeatV1CancelEnsureNextKeyEaten
   , riverXkbBindingsSeatV1ModifiersWatch
+  , riverXkbBindingsSeatV1DestroySince
+  , riverXkbBindingsSeatV1EnsureNextKeyEatenSince
+  , riverXkbBindingsSeatV1CancelEnsureNextKeyEatenSince
+  , riverXkbBindingsSeatV1ModifiersWatchSince
+  , riverXkbBindingsSeatV1AteUnboundKeySince
+  , riverXkbBindingsSeatV1ModifiersUpdateSince
   ) where
 
 import Data.ByteString (ByteString)
@@ -68,6 +76,10 @@ riverXkbBindingsV1GetXkbBinding conn self seat keysym modifiers =
 riverXkbBindingsV1GetSeat :: Connection -> ObjectId -> ObjectId -> IO ObjectId
 riverXkbBindingsV1GetSeat conn self seat =
   requestNew conn self 2 (\id_ -> argObject id_ <> argObject seat)
+
+-- | The version @river_xkb_bindings_v1.get_seat@ arrived in.
+riverXkbBindingsV1GetSeatSince :: Word32
+riverXkbBindingsV1GetSeatSince = 2
 
 -- | Events delivered to a @river_xkb_bindings_v1@.
 data RiverXkbBindingsV1Event
@@ -127,6 +139,10 @@ data RiverXkbBindingV1Event
     -- client forward compatible.
   deriving (Eq, Show)
 
+-- | The version @river_xkb_binding_v1.stop_repeat@ arrived in.
+riverXkbBindingV1StopRepeatSince :: Word32
+riverXkbBindingV1StopRepeatSince = 2
+
 -- | Attach an event handler to a @river_xkb_binding_v1@ object.
 riverXkbBindingV1Listen :: Connection -> ObjectId -> (RiverXkbBindingV1Event -> IO ()) -> IO ()
 riverXkbBindingV1Listen conn self handler =
@@ -155,11 +171,19 @@ riverXkbBindingsSeatV1Destroy conn self =
   request conn self 0 (mempty)
     >> freeObject conn self
 
+-- | The version @river_xkb_bindings_seat_v1.destroy@ arrived in.
+riverXkbBindingsSeatV1DestroySince :: Word32
+riverXkbBindingsSeatV1DestroySince = 2
+
 -- | @river_xkb_bindings_seat_v1.ensure_next_key_eaten@
 -- Since version 2.
 riverXkbBindingsSeatV1EnsureNextKeyEaten :: Connection -> ObjectId -> IO ()
 riverXkbBindingsSeatV1EnsureNextKeyEaten conn self =
   request conn self 1 (mempty)
+
+-- | The version @river_xkb_bindings_seat_v1.ensure_next_key_eaten@ arrived in.
+riverXkbBindingsSeatV1EnsureNextKeyEatenSince :: Word32
+riverXkbBindingsSeatV1EnsureNextKeyEatenSince = 2
 
 -- | @river_xkb_bindings_seat_v1.cancel_ensure_next_key_eaten@
 -- Since version 2.
@@ -167,11 +191,19 @@ riverXkbBindingsSeatV1CancelEnsureNextKeyEaten :: Connection -> ObjectId -> IO (
 riverXkbBindingsSeatV1CancelEnsureNextKeyEaten conn self =
   request conn self 2 (mempty)
 
+-- | The version @river_xkb_bindings_seat_v1.cancel_ensure_next_key_eaten@ arrived in.
+riverXkbBindingsSeatV1CancelEnsureNextKeyEatenSince :: Word32
+riverXkbBindingsSeatV1CancelEnsureNextKeyEatenSince = 2
+
 -- | @river_xkb_bindings_seat_v1.modifiers_watch@
 -- Since version 3.
 riverXkbBindingsSeatV1ModifiersWatch :: Connection -> ObjectId -> Word32 -> IO ()
 riverXkbBindingsSeatV1ModifiersWatch conn self modifiers =
   request conn self 3 (argUInt modifiers)
+
+-- | The version @river_xkb_bindings_seat_v1.modifiers_watch@ arrived in.
+riverXkbBindingsSeatV1ModifiersWatchSince :: Word32
+riverXkbBindingsSeatV1ModifiersWatchSince = 3
 
 -- | Events delivered to a @river_xkb_bindings_seat_v1@.
 data RiverXkbBindingsSeatV1Event
@@ -182,6 +214,14 @@ data RiverXkbBindingsSeatV1Event
     -- a newer version of the protocol. Ignoring these is what keeps a
     -- client forward compatible.
   deriving (Eq, Show)
+
+-- | The version @river_xkb_bindings_seat_v1.ate_unbound_key@ arrived in.
+riverXkbBindingsSeatV1AteUnboundKeySince :: Word32
+riverXkbBindingsSeatV1AteUnboundKeySince = 2
+
+-- | The version @river_xkb_bindings_seat_v1.modifiers_update@ arrived in.
+riverXkbBindingsSeatV1ModifiersUpdateSince :: Word32
+riverXkbBindingsSeatV1ModifiersUpdateSince = 3
 
 -- | Attach an event handler to a @river_xkb_bindings_seat_v1@ object.
 riverXkbBindingsSeatV1Listen :: Connection -> ObjectId -> (RiverXkbBindingsSeatV1Event -> IO ()) -> IO ()

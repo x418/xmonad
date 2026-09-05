@@ -10,6 +10,7 @@ module XMonad.River.Protocol.LayerShellClient
   , zwlrLayerShellV1Listen
   , zwlrLayerShellV1GetLayerSurface
   , zwlrLayerShellV1Destroy
+  , zwlrLayerShellV1DestroySince
   , zwlrLayerShellV1ErrorRole
   , zwlrLayerShellV1ErrorInvalidLayer
   , zwlrLayerShellV1ErrorAlreadyConstructed
@@ -31,6 +32,8 @@ module XMonad.River.Protocol.LayerShellClient
   , zwlrLayerSurfaceV1Destroy
   , zwlrLayerSurfaceV1SetLayer
   , zwlrLayerSurfaceV1SetExclusiveEdge
+  , zwlrLayerSurfaceV1SetLayerSince
+  , zwlrLayerSurfaceV1SetExclusiveEdgeSince
   , zwlrLayerSurfaceV1KeyboardInteractivityNone
   , zwlrLayerSurfaceV1KeyboardInteractivityExclusive
   , zwlrLayerSurfaceV1KeyboardInteractivityOnDemand
@@ -103,6 +106,10 @@ zwlrLayerShellV1Destroy :: Connection -> ObjectId -> IO ()
 zwlrLayerShellV1Destroy conn self =
   request conn self 1 (mempty)
     >> freeObject conn self
+
+-- | The version @zwlr_layer_shell_v1.destroy@ arrived in.
+zwlrLayerShellV1DestroySince :: Word32
+zwlrLayerShellV1DestroySince = 3
 
 -- | Events delivered to a @zwlr_layer_shell_v1@.
 data ZwlrLayerShellV1Event
@@ -225,11 +232,19 @@ zwlrLayerSurfaceV1SetLayer :: Connection -> ObjectId -> Word32 -> IO ()
 zwlrLayerSurfaceV1SetLayer conn self layer =
   request conn self 8 (argUInt layer)
 
+-- | The version @zwlr_layer_surface_v1.set_layer@ arrived in.
+zwlrLayerSurfaceV1SetLayerSince :: Word32
+zwlrLayerSurfaceV1SetLayerSince = 2
+
 -- | @zwlr_layer_surface_v1.set_exclusive_edge@
 -- Since version 5.
 zwlrLayerSurfaceV1SetExclusiveEdge :: Connection -> ObjectId -> Word32 -> IO ()
 zwlrLayerSurfaceV1SetExclusiveEdge conn self edge =
   request conn self 9 (argUInt edge)
+
+-- | The version @zwlr_layer_surface_v1.set_exclusive_edge@ arrived in.
+zwlrLayerSurfaceV1SetExclusiveEdgeSince :: Word32
+zwlrLayerSurfaceV1SetExclusiveEdgeSince = 5
 
 -- | Events delivered to a @zwlr_layer_surface_v1@.
 data ZwlrLayerSurfaceV1Event

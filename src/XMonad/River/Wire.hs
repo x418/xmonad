@@ -3,12 +3,13 @@
 -- | The Wayland wire protocol, encoder and decoder.
 --
 -- This is a from-scratch implementation rather than a binding to
--- @libwayland-client@. That is viable here because the river window
--- management protocols pass no file descriptors, which is the only part of
--- the wire format needing @SCM_RIGHTS@ and hence C support. Avoiding
--- libwayland means @xmonad-river@ has no C dependencies at all, and that the
--- event dispatch loop is ordinary Haskell rather than a callback jungle
--- reached through @wl_proxy_marshal@'s variadic interface.
+-- @libwayland-client@.  The bytes are all Haskell; the one thing the wire
+-- format needs C for is attaching file descriptors as @SCM_RIGHTS@ on the
+-- same @sendmsg@ as the request bytes (keymaps, shared-memory buffers), and
+-- that is the forty lines of "XMonad.River.Socket" and @src/cbits/wl-fd.c@.
+-- Avoiding libwayland means the event dispatch loop is ordinary Haskell
+-- rather than a callback jungle reached through @wl_proxy_marshal@'s
+-- variadic interface.
 --
 -- Serialization uses @store-core@'s 'Poke' and 'Peek'. The fit is unusually
 -- good: Wayland's wire format is host-endian and 32-bit aligned, which is

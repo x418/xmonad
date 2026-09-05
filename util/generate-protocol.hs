@@ -23,10 +23,10 @@
 {-# LANGUAGE ViewPatterns #-}
 
 import Data.Char (isAlpha, toLower, toUpper)
-import Control.Monad (unless)
+import Control.Monad (unless, when)
 import Data.List (intercalate, isPrefixOf)
 import Data.Maybe (fromMaybe, mapMaybe)
-import System.Directory (createDirectoryIfMissing, doesFileExist)
+import System.Directory (createDirectoryIfMissing, doesFileExist, removeFile)
 import System.FilePath ((</>), (<.>))
 import System.Process (callProcess)
 import qualified Data.Map as M
@@ -346,6 +346,7 @@ ifaceExports i =
   [ funName (ifaceName i) ++ typeName (msgName m)
   | m <- ifaceRequests i
   ] ++
+  [ sinceName i m | m <- ifaceRequests i ++ ifaceEvents i, Just _ <- [msgSince m] ] ++
   [ enumConstName i e n | e <- ifaceEnums i, (n, _) <- enumEntries e ]
 
 enumConstName :: Interface -> Enum' -> String -> String
@@ -386,6 +387,23 @@ renderEnum i e = concat
   , let nm = enumConstName i e n
   ]
 
+-- | The name of the constant that says which version a message arrived in:
+-- @riverXkbBindingsSeatV1ModifiersWatchSince@.  A version check written
+-- against it survives the protocol moving; a literal does not.
+sinceName :: Interface -> Message -> String
+sinceName i m = funName (ifaceName i) ++ typeName (msgName m) ++ "Since"
+
+-- | The constant itself, for a message the XML marks @since@.
+renderSince :: Interface -> Message -> [String]
+renderSince i m = case msgSince m of
+  Nothing -> []
+  Just s ->
+    [ "-- | The version @" ++ ifaceName i ++ "." ++ msgName m ++ "@ arrived in."
+    , sinceName i m ++ " :: Word32"
+    , sinceName i m ++ " = " ++ show s
+    , ""
+    ]
+
 renderRequest :: Interface -> Message -> [String]
 renderRequest i m =
       [ "-- | @" ++ ifaceName i ++ "." ++ msgName m ++ "@"
@@ -396,7 +414,8 @@ renderRequest i m =
       , name ++ " conn self" ++ concatMap ((' ' :) . safeVar . argName) plainArgs ++ " ="
       ] ++
       body ++
-      [ "" ]
+      [ "" ] ++
+      renderSince i m
   where
     name = funName (ifaceName i) ++ typeName (msgName m)
     -- A new_id argument in a request is allocated by us and returned, rather
@@ -445,7 +464,8 @@ renderEventType i =
   , "    -- client forward compatible."
   , "  deriving (Eq, Show)"
   , ""
-  ]
+  ] ++
+  concatMap (renderSince i) (ifaceEvents i)
   where
     tn = typeName (ifaceName i)
     sep 0 = "  = "
@@ -495,6 +515,19 @@ renderListener i =
 fetchSources :: IO ()
 fetchSources = do
   createDirectoryIfMissing True protocolDir
+  -- The pins, stamped beside the XML: a bump here used to change nothing
+  -- until somebody deleted the directory by hand, and the modules were
+  -- regenerated from the old text.
+  let stamp = protocolDir </> "PIN"
+      pin = unlines [riverCommit, waylandCommit]
+  havePin <- doesFileExist stamp
+  current <- if havePin then (== pin) <$> readFile stamp else pure False
+  unless current $ do
+    mapM_ (\(name, _) -> do
+             let path = protocolDir </> name
+             stale <- doesFileExist path
+             when stale (removeFile path)) sources
+    writeFile stamp pin
   mapM_ fetch sources
   where
     fetch (name, url) = do

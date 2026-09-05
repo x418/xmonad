@@ -20,6 +20,13 @@ module XMonad.River (
     -- its events, because river reports state rather than answering queries.
     RiverWindow(..), RiverOutput(..), RiverSeat(..),
     LayerFocus(..), layerHasFocus,
+    -- | Where a module that draws its own surfaces reads and records them:
+    -- 'riverWindows' is what river has, 'riverOverlays' and 'riverOverlayPos'
+    -- are the window manager's own surfaces and where they go, and the three
+    -- globals are what such a surface is created against.  This is the whole
+    -- contract; "XMonad.River.State" is the backend's own.
+    riverWindows, riverOverlays, riverOverlayPos,
+    riverShm, riverCompositor, riverManager,
     BorderColor,
     -- | @\"#rrggbb\"@ to the RGBA form river wants.  X11 resolved a colour
     -- name against the server's colormap and could fail for reasons a config
@@ -142,7 +149,13 @@ module XMonad.River (
     Display'(..),
 
     -- * Lifecycle
-    RestartRequested(..), setMainThread, exitSession,
+    RestartRequested(..), exitSession,
+
+    -- * Clients of the compositor
+    --
+    -- | A prompt or an overlay is an ordinary Wayland client on a connection
+    -- of its own; this is how one is started.
+    startClient, ClientSpec(..), ClientHandle(..), Anchor(..),
 
     -- * Input devices
     --
@@ -150,7 +163,7 @@ module XMonad.River (
     setInputConfig,
     -- | What @setxkbmap@'s layout switching did, through
     -- @river_xkb_config_v1@; the keymap itself is still river's.
-    keyboardLayout, nextKeyboardLayout, setKeyboardLayout, setKeyboardLayoutByName,
+    keyboardLayout, keyboardLayoutIO, nextKeyboardLayout, setKeyboardLayout, setKeyboardLayoutByName,
     -- | What @setxkbmap@ did: the keymap itself, on every keyboard present
     -- and to come.
     setKeymap, Keymap(..), defaultKeymap, keymapLayoutNames,
@@ -158,10 +171,10 @@ module XMonad.River (
     NameMatch(..), InputType(..),
     InputSettings(..), defaultInputSettings,
     SendEvents(..), ButtonMap(..), DragLock(..), ThreeFingerDrag(..),
-    AccelProfile(..), ClickMethod(..), ScrollMethod(..),
+    AccelProfile(..), AccelType(..), AccelCurve(..), ClickMethod(..), ScrollMethod(..),
 
     -- * Keysym tables
-    keysymTable, reverseKeysymTable,
+    module XMonad.River.Keysym.Table,
 
     -- * Diagnostics
     warnUnimplemented,
@@ -185,16 +198,16 @@ import qualified Data.Map.Strict as M
 import XMonad.Core
 import Data.List (find, sortOn)
 import XMonad.Operations (applySizeHintsContents, float, mouseDrag, pointWithin)
-import XMonad.River.Keysym.Table (keysymTable, reverseKeysymTable)
+import XMonad.River.Keysym.Table
 import qualified XMonad.River.Mailbox as MB
-import XMonad.River.Client (closeAllClients)
+import XMonad.River.Client (Anchor(..), ClientHandle(..), ClientSpec(..), closeAllClients, startClient)
 import XMonad.River.Input
 import qualified XMonad.River.Connection as C
 import XMonad.River.Protocol.WindowManagement
 import XMonad.River.Protocol.XkbBindings
 import XMonad.River.Ops (emitNow, emitOp)
 import XMonad.River.Plan (KeyboardLayoutRequest(..), Op(..))
-import XMonad.River.Runtime (RestartRequested(..), setMainThread, warnUnimplemented)
+import XMonad.River.Runtime (RestartRequested(..), warnUnimplemented)
 import XMonad.River.Types
 import XMonad.River.State
 import XMonad.River.Wire (decodeUtf8, encodeUtf8)
@@ -576,6 +589,12 @@ setInputConfig rules = case validateInputConfig rules of
 -- | The active xkb layout, index and name, as river last reported it.
 keyboardLayout :: X (Maybe (Int, String))
 keyboardLayout = io . readIORef =<< asks (riverKeyboardLayout . riverState)
+
+-- | 'keyboardLayout' for a thread that is not the worker -- a bar's socket
+-- server answering a query -- given the 'XConf' it was started with.  The
+-- loop writes the value whole, so a read from any thread sees a whole one.
+keyboardLayoutIO :: XConf -> IO (Maybe (Int, String))
+keyboardLayoutIO = readIORef . riverKeyboardLayout . riverState
 
 -- | Open capture sessions on a window; 0 for one river does not know.
 captureSessions :: Window -> X Word32

@@ -15,6 +15,7 @@ module XMonad.River.Protocol.WindowManagement
   , riverWindowManagerV1RenderFinish
   , riverWindowManagerV1GetShellSurface
   , riverWindowManagerV1ExitSession
+  , riverWindowManagerV1ExitSessionSince
   , riverWindowManagerV1ErrorSequenceOrder
   , riverWindowManagerV1ErrorRole
   , riverWindowManagerV1ErrorUnresponsive
@@ -46,6 +47,13 @@ module XMonad.River.Protocol.WindowManagement
   , riverWindowV1SetClipBox
   , riverWindowV1SetContentClipBox
   , riverWindowV1SetDimensionBounds
+  , riverWindowV1SetClipBoxSince
+  , riverWindowV1SetContentClipBoxSince
+  , riverWindowV1SetDimensionBoundsSince
+  , riverWindowV1UnreliablePidSince
+  , riverWindowV1PresentationHintSince
+  , riverWindowV1IdentifierSince
+  , riverWindowV1CaptureSessionsSince
   , riverWindowV1ErrorNodeExists
   , riverWindowV1ErrorInvalidDimensions
   , riverWindowV1ErrorInvalidBorder
@@ -96,6 +104,8 @@ module XMonad.River.Protocol.WindowManagement
   , riverOutputV1Listen
   , riverOutputV1Destroy
   , riverOutputV1SetPresentationMode
+  , riverOutputV1SetPresentationModeSince
+  , riverOutputV1CaptureSessionsSince
   , riverOutputV1ErrorInvalidPresentationMode
   , riverOutputV1PresentationModeVsync
   , riverOutputV1PresentationModeAsync
@@ -112,6 +122,9 @@ module XMonad.River.Protocol.WindowManagement
   , riverSeatV1GetPointerBinding
   , riverSeatV1SetXcursorTheme
   , riverSeatV1PointerWarp
+  , riverSeatV1SetXcursorThemeSince
+  , riverSeatV1PointerWarpSince
+  , riverSeatV1PointerPositionSince
   , riverSeatV1ModifiersNone
   , riverSeatV1ModifiersShift
   , riverSeatV1ModifiersCtrl
@@ -195,6 +208,10 @@ riverWindowManagerV1GetShellSurface conn self surface =
 riverWindowManagerV1ExitSession :: Connection -> ObjectId -> IO ()
 riverWindowManagerV1ExitSession conn self =
   request conn self 6 (mempty)
+
+-- | The version @river_window_manager_v1.exit_session@ arrived in.
+riverWindowManagerV1ExitSessionSince :: Word32
+riverWindowManagerV1ExitSessionSince = 4
 
 -- | Events delivered to a @river_window_manager_v1@.
 data RiverWindowManagerV1Event
@@ -423,17 +440,29 @@ riverWindowV1SetClipBox :: Connection -> ObjectId -> Int32 -> Int32 -> Int32 -> 
 riverWindowV1SetClipBox conn self x y width height =
   request conn self 21 (argInt x <> argInt y <> argInt width <> argInt height)
 
+-- | The version @river_window_v1.set_clip_box@ arrived in.
+riverWindowV1SetClipBoxSince :: Word32
+riverWindowV1SetClipBoxSince = 2
+
 -- | @river_window_v1.set_content_clip_box@
 -- Since version 3.
 riverWindowV1SetContentClipBox :: Connection -> ObjectId -> Int32 -> Int32 -> Int32 -> Int32 -> IO ()
 riverWindowV1SetContentClipBox conn self x y width height =
   request conn self 22 (argInt x <> argInt y <> argInt width <> argInt height)
 
+-- | The version @river_window_v1.set_content_clip_box@ arrived in.
+riverWindowV1SetContentClipBoxSince :: Word32
+riverWindowV1SetContentClipBoxSince = 3
+
 -- | @river_window_v1.set_dimension_bounds@
 -- Since version 4.
 riverWindowV1SetDimensionBounds :: Connection -> ObjectId -> Int32 -> Int32 -> IO ()
 riverWindowV1SetDimensionBounds conn self maxWidth maxHeight =
   request conn self 23 (argInt maxWidth <> argInt maxHeight)
+
+-- | The version @river_window_v1.set_dimension_bounds@ arrived in.
+riverWindowV1SetDimensionBoundsSince :: Word32
+riverWindowV1SetDimensionBoundsSince = 4
 
 -- | Events delivered to a @river_window_v1@.
 data RiverWindowV1Event
@@ -461,6 +490,22 @@ data RiverWindowV1Event
     -- a newer version of the protocol. Ignoring these is what keeps a
     -- client forward compatible.
   deriving (Eq, Show)
+
+-- | The version @river_window_v1.unreliable_pid@ arrived in.
+riverWindowV1UnreliablePidSince :: Word32
+riverWindowV1UnreliablePidSince = 2
+
+-- | The version @river_window_v1.presentation_hint@ arrived in.
+riverWindowV1PresentationHintSince :: Word32
+riverWindowV1PresentationHintSince = 4
+
+-- | The version @river_window_v1.identifier@ arrived in.
+riverWindowV1IdentifierSince :: Word32
+riverWindowV1IdentifierSince = 4
+
+-- | The version @river_window_v1.capture_sessions@ arrived in.
+riverWindowV1CaptureSessionsSince :: Word32
+riverWindowV1CaptureSessionsSince = 5
 
 -- | Attach an event handler to a @river_window_v1@ object.
 riverWindowV1Listen :: Connection -> ObjectId -> (RiverWindowV1Event -> IO ()) -> IO ()
@@ -690,6 +735,10 @@ riverOutputV1SetPresentationMode :: Connection -> ObjectId -> Word32 -> IO ()
 riverOutputV1SetPresentationMode conn self mode =
   request conn self 1 (argUInt mode)
 
+-- | The version @river_output_v1.set_presentation_mode@ arrived in.
+riverOutputV1SetPresentationModeSince :: Word32
+riverOutputV1SetPresentationModeSince = 4
+
 -- | Events delivered to a @river_output_v1@.
 data RiverOutputV1Event
   = RiverOutputV1Removed
@@ -702,6 +751,10 @@ data RiverOutputV1Event
     -- a newer version of the protocol. Ignoring these is what keeps a
     -- client forward compatible.
   deriving (Eq, Show)
+
+-- | The version @river_output_v1.capture_sessions@ arrived in.
+riverOutputV1CaptureSessionsSince :: Word32
+riverOutputV1CaptureSessionsSince = 5
 
 -- | Attach an event handler to a @river_output_v1@ object.
 riverOutputV1Listen :: Connection -> ObjectId -> (RiverOutputV1Event -> IO ()) -> IO ()
@@ -800,11 +853,19 @@ riverSeatV1SetXcursorTheme :: Connection -> ObjectId -> ByteString -> Word32 -> 
 riverSeatV1SetXcursorTheme conn self name size =
   request conn self 7 (argString (Just name) <> argUInt size)
 
+-- | The version @river_seat_v1.set_xcursor_theme@ arrived in.
+riverSeatV1SetXcursorThemeSince :: Word32
+riverSeatV1SetXcursorThemeSince = 2
+
 -- | @river_seat_v1.pointer_warp@
 -- Since version 3.
 riverSeatV1PointerWarp :: Connection -> ObjectId -> Int32 -> Int32 -> IO ()
 riverSeatV1PointerWarp conn self x y =
   request conn self 8 (argInt x <> argInt y)
+
+-- | The version @river_seat_v1.pointer_warp@ arrived in.
+riverSeatV1PointerWarpSince :: Word32
+riverSeatV1PointerWarpSince = 3
 
 -- | Events delivered to a @river_seat_v1@.
 data RiverSeatV1Event
@@ -822,6 +883,10 @@ data RiverSeatV1Event
     -- a newer version of the protocol. Ignoring these is what keeps a
     -- client forward compatible.
   deriving (Eq, Show)
+
+-- | The version @river_seat_v1.pointer_position@ arrived in.
+riverSeatV1PointerPositionSince :: Word32
+riverSeatV1PointerPositionSince = 2
 
 -- | Attach an event handler to a @river_seat_v1@ object.
 riverSeatV1Listen :: Connection -> ObjectId -> (RiverSeatV1Event -> IO ()) -> IO ()

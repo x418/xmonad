@@ -15,6 +15,7 @@ module XMonad.River.Protocol.Core
   , wlCompositorCreateSurface
   , wlCompositorCreateRegion
   , wlCompositorRelease
+  , wlCompositorReleaseSince
   , WlShmPoolEvent(..)
   , wlShmPoolInterface
   , wlShmPoolVersion
@@ -30,6 +31,7 @@ module XMonad.River.Protocol.Core
   , wlShmListen
   , wlShmCreatePool
   , wlShmRelease
+  , wlShmReleaseSince
   , wlShmErrorInvalidFormat
   , wlShmErrorInvalidStride
   , wlShmErrorInvalidFd
@@ -202,6 +204,13 @@ module XMonad.River.Protocol.Core
   , wlSurfaceDamageBuffer
   , wlSurfaceOffset
   , wlSurfaceGetRelease
+  , wlSurfaceSetBufferTransformSince
+  , wlSurfaceSetBufferScaleSince
+  , wlSurfaceDamageBufferSince
+  , wlSurfaceOffsetSince
+  , wlSurfaceGetReleaseSince
+  , wlSurfacePreferredBufferScaleSince
+  , wlSurfacePreferredBufferTransformSince
   , wlSurfaceErrorInvalidScale
   , wlSurfaceErrorInvalidTransform
   , wlSurfaceErrorInvalidSize
@@ -216,6 +225,8 @@ module XMonad.River.Protocol.Core
   , wlSeatGetKeyboard
   , wlSeatGetTouch
   , wlSeatRelease
+  , wlSeatReleaseSince
+  , wlSeatNameSince
   , wlSeatCapabilityPointer
   , wlSeatCapabilityKeyboard
   , wlSeatCapabilityTouch
@@ -225,6 +236,8 @@ module XMonad.River.Protocol.Core
   , wlKeyboardVersion
   , wlKeyboardListen
   , wlKeyboardRelease
+  , wlKeyboardReleaseSince
+  , wlKeyboardRepeatInfoSince
   , wlKeyboardKeymapFormatNoKeymap
   , wlKeyboardKeymapFormatXkbV1
   , wlKeyboardKeyStateReleased
@@ -235,6 +248,11 @@ module XMonad.River.Protocol.Core
   , wlOutputVersion
   , wlOutputListen
   , wlOutputRelease
+  , wlOutputReleaseSince
+  , wlOutputDoneSince
+  , wlOutputScaleSince
+  , wlOutputNameSince
+  , wlOutputDescriptionSince
   , wlOutputSubpixelUnknown
   , wlOutputSubpixelNone
   , wlOutputSubpixelHorizontalRgb
@@ -325,6 +343,10 @@ wlCompositorRelease :: Connection -> ObjectId -> IO ()
 wlCompositorRelease conn self =
   request conn self 2 (mempty)
     >> freeObject conn self
+
+-- | The version @wl_compositor.release@ arrived in.
+wlCompositorReleaseSince :: Word32
+wlCompositorReleaseSince = 7
 
 -- | Events delivered to a @wl_compositor@.
 data WlCompositorEvent
@@ -1018,6 +1040,10 @@ wlShmRelease conn self =
   request conn self 1 (mempty)
     >> freeObject conn self
 
+-- | The version @wl_shm.release@ arrived in.
+wlShmReleaseSince :: Word32
+wlShmReleaseSince = 2
+
 -- | Events delivered to a @wl_shm@.
 data WlShmEvent
   = WlShmFormat !Word32
@@ -1147,11 +1173,19 @@ wlSurfaceSetBufferTransform :: Connection -> ObjectId -> Int32 -> IO ()
 wlSurfaceSetBufferTransform conn self transform =
   request conn self 7 (argInt transform)
 
+-- | The version @wl_surface.set_buffer_transform@ arrived in.
+wlSurfaceSetBufferTransformSince :: Word32
+wlSurfaceSetBufferTransformSince = 2
+
 -- | @wl_surface.set_buffer_scale@
 -- Since version 3.
 wlSurfaceSetBufferScale :: Connection -> ObjectId -> Int32 -> IO ()
 wlSurfaceSetBufferScale conn self scale =
   request conn self 8 (argInt scale)
+
+-- | The version @wl_surface.set_buffer_scale@ arrived in.
+wlSurfaceSetBufferScaleSince :: Word32
+wlSurfaceSetBufferScaleSince = 3
 
 -- | @wl_surface.damage_buffer@
 -- Since version 4.
@@ -1159,17 +1193,29 @@ wlSurfaceDamageBuffer :: Connection -> ObjectId -> Int32 -> Int32 -> Int32 -> In
 wlSurfaceDamageBuffer conn self x y width height =
   request conn self 9 (argInt x <> argInt y <> argInt width <> argInt height)
 
+-- | The version @wl_surface.damage_buffer@ arrived in.
+wlSurfaceDamageBufferSince :: Word32
+wlSurfaceDamageBufferSince = 4
+
 -- | @wl_surface.offset@
 -- Since version 5.
 wlSurfaceOffset :: Connection -> ObjectId -> Int32 -> Int32 -> IO ()
 wlSurfaceOffset conn self x y =
   request conn self 10 (argInt x <> argInt y)
 
+-- | The version @wl_surface.offset@ arrived in.
+wlSurfaceOffsetSince :: Word32
+wlSurfaceOffsetSince = 5
+
 -- | @wl_surface.get_release@
 -- Since version 7.
 wlSurfaceGetRelease :: Connection -> ObjectId -> IO ObjectId
 wlSurfaceGetRelease conn self =
   requestNew conn self 11 (\callback -> argObject callback)
+
+-- | The version @wl_surface.get_release@ arrived in.
+wlSurfaceGetReleaseSince :: Word32
+wlSurfaceGetReleaseSince = 7
 
 -- | Events delivered to a @wl_surface@.
 data WlSurfaceEvent
@@ -1182,6 +1228,14 @@ data WlSurfaceEvent
     -- a newer version of the protocol. Ignoring these is what keeps a
     -- client forward compatible.
   deriving (Eq, Show)
+
+-- | The version @wl_surface.preferred_buffer_scale@ arrived in.
+wlSurfacePreferredBufferScaleSince :: Word32
+wlSurfacePreferredBufferScaleSince = 6
+
+-- | The version @wl_surface.preferred_buffer_transform@ arrived in.
+wlSurfacePreferredBufferTransformSince :: Word32
+wlSurfacePreferredBufferTransformSince = 6
 
 -- | Attach an event handler to a @wl_surface@ object.
 wlSurfaceListen :: Connection -> ObjectId -> (WlSurfaceEvent -> IO ()) -> IO ()
@@ -1247,6 +1301,10 @@ wlSeatRelease conn self =
   request conn self 3 (mempty)
     >> freeObject conn self
 
+-- | The version @wl_seat.release@ arrived in.
+wlSeatReleaseSince :: Word32
+wlSeatReleaseSince = 5
+
 -- | Events delivered to a @wl_seat@.
 data WlSeatEvent
   = WlSeatCapabilities !Word32
@@ -1256,6 +1314,10 @@ data WlSeatEvent
     -- a newer version of the protocol. Ignoring these is what keeps a
     -- client forward compatible.
   deriving (Eq, Show)
+
+-- | The version @wl_seat.name@ arrived in.
+wlSeatNameSince :: Word32
+wlSeatNameSince = 2
 
 -- | Attach an event handler to a @wl_seat@ object.
 wlSeatListen :: Connection -> ObjectId -> (WlSeatEvent -> IO ()) -> IO ()
@@ -1306,6 +1368,10 @@ wlKeyboardRelease conn self =
   request conn self 0 (mempty)
     >> freeObject conn self
 
+-- | The version @wl_keyboard.release@ arrived in.
+wlKeyboardReleaseSince :: Word32
+wlKeyboardReleaseSince = 3
+
 -- | Events delivered to a @wl_keyboard@.
 data WlKeyboardEvent
   = WlKeyboardKeymap !Word32 !Fd !Word32
@@ -1319,6 +1385,10 @@ data WlKeyboardEvent
     -- a newer version of the protocol. Ignoring these is what keeps a
     -- client forward compatible.
   deriving (Eq, Show)
+
+-- | The version @wl_keyboard.repeat_info@ arrived in.
+wlKeyboardRepeatInfoSince :: Word32
+wlKeyboardRepeatInfoSince = 4
 
 -- | Attach an event handler to a @wl_keyboard@ object.
 wlKeyboardListen :: Connection -> ObjectId -> (WlKeyboardEvent -> IO ()) -> IO ()
@@ -1422,6 +1492,10 @@ wlOutputRelease conn self =
   request conn self 0 (mempty)
     >> freeObject conn self
 
+-- | The version @wl_output.release@ arrived in.
+wlOutputReleaseSince :: Word32
+wlOutputReleaseSince = 3
+
 -- | Events delivered to a @wl_output@.
 data WlOutputEvent
   = WlOutputGeometry !Int32 !Int32 !Int32 !Int32 !Int32 !ByteString !ByteString !Int32
@@ -1435,6 +1509,22 @@ data WlOutputEvent
     -- a newer version of the protocol. Ignoring these is what keeps a
     -- client forward compatible.
   deriving (Eq, Show)
+
+-- | The version @wl_output.done@ arrived in.
+wlOutputDoneSince :: Word32
+wlOutputDoneSince = 2
+
+-- | The version @wl_output.scale@ arrived in.
+wlOutputScaleSince :: Word32
+wlOutputScaleSince = 2
+
+-- | The version @wl_output.name@ arrived in.
+wlOutputNameSince :: Word32
+wlOutputNameSince = 4
+
+-- | The version @wl_output.description@ arrived in.
+wlOutputDescriptionSince :: Word32
+wlOutputDescriptionSince = 4
 
 -- | Attach an event handler to a @wl_output@ object.
 wlOutputListen :: Connection -> ObjectId -> (WlOutputEvent -> IO ()) -> IO ()

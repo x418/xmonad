@@ -54,10 +54,11 @@ Two build-time requirements this backend has and the X11 one does not:
 - **`libxkbcommon`** (a `pkgconfig-depends`). It turns the compositor's keymap
   and a raw keycode into a keysym and the text it produces — needed for prompts,
   where a binding per keysym could express a shortcut but not typing.
-- **the threaded runtime**, already set on the `xmonad` executable here. If you
-  build your own executable rather than using this one, it needs `-threaded`:
-  the event loop waits on two descriptors, `sendRestart` interrupts a blocking
-  read with an async exception, and a prompt runs on a thread of its own.
+- **the threaded runtime**, already set on the `xmonad` executable here and
+  passed by `xmonad --recompile`. If you build your own executable rather than
+  using either, it needs `-threaded`: the event loop and the worker are two
+  threads, `sendRestart` interrupts the loop with an async exception, a prompt
+  runs on a thread of its own, and the calls into libxkbcommon are safe FFI.
 
 ### The programs your config spawns
 

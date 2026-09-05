@@ -34,6 +34,11 @@ module XMonad.River.Protocol.XkbConfig
   , riverXkbKeyboardV1NumlockDisable
   , riverXkbKeyboardV1ScrolllockEnable
   , riverXkbKeyboardV1ScrolllockDisable
+  , riverXkbKeyboardV1ScrolllockEnableSince
+  , riverXkbKeyboardV1ScrolllockDisableSince
+  , riverXkbKeyboardV1DoneSince
+  , riverXkbKeyboardV1ScrolllockEnabledSince
+  , riverXkbKeyboardV1ScrolllockDisabledSince
   , riverXkbKeyboardV1ErrorInvalidKeymap
   ) where
 
@@ -208,11 +213,19 @@ riverXkbKeyboardV1ScrolllockEnable :: Connection -> ObjectId -> IO ()
 riverXkbKeyboardV1ScrolllockEnable conn self =
   request conn self 8 (mempty)
 
+-- | The version @river_xkb_keyboard_v1.scrolllock_enable@ arrived in.
+riverXkbKeyboardV1ScrolllockEnableSince :: Word32
+riverXkbKeyboardV1ScrolllockEnableSince = 3
+
 -- | @river_xkb_keyboard_v1.scrolllock_disable@
 -- Since version 3.
 riverXkbKeyboardV1ScrolllockDisable :: Connection -> ObjectId -> IO ()
 riverXkbKeyboardV1ScrolllockDisable conn self =
   request conn self 9 (mempty)
+
+-- | The version @river_xkb_keyboard_v1.scrolllock_disable@ arrived in.
+riverXkbKeyboardV1ScrolllockDisableSince :: Word32
+riverXkbKeyboardV1ScrolllockDisableSince = 3
 
 -- | Events delivered to a @river_xkb_keyboard_v1@.
 data RiverXkbKeyboardV1Event
@@ -231,6 +244,18 @@ data RiverXkbKeyboardV1Event
     -- a newer version of the protocol. Ignoring these is what keeps a
     -- client forward compatible.
   deriving (Eq, Show)
+
+-- | The version @river_xkb_keyboard_v1.done@ arrived in.
+riverXkbKeyboardV1DoneSince :: Word32
+riverXkbKeyboardV1DoneSince = 2
+
+-- | The version @river_xkb_keyboard_v1.scrolllock_enabled@ arrived in.
+riverXkbKeyboardV1ScrolllockEnabledSince :: Word32
+riverXkbKeyboardV1ScrolllockEnabledSince = 3
+
+-- | The version @river_xkb_keyboard_v1.scrolllock_disabled@ arrived in.
+riverXkbKeyboardV1ScrolllockDisabledSince :: Word32
+riverXkbKeyboardV1ScrolllockDisabledSince = 3
 
 -- | Attach an event handler to a @river_xkb_keyboard_v1@ object.
 riverXkbKeyboardV1Listen :: Connection -> ObjectId -> (RiverXkbKeyboardV1Event -> IO ()) -> IO ()

@@ -124,7 +124,7 @@ addOutput rt out = do
     -- registry name; the name event needs version 4.
     RiverOutputV1WlOutput name -> do
       globals <- readIORef (rtGlobals rt)
-      forM_ (M.lookup name globals) $ \g -> when (globalVersion g >= 4) $ do
+      forM_ (M.lookup name globals) $ \g -> when (globalVersion g >= wlOutputNameSince) $ do
         wl <- bindNamed conn (rtRegistry rt) g wlOutputVersion
         adjust ref out $ \o -> o { roWlOutput = Just wl }
         wlOutputListen conn wl $ \case
@@ -155,7 +155,7 @@ addSeat rt seat = do
 
   -- The object @ensure_next_key_eaten@ is requested on.  Once per seat (twice
   -- is a protocol error), and only from version 2, where it exists.
-  mXkbSeat <- if rtXkbVersion rt < 2 then pure Nothing else do
+  mXkbSeat <- if rtXkbVersion rt < riverXkbBindingsV1GetSeatSince then pure Nothing else do
     xs <- riverXkbBindingsV1GetSeat conn (rtBindingsGlobal rt) seat
     riverXkbBindingsSeatV1Listen conn xs $ \case
       -- A key the open capture did not ask for ends it.  Without this a

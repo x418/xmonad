@@ -23,6 +23,7 @@ module XMonad.River.Protocol.InputManagement
   , riverInputDeviceV1SetScrollFactor
   , riverInputDeviceV1MapToOutput
   , riverInputDeviceV1MapToRectangle
+  , riverInputDeviceV1DoneSince
   , riverInputDeviceV1ErrorInvalidRepeatInfo
   , riverInputDeviceV1ErrorInvalidScrollFactor
   , riverInputDeviceV1ErrorInvalidMapToRectangle
@@ -177,6 +178,10 @@ data RiverInputDeviceV1Event
     -- a newer version of the protocol. Ignoring these is what keeps a
     -- client forward compatible.
   deriving (Eq, Show)
+
+-- | The version @river_input_device_v1.done@ arrived in.
+riverInputDeviceV1DoneSince :: Word32
+riverInputDeviceV1DoneSince = 2
 
 -- | Attach an event handler to a @river_input_device_v1@ object.
 riverInputDeviceV1Listen :: Connection -> ObjectId -> (RiverInputDeviceV1Event -> IO ()) -> IO ()
