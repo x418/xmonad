@@ -25,6 +25,7 @@ module XMonad.River.WM.Runtime
   , linuxButton
   ) where
 
+import Control.Concurrent.STM (TVar)
 import Control.Monad.Reader (asks)
 import Data.IORef
 import Data.Int (Int32)
@@ -106,6 +107,11 @@ data Runtime = Runtime
   , rtDisarm         :: !(IORef Bool)
     -- ^ A capture ended and its bindings are still installed; torn down in
     -- the next manage sequence, the only place @enable@ is legal.
+  , rtCaptureDeadline :: !(IORef (Maybe (Int, TVar Bool)))
+    -- ^ The open capture's deadline: its generation and a 'registerDelay'
+    -- flag the loop waits on alongside everything else.  One slot, like
+    -- the capture; arming a new one replaces the old, whose flag then
+    -- fires for nobody.
   , rtLayerDefault   :: !(IORef (Maybe ObjectId))
     -- ^ The output last nominated for layer surfaces that name none.
   , rtStartupSent    :: !(IORef Bool)

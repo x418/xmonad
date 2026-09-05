@@ -12,8 +12,7 @@ module XMonad.River.WM.Transmit
   , transmitRender
   ) where
 
-import Control.Concurrent (forkIO, threadDelay)
-import Control.Concurrent.STM (readTVarIO)
+import Control.Concurrent.STM (readTVarIO, registerDelay)
 import Control.Monad (forM, forM_, unless, void, when)
 import Data.Bits ((.&.), (.|.))
 import Data.IORef
@@ -332,17 +331,12 @@ armCapture rt seats ks mods oneShot gen = do
       riverXkbBindingsSeatV1EnsureNextKeyEaten conn x
       modifyIORef' (rtEatGenerations rt) (M.insert x gen)
 
-  -- A deadline, or an abandoned capture is a session with no bindings.  The
-  -- work is posted to the loop; this thread touches no connection.
-  void $ forkIO $ do
-    threadDelay captureDeadlineMicros
-    MB.post (shLoopJobs (rtShared rt)) $ do
-      taken <- claim
-      forM_ taken $ \cap -> do
-        hPutStrLn stderr
-          "xmonad-river: keyboard capture abandoned after 60s; restoring bindings"
-        writeIORef (rtDisarm rt) True
-        queueAction rt (icOnEnd cap)
+  -- A deadline, or an abandoned capture is a session with no bindings.  A
+  -- 'registerDelay' flag the loop waits on ('expireCapture'), not a thread
+  -- per capture sleeping for a minute: a dozen submaps used to be a dozen
+  -- threads, each waking the loop at its expiry.
+  expired <- registerDelay captureDeadlineMicros
+  writeIORef (rtCaptureDeadline rt) (Just (gen, expired))
   where
     conn = rtConn rt
 

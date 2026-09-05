@@ -71,6 +71,9 @@
 -- never do anything with it -- which is the failure this whole module is built
 -- to avoid -- and no amount of waiting will change it.  'startupDeadlineMicros'
 -- after the client starts, such a prompt is closed and the reason is logged.
+-- The check runs on the client's own loop, from a deadline flag its wait
+-- includes; a loop too wedged to run it is what the panic chord and
+-- 'closeAllClients' are for.
 --
 -- Deliberately /not/ a timeout on keystrokes.  A prompt waiting while someone
 -- reads the screen is idle for minutes and is working perfectly; closing it
@@ -87,7 +90,8 @@ module XMonad.River.Client
     -- this function worth a test and the one it got wrong; see its haddock.
   ) where
 
-import Control.Concurrent (ThreadId, forkIO, killThread, myThreadId, threadDelay)
+import Control.Concurrent (ThreadId, forkIO, killThread, myThreadId)
+import Control.Concurrent.STM (STM, TVar, atomically, check, newTVarIO, orElse, readTVar, readTVarIO, registerDelay, retry, writeTVar)
 import Control.Monad (forM_, unless, void, when)
 import Data.Bits ((.&.), (.|.))
 import Data.IORef
@@ -242,6 +246,8 @@ data Client = Client
     -- is whether the grab ever worked, and a prompt that has since /lost/ focus
     -- is not eating anyone's keystrokes.
   , clRunning :: !(IORef Bool)
+  , clWatch   :: !(TVar Watch)
+    -- ^ The startup watchdog's state; the loop waits on it with the inbox.
   , clConfigured :: !(IORef Bool)
     -- ^ Whether the compositor has sent a @configure@ and it has been acked.
     --
@@ -294,9 +300,10 @@ clientMain spec inbox = do
       kbRef <- newIORef Nothing
       focusRef <- newIORef False
       running <- newIORef True
+      watch <- newTVarIO WatchDone
       configured <- newIORef False
       let cl = Client conn shm surface layer bufRef sizeRef xkbRef kbRef
-                      focusRef running configured
+                      focusRef running watch configured
 
       when (csKeyboard spec) $
         forM_ mSeat $ \(seat, _) -> setupKeyboard spec cl seat
@@ -317,7 +324,7 @@ clientMain spec inbox = do
       -- Everything above has created a surface that may be holding the
       -- keyboard.  From here on the only acceptable outcome is that it is
       -- destroyed, so the loop runs under a handler rather than in the open.
-      watchStartup spec cl inbox
+      armWatch cl
       loop spec cl inbox `E.finally` shutdown spec cl
 
     _ -> do
@@ -427,43 +434,48 @@ activeKeyMask st = foldr (.|.) 0 <$> mapM active named
 startupDeadlineMicros :: Int
 startupDeadlineMicros = 10 * 1000 * 1000
 
--- | How long to wait for a client to close itself before killing its thread.
-closeGraceMicros :: Int
-closeGraceMicros = 1 * 1000 * 1000
+-- | The startup watchdog, as the loop sees it: armed with a 'registerDelay'
+-- flag, then done.
+data Watch = WatchStartup !(TVar Bool) | WatchDone
+
+-- | Arm the watchdog.  A flag the loop's own wait includes rather than a
+-- thread sleeping for ten seconds per prompt: the check runs on the loop,
+-- which owns the connection and can close the surface itself.
+armWatch :: Client -> IO ()
+armWatch cl = do
+  expired <- registerDelay startupDeadlineMicros
+  atomically (writeTVar (clWatch cl) (WatchStartup expired))
+
+-- | Retries until the watchdog has something to say.
+watchFired :: Client -> STM ()
+watchFired cl = readTVar (clWatch cl) >>= \case
+  WatchStartup expired -> readTVar expired >>= check
+  WatchDone -> retry
 
 -- | Close a client that never became able to read the keyboard.
 --
 -- See the module header for why this watches capability rather than silence.
--- The escalation matters as much as the check: 'Close' is posted first, which
--- is the orderly route and the one that works when the loop is healthy and only
--- the keyboard is not.  A loop that does not answer within 'closeGraceMicros'
--- is wedged as well as useless, and gets what 'closeAllClients' gives -- the
--- asynchronous exception that unwinds through the handler around 'loop'.
---
--- Note what this thread does /not/ do: touch 'clConn'.  One thread owns that
--- connection, and it is not this one.
-watchStartup :: ClientSpec -> Client -> Mailbox Request -> IO ()
-watchStartup spec cl inbox = do
-  tid <- myThreadId
-  void . forkIO $ do
-    threadDelay startupDeadlineMicros
-    alive <- readIORef (clRunning cl)
-    when alive $ do
-      faults <- startupFaults spec cl
-      unless (null faults) $ do
-        hPutStrLn stderr $
-          "xmonad-river: closing a prompt that never became usable: "
-            ++ intercalate "; " faults
-            ++ ".  Every keystroke was going to it and it could not have "
-            ++ "answered any of them."
-        MB.post inbox Close
-        threadDelay closeGraceMicros
-        stuck <- readIORef (clRunning cl)
-        when stuck $ do
-          hPutStrLn stderr
-            "xmonad-river: that prompt did not answer its own close request \
-            \either, so killing its thread"
-          killThread tid
+-- On the loop, so the orderly route -- 'shutdown', which destroys the
+-- surface and releases the grab -- is taken directly.  A loop too wedged to
+-- get here is what the panic chord and 'closeAllClients' are for; nothing
+-- inside the client can rescue it from itself.
+checkWatch :: ClientSpec -> Client -> IO ()
+checkWatch spec cl = readTVarIO (clWatch cl) >>= \case
+  WatchDone -> pure ()
+  WatchStartup expired -> do
+    fired <- readTVarIO expired
+    when fired $ do
+      atomically (writeTVar (clWatch cl) WatchDone)
+      alive <- readIORef (clRunning cl)
+      when alive $ do
+        faults <- startupFaults spec cl
+        unless (null faults) $ do
+          hPutStrLn stderr $
+            "xmonad-river: closing a prompt that never became usable: "
+              ++ intercalate "; " faults
+              ++ ".  Every keystroke was going to it and it could not have "
+              ++ "answered any of them."
+          shutdown spec cl
 
 -- | What is wrong with a client that has had 'startupDeadlineMicros' to start.
 --
@@ -633,10 +645,11 @@ loop spec cl inbox = go
         -- nothing comes back to wake us and the prompt hangs unpainted.
         flush (clConn cl)
         sockFd <- connectionFd (clConn cl)
-        r <- MB.waitSocketOr sockFd (MB.awaitMail inbox)
+        r <- MB.waitSocketOr sockFd (MB.awaitMail inbox `orElse` watchFired cl)
         case r of
           Left () -> dispatch (clConn cl)
           Right () -> do
+            checkWatch spec cl
             reqs <- MB.drain inbox
             forM_ reqs $ \case
               Redraw -> redraw spec cl

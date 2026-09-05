@@ -28,7 +28,7 @@ module XMonad.River.WM
 import Control.Concurrent (forkFinally, forkIO, killThread, newChan, newEmptyMVar, putMVar, readChan, takeMVar, writeChan)
 import Control.Concurrent.STM
 import Control.Exception (AsyncException(ThreadKilled), SomeException, catch, fromException, handle, throwIO)
-import Control.Monad (forever, unless, void, when)
+import Control.Monad (forM_, forever, unless, void, when)
 import Control.Monad.Reader (asks)
 import Data.IORef
 import Data.List (isSuffixOf)
@@ -288,6 +288,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm g
     armed      <- newIORef []
     armedGen   <- newIORef 0
     disarm     <- newIORef False
+    deadline   <- newIORef Nothing
     layerDef   <- newIORef Nothing
     startup    <- newIORef False
     modWatcher <- newIORef Nothing
@@ -329,6 +330,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm g
       , rtArmed = armed
       , rtArmedGen = armedGen
       , rtDisarm = disarm
+      , rtCaptureDeadline = deadline
       , rtLayerDefault = layerDef
       , rtStartupSent = startup
       , rtModWatcher = modWatcher
@@ -368,17 +370,20 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm g
 
   let mailbox = riverMailbox rs
       -- What can wake the loop besides the compositor: actions posted from
-      -- other threads, loop jobs, a dirty flag or a now-op from the worker, and
-      -- a plan that landed after its sequence was answered.
-      signals sent asked =
+      -- other threads, loop jobs, a dirty flag or a now-op from the worker, a
+      -- plan that landed after its sequence was answered, and the open
+      -- capture's deadline.
+      signals sent asked deadline =
                 MB.awaitMail mailbox
         `orElse` MB.awaitMail (shLoopJobs sh)
         `orElse` (readTVar (riverDirty rs) >>= check)
         `orElse` nowOpsPending rs
         `orElse` (readTVar (shPlan sh) >>= \p -> check (planSerial p > max sent asked))
+        `orElse` maybe retry (\(_, expired) -> readTVar expired >>= check) deadline
       loop = do
         MB.drain mailbox >>= queueActions rt
         MB.drain (shLoopJobs sh) >>= sequence_
+        expireCapture rt
         dirty <- atomically (swapTVar (riverDirty rs) False)
         sent <- readIORef (rtSent rt)
         asked <- readIORef (rtAsked rt)
@@ -405,7 +410,8 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm g
         -- reaches the compositor and nothing comes back to wake us.
         flush conn
         sockFd <- connectionFd conn
-        ready <- MB.waitSocketOr sockFd (signals sent asked)
+        deadline <- readIORef (rtCaptureDeadline rt)
+        ready <- MB.waitSocketOr sockFd (signals sent asked deadline)
         case ready of
           Left ()  -> dispatch conn
           Right () -> pure ()
@@ -473,6 +479,22 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm g
       -- still there.
       supervise = (loop `catch` \RestartRequested -> onRestart) >> supervise
   handle onExit (handle onWayland supervise)
+
+-- | A capture whose deadline has passed is abandoned: claimed by its
+-- generation, so a capture armed since is untouched, and its end action
+-- queued.  A session with no bindings is what an abandoned capture would
+-- otherwise be.
+expireCapture :: Runtime -> IO ()
+expireCapture rt = readIORef (rtCaptureDeadline rt) >>= mapM_ (\(gen, expired) -> do
+  fired <- readTVarIO expired
+  when fired $ do
+    writeIORef (rtCaptureDeadline rt) Nothing
+    taken <- claimCapture rt gen
+    forM_ taken $ \cap -> do
+      hPutStrLn stderr
+        "xmonad-river: keyboard capture abandoned after 60s; restoring bindings"
+      writeIORef (rtDisarm rt) True
+      queueAction rt (icOnEnd cap))
 
 -- | What to exec on restart, or 'Nothing' if there is nothing to exec.
 --
