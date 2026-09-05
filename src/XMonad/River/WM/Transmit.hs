@@ -229,22 +229,24 @@ transmitManage rt plan = do
   when (planSerial plan > 0) $ do
     lastM <- readIORef (rtLastManage rt)
     current <- fmap M.fromList $ forM
-      [ (win, r, rw) | (win, r) <- planPlacements plan, Just rw <- [M.lookup win known] ] $
-      \(win, r, rw) -> do
-        let tiled = not (S.member win (planFloating plan))
-            (pw, ph) | S.member win (planUnsized plan) = (0, 0)
+      [ (win, pl, rw) | win <- planOrder plan, Just pl <- [M.lookup win (planPlaced plan)]
+                      , Just rw <- [M.lookup win known] ] $
+      \(win, pl, rw) -> do
+        let tiled = not (plFloating pl)
+            r = plRect pl
+            (pw, ph) | plUnsized pl = (0, 0)
                      | otherwise = (rect_width r, rect_height r)
             want = (pw, ph, tiled)
             asked = (fromIntegral pw, fromIntegral ph)
             dims = rwDimensions rw
             resend = case M.lookup win lastM of
-              Just (want', seen) ->
-                want' /= want || (tiled && dims /= asked && dims /= seen)
+              Just sent ->
+                msWant sent /= want || (tiled && dims /= asked && dims /= msSeen sent)
               Nothing -> True
         when resend $ do
           riverWindowV1ProposeDimensions conn win (fromIntegral pw) (fromIntegral ph)
           riverWindowV1SetTiled conn win (if tiled then allEdges else 0)
-        pure (win, (want, dims))
+        pure (win, ManageSent want dims)
     atomicWriteIORef (rtLastManage rt) $! current
 
     -- Keyboard focus.  A seat whose keyboard has gone to a layer surface is left
@@ -447,8 +449,8 @@ transmitRender rt = do
   -- size, with nothing new for this side to say.  Given the same plan, the
   -- same windows and the same overlays as last time, there is nothing to
   -- diff and nothing is sent.
-  let given = (planSerial plan, windowsGen, overlays,
-               M.restrictKeys positions (S.fromList overlays))
+  let given = RenderInput (planSerial plan) windowsGen overlays
+                (M.restrictKeys positions (S.fromList overlays))
   lastGiven <- readIORef (rtLastRendered rt)
   when (planSerial plan > 0) $ unless (given == lastGiven) $ do
     atomicWriteIORef (rtLastRendered rt) $! given
@@ -464,12 +466,12 @@ renderPlan rt plan known overlays positions = do
   -- a window that was hidden, or is new, gets everything.
   lastR <- readIORef (rtLastRender rt)
   shown <- fmap M.fromList $ forM
-    [ (win, r, w) | (win, r) <- planPlacements plan, Just w <- [M.lookup win known] ] $
-    \(win, r, w) -> do
-      -- Width 0 is how NoBorders removes a border; river reads it as none.
-      let border@(width, (red, green, blue, alpha)) =
-            M.findWithDefault (0, (0, 0, 0, 0)) win (planBorders plan)
-          entry = (r, border)
+    [ (win, pl, w) | win <- planOrder plan, Just pl <- [M.lookup win (planPlaced plan)]
+                   , Just w <- [M.lookup win known] ] $
+    \(win, pl, w) -> do
+      let r = plRect pl
+          Border width (red, green, blue, alpha) = plBorder pl
+          entry = RenderSent r (plBorder pl)
       when (rwHidden w) $ do
         riverWindowV1Show conn win
         adjust winRef win $ \x -> x { rwHidden = False }
@@ -483,7 +485,7 @@ renderPlan rt plan known overlays positions = do
   -- What the layout did not place is on a workspace that is off screen.
   -- river has no workspaces; this is what implements them.
   let toHide = [ w | w <- M.elems known
-                   , not (S.member (rwObject w) (planVisible plan)), not (rwHidden w) ]
+                   , not (planVisible plan (rwObject w)), not (rwHidden w) ]
   forM_ toHide $ \w -> riverWindowV1Hide conn (rwObject w)
   unless (null toHide) $ modifyIORef' winRef $ \m ->
     foldr (\w -> M.adjust (\x -> x { rwHidden = True }) (rwObject w)) m toHide
@@ -496,7 +498,7 @@ renderPlan rt plan known overlays positions = do
   -- overlays), which contrib records, go above the windows.
   let nodeOf win = rwNode <$> M.lookup win known
       order = concat
-        [ [ n | (win, _) <- reverse (planPlacements plan), Just n <- [nodeOf win] ]
+        [ [ n | win <- reverse (planOrder plan), Just n <- [nodeOf win] ]
         , [ n | win <- planRaised plan, Just n <- [nodeOf win] ]
         , overlays ]
   lastOrder <- readIORef (rtLastStack rt)

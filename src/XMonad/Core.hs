@@ -314,7 +314,7 @@ lookupWindowAttributes :: Display -> Window -> IO (Maybe WindowAttributes)
 lookupWindowAttributes dpy win = do
     let rs = dpyState dpy
         bw = riverBorderWidth rs
-    placed <- M.lookup win <$> readIORef (riverGeometry rs)
+    placed <- rectOf rs win
     case placed of
         Just r -> pure $ Just WindowAttributes
             { wa_x = rect_x r, wa_y = rect_y r

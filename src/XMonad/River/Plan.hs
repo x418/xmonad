@@ -5,6 +5,9 @@
 -- requests are one-shot effects ('Op') and must go exactly once.
 module XMonad.River.Plan
   ( Plan(..)
+  , Placement(..)
+  , Border(..)
+  , planVisible
   , emptyPlan
   , FocusTarget(..)
   , Op(..)
@@ -30,29 +33,41 @@ data FocusTarget
 
 -- | Everything restated on each sequence: safe to transmit again unchanged,
 -- which is what lets the loop answer a @manage_start@ it has nothing new for.
+-- | A border as river draws it: width and RGBA.  Rendering state, so river
+-- forgets it between frames and it is restated rather than set once.
+data Border = Border
+  { bdWidth :: !Dimension
+    -- ^ 0 is how NoBorders removes a border; river reads it as none.
+  , bdRGBA  :: !(Word32, Word32, Word32, Word32)
+  } deriving (Eq, Show)
+
+-- | Where the layout put one window and what it is to be told about itself.
+data Placement = Placement
+  { plRect     :: !Rectangle
+  , plFloating :: !Bool
+    -- ^ A tiled window is told so.  One that is not told draws itself as
+    -- though it were floating: its own decorations, and drop shadows outside
+    -- the size it was given, which it then subtracts from its content.
+  , plUnsized  :: !Bool
+    -- ^ A float whose size is the client's to choose: proposed 0x0.  In the
+    -- plan rather than read from the worker's state, since the plan
+    -- transmitted may be older than that state.
+  , plBorder   :: !Border
+    -- ^ Already resolved against any per-window override.
+  } deriving (Eq, Show)
+
 data Plan = Plan
   { planSerial     :: !Int
     -- ^ Monotonic.  Lets whoever published a plan tell when it has landed.
-  , planPlacements :: ![(Window, Rectangle)]
-    -- ^ Topmost first, floats before tiles, which is upstream's convention.
-    -- The render sequence reverses this before @place_top@ing it.
-  , planFloating   :: !(S.Set Window)
-    -- ^ Which of the placements are floating, so the rest can be told they
-    -- are tiled.  A window that is not told draws itself as though it were
-    -- floating: its own decorations, and drop shadows outside the size it
-    -- was given, which it then subtracts from its content.
-  , planUnsized    :: !(S.Set Window)
-    -- ^ Placed floats whose size is the client's to choose: proposed 0x0.
-    -- In the plan rather than read from the worker's state, since the plan
-    -- transmitted may be older than that state.
-  , planBorders    :: !(M.Map Window (Dimension, (Word32, Word32, Word32, Word32)))
-    -- ^ Width and RGBA per placed window, already resolved against any
-    -- per-window override.  Borders are rendering state, so river forgets them
-    -- between frames and they have to be restated rather than set once.
-  , planVisible    :: !(S.Set Window)
-    -- ^ What the layout placed.  Anything river knows about and this does not
-    -- contain belongs to a workspace that is off screen, and is hidden --
-    -- which is how workspaces exist at all, river having no such concept.
+  , planOrder      :: ![Window]
+    -- ^ The placed windows, topmost first, floats before tiles, which is
+    -- upstream's convention.  The render sequence reverses this before
+    -- @place_top@ing it.  Every entry has a 'Placement'.
+  , planPlaced     :: !(M.Map Window Placement)
+    -- ^ What the layout placed, and how.  Anything river knows about and this
+    -- does not contain belongs to a workspace that is off screen, and is
+    -- hidden -- which is how workspaces exist at all, river having no such
+    -- concept.
   , planRaised     :: ![Window]
     -- ^ Standing "keep this above the layout" requests, re-applied every frame
     -- because the render sequence would otherwise have just undone them.
@@ -68,14 +83,15 @@ data Plan = Plan
   }
 
 -- | The plan of a window manager that has decided nothing yet.
+-- | Whether the layout placed the window.
+planVisible :: Plan -> Window -> Bool
+planVisible p w = M.member w (planPlaced p)
+
 emptyPlan :: Plan
 emptyPlan = Plan
   { planSerial     = 0
-  , planPlacements = []
-  , planBorders    = M.empty
-  , planFloating   = S.empty
-  , planUnsized    = S.empty
-  , planVisible    = S.empty
+  , planOrder      = []
+  , planPlaced     = M.empty
   , planRaised     = []
   , planFocus      = ClearFocus
   , planLayerDefault = Nothing

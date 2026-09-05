@@ -10,6 +10,9 @@
 module XMonad.River.WM.Runtime
   ( Runtime(..)
   , Shared(..)
+  , ManageSent(..)
+  , RenderSent(..)
+  , RenderInput(..)
   , queueAction
   , queueActions
   , claimCapture
@@ -33,6 +36,7 @@ import qualified Data.Set as S
 import XMonad.Core
 import XMonad.River.Connection (Connection, Global)
 import qualified XMonad.River.Mailbox as MB
+import XMonad.River.Plan (Border)
 import XMonad.River.Protocol.WindowManagement
 import XMonad.River.State (InputCapture(..), Shared(..))
 import XMonad.River.Types
@@ -125,21 +129,47 @@ data Runtime = Runtime
     -- ^ Counts the windows river has announced; part of what decides whether
     -- a render sequence has anything new to send.
     -- what the last transmission said, so the next sends only what changed
-  , rtLastManage     :: !(IORef (M.Map Window ((Dimension, Dimension, Bool), (Int32, Int32))))
-    -- ^ Per placed window: the dimensions and tiled-ness last proposed, and
-    -- the size the client had when that was decided.
-  , rtLastRender     :: !(IORef (M.Map Window (Rectangle, (Dimension, BorderColor))))
-    -- ^ Position and border, per shown window.
+  , rtLastManage     :: !(IORef (M.Map Window ManageSent))
+    -- ^ Per placed window, what the last manage sequence proposed.  Pruned
+    -- when the window is reaped: river recycles ids, and a new window in
+    -- the slot must not have its first proposal suppressed.
+  , rtLastRender     :: !(IORef (M.Map Window RenderSent))
+    -- ^ Position and border, per shown window.  Pruned likewise.
   , rtLastStack      :: !(IORef [ObjectId])
-    -- ^ The node order last placed, bottom to top.
+    -- ^ The node order last placed, bottom to top.  A reaped window's node
+    -- leaves it, so the next order with a new node in that slot is sent.
   , rtLastOverlayPos :: !(IORef (M.Map ObjectId (Position, Position)))
     -- ^ Where each listed overlay was last put.
-  , rtLastRendered   :: !(IORef (Int, Int, [ObjectId], M.Map ObjectId (Position, Position)))
-    -- ^ What the last render sequence was given: plan serial, window count,
-    -- overlays and their positions.  A render sequence given the same again
-    -- -- river starts one whenever a client changes its own size -- sends
-    -- nothing.
+  , rtLastRendered   :: !(IORef RenderInput)
+    -- ^ What the last render sequence was given.  A render sequence given
+    -- the same again -- river starts one whenever a client changes its own
+    -- size -- sends nothing.
   }
+
+-- | What the last manage sequence proposed to one window.
+data ManageSent = ManageSent
+  { msWant :: !(Dimension, Dimension, Bool)
+    -- ^ Width, height and tiled-ness proposed.
+  , msSeen :: !(Int32, Int32)
+    -- ^ The size the client had when that was decided.
+  } deriving (Eq, Show)
+
+-- | What the last render sequence placed for one window.
+data RenderSent = RenderSent
+  { rdRect   :: !Rectangle
+  , rdBorder :: !Border
+  } deriving (Eq, Show)
+
+-- | What a render sequence is a function of.
+data RenderInput = RenderInput
+  { riSerial    :: !Int
+    -- ^ 'XMonad.River.Plan.planSerial'.
+  , riWindows   :: !Int
+    -- ^ How many windows river has announced, ever.
+  , riOverlays  :: ![ObjectId]
+  , riPositions :: !(M.Map ObjectId (Position, Position))
+    -- ^ The listed overlays' positions.
+  } deriving (Eq, Show)
 
 -- | Queue an action for the next manage sequence.  Loop thread only.
 --

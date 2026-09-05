@@ -28,9 +28,10 @@ module XMonad.River.State
   , riverWindows, riverOutputs, riverSeats, riverDirty, riverRestart, riverMailbox, riverLoopJobs
   , riverExtraKeys, riverOverlays, riverOverlayPos, riverCapture, riverOps, riverNowOps
   , riverKeyboardLayout
-  , inManageSeq, riverPlacements, riverGeometry, riverRestack, riverDragOrigin, riverAfterLayout
+  , inManageSeq, riverPlaced, riverRestack, riverDragOrigin, riverAfterLayout
   , riverUnsized, riverLogDue, riverBorders, riverSubmapGen
-  , updatePlacement
+    -- * Where the last layout put things
+  , Placed(..), rectOf, placedRects, placedOrder, updatePlacement
     -- * One-shot requests
   , queueOp, queueNow, takeOps, takeNowOps, nowOpsPending
     -- * Border overrides
@@ -167,11 +168,9 @@ data Shared m = Shared
 data WorkerState m = WorkerState
     { wsInManageSeq :: !(IORef Bool)
       -- ^ guards requests river only permits during a manage sequence
-    , wsPlacements :: !(IORef [(Window, Rectangle)])
-      -- ^ The last layout's placements, topmost first: the stacking order,
-      -- for what is under the pointer.  Lookups by window go to 'wsGeometry'.
-    , wsGeometry :: !(IORef (M.Map Window Rectangle))
-      -- ^ Where the last layout put each placed window, as a map: what
+    , wsPlaced :: !(IORef Placed)
+      -- ^ Where the last layout put things: the stacking order, for what is
+      -- under the pointer, and the rectangles by window, which is what
       -- 'XMonad.Core.getWindowAttributes' answers from.  A window river knows
       -- and this does not hold is unmapped at the origin, as X11 would have
       -- said; the attributes are built when asked, not for every window on
@@ -260,10 +259,8 @@ riverKeyboardLayout = shKeyboardLayout . rsShared
 
 inManageSeq :: RiverState m -> IORef Bool
 inManageSeq = wsInManageSeq . rsWorker
-riverPlacements :: RiverState m -> IORef [(Window, Rectangle)]
-riverPlacements = wsPlacements . rsWorker
-riverGeometry :: RiverState m -> IORef (M.Map Window Rectangle)
-riverGeometry = wsGeometry . rsWorker
+riverPlaced :: RiverState m -> IORef Placed
+riverPlaced = wsPlaced . rsWorker
 riverRestack :: RiverState m -> IORef [Window]
 riverRestack = wsRestack . rsWorker
 riverDragOrigin :: RiverState m -> IORef (Position, Position)
@@ -299,8 +296,7 @@ riverSubmapGen = wsSubmapGen . rsWorker
 {-# INLINE riverNowOps #-}
 {-# INLINE riverKeyboardLayout #-}
 {-# INLINE inManageSeq #-}
-{-# INLINE riverPlacements #-}
-{-# INLINE riverGeometry #-}
+{-# INLINE riverPlaced #-}
 {-# INLINE riverRestack #-}
 {-# INLINE riverDragOrigin #-}
 {-# INLINE riverAfterLayout #-}
@@ -367,10 +363,31 @@ clearBorderColor ref w = atomicModifyIORef' ref $ \m ->
 forgetBorderOverride :: Borders -> Window -> IO ()
 forgetBorderOverride ref w = atomicModifyIORef' ref (\m -> (M.delete w m, ()))
 
+-- | What the last layout placed, once: the order for hit-testing and the
+-- rectangles for lookups, written together by @applyLayout@.
+data Placed = Placed
+    { pdOrder :: ![Window]
+      -- ^ Topmost first.
+    , pdMap   :: !(M.Map Window Rectangle)
+    }
+
+-- | Where the last layout put a window, if it placed it.
+rectOf :: MonadIO m => RiverState n -> Window -> m (Maybe Rectangle)
+rectOf rs w = liftIO (M.lookup w . pdMap <$> readIORef (riverPlaced rs))
+
+-- | Every placed window's rectangle.
+placedRects :: MonadIO m => RiverState n -> m (M.Map Window Rectangle)
+placedRects rs = liftIO (pdMap <$> readIORef (riverPlaced rs))
+
+-- | The placed windows with their rectangles, topmost first.
+placedOrder :: MonadIO m => RiverState n -> m [(Window, Rectangle)]
+placedOrder rs = liftIO $ do
+    Placed order rects <- readIORef (riverPlaced rs)
+    pure [ (w, r) | w <- order, Just r <- [M.lookup w rects] ]
+
 -- | Correct the recorded geometry of a window something just moved outside a
 -- layout run, so 'XMonad.Operations.floatLocation' reads the move back rather
 -- than undoing it.  A window with no placement is left alone.
 updatePlacement :: MonadIO m => RiverState n -> Window -> Rectangle -> m ()
-updatePlacement rs w r = liftIO $ do
-    modifyIORef' (riverPlacements rs) $ map (\e -> if fst e == w then (w, r) else e)
-    modifyIORef' (riverGeometry rs) $ M.adjust (const r) w
+updatePlacement rs w r = liftIO $
+    modifyIORef' (riverPlaced rs) $ \p -> p { pdMap = M.adjust (const r) w (pdMap p) }

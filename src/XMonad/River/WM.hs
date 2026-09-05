@@ -152,8 +152,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm g
       }
   wstate <- do
     manageRef   <- newIORef False
-    placeRef    <- newIORef []
-    geometry    <- newIORef M.empty
+    placed      <- newIORef (Placed [] M.empty)
     restackRef  <- newIORef []
     dragOrigin  <- newIORef (0, 0)
     afterLayout <- newIORef []
@@ -170,8 +169,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm g
     floatSizes  <- newIORef M.empty
     pure WorkerState
       { wsInManageSeq = manageRef
-      , wsPlacements  = placeRef
-      , wsGeometry    = geometry
+      , wsPlaced      = placed
       , wsRestack     = restackRef
       , wsDragOrigin  = dragOrigin
       , wsAfterLayout = afterLayout
@@ -301,7 +299,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm g
     lastRender <- newIORef M.empty
     lastStack  <- newIORef []
     lastOvPos  <- newIORef M.empty
-    lastGiven  <- newIORef (-1, -1, [], M.empty)
+    lastGiven  <- newIORef (RenderInput (-1) (-1) [] M.empty)
     pure Runtime
       { rtConn = conn
       , rtRegistry = registry

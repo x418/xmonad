@@ -239,6 +239,11 @@ reapObjects rt = do
     riverNodeV1Destroy conn (rwNode w)
     riverWindowV1Destroy conn (rwObject w)
     modifyIORef' winRef (M.delete (rwObject w))
+    -- river recycles ids: what was last sent for this slot must not
+    -- suppress the first proposal, position or stacking of its successor.
+    modifyIORef' (rtLastManage rt) (M.delete (rwObject w))
+    modifyIORef' (rtLastRender rt) (M.delete (rwObject w))
+    modifyIORef' (rtLastStack rt) (filter (/= rwNode w))
     atomicModifyIORef' (shHovered sh) (\h -> (if h == Just (rwObject w) then Nothing else h, ()))
 
   let outRef = shOutputs sh

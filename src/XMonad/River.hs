@@ -246,9 +246,7 @@ exitSession = emitNow OpExitSession
 -- sent.  river never reports a position, since the window manager chose it.
 -- 'Nothing' for a window not currently placed.
 windowRect :: Window -> X (Maybe Rectangle)
-windowRect w = do
-    placements <- io . readIORef =<< asks (riverGeometry . riverState)
-    pure (M.lookup w placements)
+windowRect w = asks riverState >>= \rs -> rectOf rs w
 
 -- | Put a window at an absolute position and size, size hints applied.
 --
@@ -274,7 +272,7 @@ moveResizeWindow w r = do
 mouseResizeWindowEdges :: Word32 -> Window -> X ()
 mouseResizeWindowEdges edges w = do
     known <- io . readIORef =<< asks (riverWindows . riverState)
-    geometry <- io . readIORef =<< asks (riverGeometry . riverState)
+    geometry <- placedRects =<< asks riverState
     drag <- gets dragging
     seats <- io . readIORef =<< asks (riverSeats . riverState)
     let free = isNothing drag && any (not . rsRemoved) (M.elems seats)
@@ -323,7 +321,7 @@ windowUnderPointer :: X (Maybe Window)
 windowUnderPointer = pointerPosition >>= \case
     Nothing -> pure Nothing
     Just (px, py) -> do
-        placements <- io . readIORef =<< asks (riverPlacements . riverState)
+        placements <- placedOrder =<< asks riverState
         pure $ fst <$> find (pointWithin px py . snd) placements
 
 -- | How many outputs the compositor has, over a connection of its own -- for

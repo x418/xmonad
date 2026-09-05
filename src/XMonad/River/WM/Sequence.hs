@@ -306,7 +306,7 @@ settleFloats = do
   -- ConfigureRequest let it.  Only a size that changed since last seen: one
   -- this side proposed is the placement's already, and the client's report
   -- of it is not a change of mind.
-  geometry <- io (readIORef (riverGeometry rs))
+  geometry <- placedRects rs
   seen <- io (readIORef sizesRef)
   floats <- gets (M.keys . W.floating . windowset)
   let sized = [ (w, rwDimensions rw) | w <- floats, Just rw <- [M.lookup w known]
@@ -362,12 +362,6 @@ applyLayout layerDefault = do
       st { windowset = updateLayout (W.tag wsp) l' (windowset st) }
     pure (flt ++ rects, map fst flt)
 
-  let placements = concatMap fst perScreen
-      floating = S.fromList (concatMap snd perScreen)
-      placedMap = M.fromList placements
-      placed = M.keysSet placedMap
-      mFocus = W.peek ws
-
   -- Borders are decided here.  The focused window takes the focused colour
   -- whatever an override says: X11 repainted it on every 'windows', and a
   -- colour WindowNavigation had set would otherwise hide the focus forever.
@@ -375,42 +369,50 @@ applyLayout layerDefault = do
   focusedCol <- asks focusedBorder
   normalCol <- asks normalBorder
   overrides <- io (readIORef (riverBorders rs))
-  let borders = M.fromList
-        [ (win, (fromMaybe bw mWidth, rgba))
-        | (win, _) <- placements
-        , let (mWidth, mColor) = M.findWithDefault (Nothing, Nothing) win overrides
-        , let rgba = case mColor of
-                Just c | Just win /= mFocus -> c
-                _ -> pixelColor (if Just win == mFocus then focusedCol else normalCol)
-        ]
+  unsized <- io (readIORef (riverUnsized rs))
+  let placements = concatMap fst perScreen
+      floating = S.fromList (concatMap snd perScreen)
+      order = map fst placements
+      mFocus = W.peek ws
+      placement (win, r) = Placement
+        { plRect     = r
+        , plFloating = S.member win floating
+        , plUnsized  = S.member win floating && S.member win unsized
+        , plBorder   =
+            let (mWidth, mColor) = M.findWithDefault (Nothing, Nothing) win overrides
+                rgba = case mColor of
+                  Just c | Just win /= mFocus -> c
+                  _ -> pixelColor (if Just win == mFocus then focusedCol else normalCol)
+            in Border (fromMaybe bw mWidth) rgba
+        }
+      -- One pass: the order, the placement per window, the rectangles.
+      placedMap = M.fromList [ (win, placement e) | e@(win, _) <- placements ]
+      rects = M.map plRect placedMap
 
   restackRef <- asks (riverRestack . riverState)
   raised <- io (readIORef restackRef)
-  let stillUp = filter (`S.member` placed) raised
+  let stillUp = filter (`M.member` placedMap) raised
   io (atomicWriteIORef restackRef stillUp)
 
   -- X11 kept 'mapped' from map and unmap events; here it is what this pass
   -- placed, which is what contrib (EasyMotion, for one) asks.
-  modify $ \st -> st { mapped = placed }
+  modify $ \st -> st { mapped = M.keysSet placedMap }
 
-  placeRef <- asks (riverPlacements . riverState)
-  old <- io (readIORef placeRef)
-  io (atomicWriteIORef (shLayoutMoved (rsShared rs)) (old /= placements))
-  io (atomicWriteIORef placeRef placements)
-  -- What 'getWindowAttributes' answers from; the attributes themselves are
-  -- built when asked, in "XMonad.Core".  Forced: a map left as a thunk
-  -- keeps the previous pass alive until somebody reads it.
-  io (atomicWriteIORef (riverGeometry rs) $! placedMap)
+  -- Where things went, for lookups and hit-testing, written once.  Forced:
+  -- a map left as a thunk keeps the previous pass alive until somebody
+  -- reads it.  "Moved" compares rectangles only: a focus change alters
+  -- borders, not positions, and must not make the next pointer_enter look
+  -- like the layout's doing (focus-follows-mouse would stop following).
+  let placedRef = riverPlaced rs
+  old <- io (readIORef placedRef)
+  io (atomicWriteIORef (shLayoutMoved (rsShared rs)) (pdMap old /= rects))
+  io (atomicWriteIORef placedRef $! Placed order rects)
 
-  unsized <- io (readIORef (riverUnsized rs))
   io $ atomically $ modifyTVar' (shPlan (rsShared rs)) $ \p -> p
     { planSerial     = planSerial p + 1
     , planLayerDefault = layerDefault
-    , planPlacements = placements
-    , planFloating   = floating
-    , planUnsized    = S.filter (`S.member` floating) unsized
-    , planBorders    = borders
-    , planVisible    = placed
+    , planOrder      = order
+    , planPlaced     = placedMap
     , planRaised     = stillUp
     , planFocus      = maybe ClearFocus FocusWindow mFocus
     }
