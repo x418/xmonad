@@ -28,7 +28,7 @@ module XMonad.River.State
   , riverWindows, riverOutputs, riverSeats, riverDirty, riverRestart, riverMailbox, riverLoopJobs
   , riverExtraKeys, riverOverlays, riverOverlayPos, riverCapture, riverOps, riverNowOps
   , riverKeyboardLayout
-  , inManageSeq, riverPlaced, riverRestack, riverDragOrigin, riverAfterLayout
+  , inManageSeq, riverPlaced, riverRestack, riverDragOrigin, riverDragTouch, riverAfterLayout
   , riverUnsized, riverLogDue, riverBorders, riverSubmapGen
     -- * Where the last layout put things
   , Placed(..), rectOf, placedRects, placedOrder, updatePlacement
@@ -181,6 +181,9 @@ data WorkerState m = WorkerState
     , wsDragOrigin :: !(IORef (Position, Position))
       -- ^ Where the pointer was when the interactive operation began; river
       -- reports deltas, 'XMonad.Operations.mouseDrag' promises positions.
+    , wsDragTouch :: !(IORef (Maybe (ObjectId, Int32, m ())))
+      -- ^ The seat and touch point driving the drag, and what puts things
+      -- back if river cancels the touch; 'Nothing' for a pointer drag.
     , wsAfterLayout :: !(IORef [m ()])
       -- ^ Actions waiting for the layout, newest first; see
       -- 'XMonad.River.afterLayout'.
@@ -265,6 +268,8 @@ riverRestack :: RiverState m -> IORef [Window]
 riverRestack = wsRestack . rsWorker
 riverDragOrigin :: RiverState m -> IORef (Position, Position)
 riverDragOrigin = wsDragOrigin . rsWorker
+riverDragTouch :: RiverState m -> IORef (Maybe (ObjectId, Int32, m ()))
+riverDragTouch = wsDragTouch . rsWorker
 riverAfterLayout :: RiverState m -> IORef [m ()]
 riverAfterLayout = wsAfterLayout . rsWorker
 riverUnsized :: RiverState m -> IORef (S.Set Window)
@@ -299,6 +304,7 @@ riverSubmapGen = wsSubmapGen . rsWorker
 {-# INLINE riverPlaced #-}
 {-# INLINE riverRestack #-}
 {-# INLINE riverDragOrigin #-}
+{-# INLINE riverDragTouch #-}
 {-# INLINE riverAfterLayout #-}
 {-# INLINE riverUnsized #-}
 {-# INLINE riverLogDue #-}

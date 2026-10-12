@@ -63,7 +63,7 @@ module XMonad.River (
     -- | X11 answered @XGetWindowAttributes@ for any window; river never
     -- reports where a window is, because the window manager is what decided.
     windowRect, moveResizeWindow, pointerPosition, windowUnderPointer,
-    mouseResizeWindowEdges,
+    mouseResizeWindowEdges, touchMoveWindow, touchResizeWindowEdges, edgesDragged,
 
     -- * Stacking
     --
@@ -183,7 +183,8 @@ module XMonad.River (
 import Data.Bits ((.&.))
 import System.IO (hPutStrLn, stderr)
 import Control.Concurrent.STM (atomically, writeTVar)
-import Data.IORef (IORef, atomicModifyIORef', atomicWriteIORef, modifyIORef', readIORef)
+import Data.IORef (IORef, atomicModifyIORef', atomicWriteIORef, modifyIORef', readIORef, writeIORef)
+import Data.Int (Int32)
 import Data.Maybe (fromMaybe, isJust, isNothing)
 import Data.Word (Word32)
 import Control.Concurrent (forkIO, threadDelay)
@@ -191,13 +192,14 @@ import Control.Exception (SomeException, bracket, evaluate, handle)
 import Control.Monad (forM, forM_, unless, void, when)
 import Control.Monad.IO.Class (MonadIO)
 import Control.Monad.Reader (ask, asks)
-import Control.Monad.State (gets)
+import Control.Monad.State (gets, modify)
 import qualified Data.ByteString.Char8 as BC
 import qualified Data.Map.Strict as M
 
 import XMonad.Core
 import Data.List (find, sortOn)
-import XMonad.Operations (applySizeHintsContents, float, mouseDrag, pointWithin)
+import XMonad.Operations (applySizeHintsContents, float, isClient, mouseDrag, pointWithin, windows)
+import qualified XMonad.StackSet as W
 import XMonad.River.Keysym.Table
 import qualified XMonad.River.Mailbox as MB
 import XMonad.River.Client (Anchor(..), ClientHandle(..), ClientSpec(..), closeAllClients, startClient)
@@ -210,7 +212,7 @@ import XMonad.River.Plan (KeyboardLayoutRequest(..), Op(..))
 import XMonad.River.Runtime (RestartRequested(..), warnUnimplemented)
 import XMonad.River.Types
 import XMonad.River.State
-import XMonad.River.Wire (decodeUtf8, encodeUtf8)
+import XMonad.River.Wire (ObjectId, decodeUtf8, encodeUtf8)
 import qualified XMonad.River.Xkb as Xkb
 import XMonad.River.Xkb (compileKeymap)
 
@@ -291,27 +293,99 @@ mouseResizeWindowEdges edges w = do
     let free = isNothing drag && any (not . rsRemoved) (M.elems seats)
     forM_ ((,) <$> M.lookup w geometry <*> M.lookup w known) $ \(r, rw) -> when free $ do
         emitOp (OpInformResize w True)
-        let on e = edges .&. e /= 0
-            none = edges == 0
-            left = on riverWindowV1EdgesLeft
-            top = on riverWindowV1EdgesTop
-            right = on riverWindowV1EdgesRight || none
-            bottom = on riverWindowV1EdgesBottom || none
-            w0 = fromIntegral (rect_width r) :: Position
-            h0 = fromIntegral (rect_height r) :: Position
         mouseDrag
             (\ex ey -> do
                 (ox, oy) <- io . readIORef =<< asks (riverDragOrigin . riverState)
-                let dx = ex - ox
-                    dy = ey - oy
-                    wantW | left = w0 - dx | right = w0 + dx | otherwise = w0
-                    wantH | top = h0 - dy | bottom = h0 + dy | otherwise = h0
-                    (width, height) = applySizeHintsContents (rwSizeHints rw) (max 1 wantW, max 1 wantH)
-                    x' | left = rect_x r + w0 - fromIntegral width | otherwise = rect_x r
-                    y' | top = rect_y r + h0 - fromIntegral height | otherwise = rect_y r
-                moveResizeWindow w (Rectangle x' y' width height)
+                moveResizeWindow w (edgesDragged edges (rwSizeHints rw) r (ex - ox) (ey - oy))
                 float w)
             (emitOp (OpInformResize w False) >> float w)
+
+-- | Where dragging the named edges by an offset puts a window, the
+-- opposite edges staying put; none means the bottom-right corner.
+edgesDragged :: Word32 -> SizeHints -> Rectangle -> Position -> Position -> Rectangle
+edgesDragged edges hints r dx dy = Rectangle x' y' width height
+  where
+    on e = edges .&. e /= 0
+    none = edges == 0
+    left = on riverWindowV1EdgesLeft
+    top = on riverWindowV1EdgesTop
+    right = on riverWindowV1EdgesRight || none
+    bottom = on riverWindowV1EdgesBottom || none
+    w0 = fromIntegral (rect_width r) :: Position
+    h0 = fromIntegral (rect_height r) :: Position
+    wantW | left = w0 - dx | right = w0 + dx | otherwise = w0
+    wantH | top = h0 - dy | bottom = h0 + dy | otherwise = h0
+    (width, height) = applySizeHintsContents hints (max 1 wantW, max 1 wantH)
+    x' | left = rect_x r + w0 - fromIntegral width | otherwise = rect_x r
+    y' | top = rect_y r + h0 - fromIntegral height | otherwise = rect_y r
+
+-- | A client's touch move (@river_window_v1.touch_move_requested@):
+-- 'XMonad.Operations.mouseMoveWindow' driven by that touch point.
+touchMoveWindow :: ObjectId -> Int32 -> Window -> X ()
+touchMoveWindow sid point w = whenX (isClient w) $ do
+    rs <- asks riverState
+    placed <- rectOf rs w
+    wasFloating <- gets (M.member w . W.floating . windowset)
+    forM_ placed $ \r -> void $ touchDrag sid point
+        (\dx dy -> placeAt w r { rect_x = rect_x r + dx, rect_y = rect_y r + dy } >> float w)
+        (float w)
+        (putBack w r wasFloating)
+
+-- | A client's touch resize (@river_window_v1.touch_resize_requested@):
+-- 'mouseResizeWindowEdges' driven by that touch point.
+touchResizeWindowEdges :: ObjectId -> Int32 -> Word32 -> Window -> X ()
+touchResizeWindowEdges sid point edges w = do
+    known <- io . readIORef =<< asks (riverWindows . riverState)
+    geometry <- placedRects =<< asks riverState
+    wasFloating <- gets (M.member w . W.floating . windowset)
+    forM_ ((,) <$> M.lookup w geometry <*> M.lookup w known) $ \(r, rw) -> do
+        started <- touchDrag sid point
+            (\dx dy -> moveResizeWindow w (edgesDragged edges (rwSizeHints rw) r dx dy) >> float w)
+            (emitOp (OpInformResize w False) >> float w)
+            (putBack w r wasFloating)
+        when started (emitOp (OpInformResize w True))
+
+-- | 'XMonad.Operations.mouseDrag' driven by a touch point, river's
+-- @op_start_touch@.  River reports no touch position, so the motion
+-- callback gets offsets from the origin.  @undo@ runs after @done@ when
+-- river cancels the touch (a palm, say), which asks for the drag never to
+-- have happened.  'False' if a drag is already running or the seat is gone.
+touchDrag :: ObjectId -> Int32 -> (Position -> Position -> X ()) -> X () -> X () -> X Bool
+touchDrag sid point f done undo = do
+    rs <- asks riverState
+    drag <- gets dragging
+    seats <- io (readIORef (riverSeats rs))
+    if isJust drag || maybe True rsRemoved (M.lookup sid seats)
+      then pure False
+      else do
+        io (writeIORef (riverDragOrigin rs) (0, 0))
+        io (writeIORef (riverDragTouch rs) (Just (sid, point, undo)))
+        emitOp (OpTouchOpStart sid point)
+        modify $ \st -> st { dragging = Just (f, cleanup rs) }
+        pure True
+  where
+    -- Still held here when the drag ends before the touch does (its window
+    -- closed): river is driving it until told otherwise.
+    cleanup rs = do
+        held <- io (atomicModifyIORef' (riverDragTouch rs) (Nothing,))
+        forM_ held $ \(s, p, _) -> emitOp (OpTouchOpEnd s p)
+        modify $ \st -> st { dragging = Nothing }
+        done
+
+-- | 'XMonad.Operations.mouseMoveWindow''s placement: the position and size
+-- sent, and recorded for 'float' to read back.
+placeAt :: Window -> Rectangle -> X ()
+placeAt w r = do
+    emitOp (OpSetPosition w (rect_x r) (rect_y r))
+    emitOp (OpProposeDimensions w (rect_width r) (rect_height r))
+    rs <- asks riverState
+    updatePlacement rs w r
+
+-- | Undo a drag: a float goes back where it was, a tile back to the layout.
+putBack :: Window -> Rectangle -> Bool -> X ()
+putBack w r wasFloating
+    | wasFloating = placeAt w r >> float w
+    | otherwise = windows (W.sink w)
 
 -- | Tell the loop which keys open submaps, so a press it answers before the
 -- worker has run the action still keeps the next key from a global binding.

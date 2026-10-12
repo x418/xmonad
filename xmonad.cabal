@@ -274,6 +274,17 @@ test-suite river-screen
   -- Screen reconciliation is pure and must preserve StackSet's uniqueness
   -- invariant even when there are more outputs than workspaces.
 
+test-suite river-drag
+  type:           exitcode-stdio-1.0
+  main-is:        river-drag-spec.hs
+  hs-source-dirs: tests
+  build-depends:  base
+                , xmonad
+  default-language: Haskell2010
+  ghc-options:    -Wall
+
+  -- The edge arithmetic a pointer or touch resize shares.
+
 executable river-submap-spec
   main-is:        river-submap-spec.hs
   hs-source-dirs: tests

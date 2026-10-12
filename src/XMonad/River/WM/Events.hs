@@ -16,13 +16,14 @@ import Control.Monad (forM, forM_, unless, void, when)
 import Control.Monad.Reader (asks)
 import Control.Monad.State (gets)
 import Data.IORef
+import Data.Int (Int32)
 import Data.Maybe (isNothing)
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
 import XMonad.Core
 import XMonad.Operations (focus, mouseMoveWindow)
-import XMonad.River (mouseResizeWindowEdges)
+import XMonad.River (mouseResizeWindowEdges, touchMoveWindow, touchResizeWindowEdges)
 import XMonad.River.Connection
 import XMonad.River.Ops (emitOp)
 import XMonad.River.Plan (Op(..), Plan(..))
@@ -30,7 +31,7 @@ import XMonad.River.Protocol.Core
 import XMonad.River.Protocol.LayerShell
 import XMonad.River.Protocol.WindowManagement
 import XMonad.River.Protocol.XkbBindings
-import XMonad.River.State (InputCapture(..), Shared(..), riverDragOrigin)
+import XMonad.River.State (InputCapture(..), Shared(..), riverDragOrigin, riverDragTouch)
 import XMonad.River.Types
 import XMonad.River.WM.Input (outputsChanged)
 import XMonad.River.WM.Runtime
@@ -94,6 +95,10 @@ addWindow rt win = do
     -- the mod-drag bindings start, from the edges the client named.
     RiverWindowV1PointerMoveRequested _ -> queueAction rt (mouseMoveWindow win)
     RiverWindowV1PointerResizeRequested _ edges -> queueAction rt (mouseResizeWindowEdges edges win)
+    -- The same, dragged by a finger on a touchscreen.
+    RiverWindowV1TouchMoveRequested seat point -> queueAction rt (touchMoveWindow seat point win)
+    RiverWindowV1TouchResizeRequested seat point edges ->
+      queueAction rt (touchResizeWindowEdges seat point edges win)
     _ -> pure ()
   where conn = rtConn rt
 
@@ -229,10 +234,27 @@ addSeat rt seat = do
       emitOp (OpPointerOpEnd seat)
       drag <- gets dragging
       whenJust drag snd
+    -- A touch drag's, for its own touch point only; river ends the operation
+    -- itself when the touch goes, so the cleanup must not end it again.
+    RiverSeatV1OpDeltaTouch point dx dy -> queueAction rt $ withTouch point $ \_ -> do
+      drag <- gets dragging
+      whenJust drag $ \(motion, _) -> do
+        (ox, oy) <- io . readIORef =<< asks (riverDragOrigin . riverState)
+        motion (ox + dx) (oy + dy)
+    RiverSeatV1OpReleaseTouch point -> queueAction rt $ withTouch point $ \_ -> touchEnded
+    RiverSeatV1OpCancelTouch point -> queueAction rt $ withTouch point $ \undo -> touchEnded >> undo
     _ -> pure ()
   where
     conn = rtConn rt
     sh = rtShared rt
+    withTouch :: Int32 -> (X () -> X ()) -> X ()
+    withTouch point k = do
+      held <- io . readIORef =<< asks (riverDragTouch . riverState)
+      forM_ held $ \(s, p, undo) -> when (s == seat && p == point) (k undo)
+    touchEnded :: X ()
+    touchEnded = do
+      io . (`writeIORef` Nothing) =<< asks (riverDragTouch . riverState)
+      gets dragging >>= mapM_ snd
 
 -- | Destroy the protocol objects for everything river has closed.
 --

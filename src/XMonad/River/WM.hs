@@ -155,6 +155,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm g
     placed      <- newIORef (Placed [] M.empty)
     restackRef  <- newIORef []
     dragOrigin  <- newIORef (0, 0)
+    dragTouch   <- newIORef Nothing
     afterLayout <- newIORef []
     unsized     <- newIORef S.empty
     -- True from the start: the initial set has never been announced, and
@@ -172,6 +173,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm g
       , wsPlaced      = placed
       , wsRestack     = restackRef
       , wsDragOrigin  = dragOrigin
+      , wsDragTouch   = dragTouch
       , wsAfterLayout = afterLayout
       , wsUnsized     = unsized
       , wsLogDue      = logDue
@@ -537,6 +539,8 @@ sendNow rt = \case
   OpWarpPointer{} -> pure ()
   OpPointerOpStart{} -> pure ()
   OpPointerOpEnd{} -> pure ()
+  OpTouchOpStart{} -> pure ()
+  OpTouchOpEnd{} -> pure ()
   OpUseDecorations{} -> pure ()
   OpSetCapabilities{} -> pure ()
   OpInformFullscreen{} -> pure ()

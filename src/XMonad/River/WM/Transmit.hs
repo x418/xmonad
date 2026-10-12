@@ -93,6 +93,8 @@ transmitManage rt plan = do
     OpWarpPointer s x y -> when (M.member s seats) $ riverSeatV1PointerWarp conn s x y
     OpPointerOpStart s -> when (M.member s seats) $ riverSeatV1OpStartPointer conn s
     OpPointerOpEnd s -> when (M.member s seats) $ riverSeatV1OpEnd conn s
+    OpTouchOpStart s p -> when (M.member s seats) $ riverSeatV1OpStartTouch conn s p
+    OpTouchOpEnd s p -> when (M.member s seats) $ riverSeatV1OpEndTouch conn s p
     OpUseDecorations w ssd -> when (M.member w known) $
       (if ssd then riverWindowV1UseSsd else riverWindowV1UseCsd) conn w
     OpSetCapabilities w caps -> when (M.member w known) $
