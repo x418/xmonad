@@ -54,6 +54,8 @@ module XMonad.River.Protocol.WindowManagement
   , riverWindowV1PresentationHintSince
   , riverWindowV1IdentifierSince
   , riverWindowV1CaptureSessionsSince
+  , riverWindowV1TouchMoveRequestedSince
+  , riverWindowV1TouchResizeRequestedSince
   , riverWindowV1ErrorNodeExists
   , riverWindowV1ErrorInvalidDimensions
   , riverWindowV1ErrorInvalidBorder
@@ -122,9 +124,16 @@ module XMonad.River.Protocol.WindowManagement
   , riverSeatV1GetPointerBinding
   , riverSeatV1SetXcursorTheme
   , riverSeatV1PointerWarp
+  , riverSeatV1OpStartTouch
+  , riverSeatV1OpEndTouch
   , riverSeatV1SetXcursorThemeSince
   , riverSeatV1PointerWarpSince
+  , riverSeatV1OpStartTouchSince
+  , riverSeatV1OpEndTouchSince
   , riverSeatV1PointerPositionSince
+  , riverSeatV1OpDeltaTouchSince
+  , riverSeatV1OpReleaseTouchSince
+  , riverSeatV1OpCancelTouchSince
   , riverSeatV1ModifiersNone
   , riverSeatV1ModifiersShift
   , riverSeatV1ModifiersCtrl
@@ -149,7 +158,7 @@ import XMonad.River.Connection
 import XMonad.River.Wire
 
 --------------------------------------------------------------------------------
--- river_window_manager_v1 (version 5)
+-- river_window_manager_v1 (version 6)
 --------------------------------------------------------------------------------
 
 -- | The interface name, as advertised by @wl_registry@.
@@ -158,7 +167,7 @@ riverWindowManagerV1Interface = "river_window_manager_v1"
 
 -- | The highest version these bindings were generated against.
 riverWindowManagerV1Version :: Word32
-riverWindowManagerV1Version = 5
+riverWindowManagerV1Version = 6
 
 -- | @river_window_manager_v1.error.sequence_order@
 riverWindowManagerV1ErrorSequenceOrder :: Word32
@@ -249,7 +258,7 @@ riverWindowManagerV1Listen conn self handler =
     _ -> handler (RiverWindowManagerV1Unknown opcode body)
 
 --------------------------------------------------------------------------------
--- river_window_v1 (version 5)
+-- river_window_v1 (version 6)
 --------------------------------------------------------------------------------
 
 -- | The interface name, as advertised by @wl_registry@.
@@ -258,7 +267,7 @@ riverWindowV1Interface = "river_window_v1"
 
 -- | The highest version these bindings were generated against.
 riverWindowV1Version :: Word32
-riverWindowV1Version = 5
+riverWindowV1Version = 6
 
 -- | @river_window_v1.error.node_exists@
 riverWindowV1ErrorNodeExists :: Word32
@@ -485,6 +494,8 @@ data RiverWindowV1Event
   | RiverWindowV1PresentationHint !Word32
   | RiverWindowV1Identifier !ByteString
   | RiverWindowV1CaptureSessions !Word32
+  | RiverWindowV1TouchMoveRequested !ObjectId !Int32
+  | RiverWindowV1TouchResizeRequested !ObjectId !Int32 !Word32
   | RiverWindowV1Unknown !Word16 !ByteString
     -- ^ An event this build does not know about, from a server speaking
     -- a newer version of the protocol. Ignoring these is what keeps a
@@ -506,6 +517,14 @@ riverWindowV1IdentifierSince = 4
 -- | The version @river_window_v1.capture_sessions@ arrived in.
 riverWindowV1CaptureSessionsSince :: Word32
 riverWindowV1CaptureSessionsSince = 5
+
+-- | The version @river_window_v1.touch_move_requested@ arrived in.
+riverWindowV1TouchMoveRequestedSince :: Word32
+riverWindowV1TouchMoveRequestedSince = 6
+
+-- | The version @river_window_v1.touch_resize_requested@ arrived in.
+riverWindowV1TouchResizeRequestedSince :: Word32
+riverWindowV1TouchResizeRequestedSince = 6
 
 -- | Attach an event handler to a @river_window_v1@ object.
 riverWindowV1Listen :: Connection -> ObjectId -> (RiverWindowV1Event -> IO ()) -> IO ()
@@ -544,10 +563,14 @@ riverWindowV1Listen conn self handler =
       handler =<< decode (RiverWindowV1Identifier <$> getString) body
     18 ->
       handler =<< decode (RiverWindowV1CaptureSessions <$> getWord32) body
+    19 ->
+      handler =<< decode (RiverWindowV1TouchMoveRequested <$> getObject <*> getInt) body
+    20 ->
+      handler =<< decode (RiverWindowV1TouchResizeRequested <$> getObject <*> getInt <*> getWord32) body
     _ -> handler (RiverWindowV1Unknown opcode body)
 
 --------------------------------------------------------------------------------
--- river_decoration_v1 (version 5)
+-- river_decoration_v1 (version 6)
 --------------------------------------------------------------------------------
 
 -- | The interface name, as advertised by @wl_registry@.
@@ -556,7 +579,7 @@ riverDecorationV1Interface = "river_decoration_v1"
 
 -- | The highest version these bindings were generated against.
 riverDecorationV1Version :: Word32
-riverDecorationV1Version = 5
+riverDecorationV1Version = 6
 
 -- | @river_decoration_v1.error.no_commit@
 riverDecorationV1ErrorNoCommit :: Word32
@@ -593,7 +616,7 @@ riverDecorationV1Listen conn self handler =
     _ -> handler (RiverDecorationV1Unknown opcode body)
 
 --------------------------------------------------------------------------------
--- river_shell_surface_v1 (version 5)
+-- river_shell_surface_v1 (version 6)
 --------------------------------------------------------------------------------
 
 -- | The interface name, as advertised by @wl_registry@.
@@ -602,7 +625,7 @@ riverShellSurfaceV1Interface = "river_shell_surface_v1"
 
 -- | The highest version these bindings were generated against.
 riverShellSurfaceV1Version :: Word32
-riverShellSurfaceV1Version = 5
+riverShellSurfaceV1Version = 6
 
 -- | @river_shell_surface_v1.error.node_exists@
 riverShellSurfaceV1ErrorNodeExists :: Word32
@@ -643,7 +666,7 @@ riverShellSurfaceV1Listen conn self handler =
     _ -> handler (RiverShellSurfaceV1Unknown opcode body)
 
 --------------------------------------------------------------------------------
--- river_node_v1 (version 5)
+-- river_node_v1 (version 6)
 --------------------------------------------------------------------------------
 
 -- | The interface name, as advertised by @wl_registry@.
@@ -652,7 +675,7 @@ riverNodeV1Interface = "river_node_v1"
 
 -- | The highest version these bindings were generated against.
 riverNodeV1Version :: Word32
-riverNodeV1Version = 5
+riverNodeV1Version = 6
 
 -- | @river_node_v1.destroy@
 riverNodeV1Destroy :: Connection -> ObjectId -> IO ()
@@ -700,7 +723,7 @@ riverNodeV1Listen conn self handler =
     _ -> handler (RiverNodeV1Unknown opcode body)
 
 --------------------------------------------------------------------------------
--- river_output_v1 (version 5)
+-- river_output_v1 (version 6)
 --------------------------------------------------------------------------------
 
 -- | The interface name, as advertised by @wl_registry@.
@@ -709,7 +732,7 @@ riverOutputV1Interface = "river_output_v1"
 
 -- | The highest version these bindings were generated against.
 riverOutputV1Version :: Word32
-riverOutputV1Version = 5
+riverOutputV1Version = 6
 
 -- | @river_output_v1.error.invalid_presentation_mode@
 riverOutputV1ErrorInvalidPresentationMode :: Word32
@@ -772,7 +795,7 @@ riverOutputV1Listen conn self handler =
     _ -> handler (RiverOutputV1Unknown opcode body)
 
 --------------------------------------------------------------------------------
--- river_seat_v1 (version 5)
+-- river_seat_v1 (version 6)
 --------------------------------------------------------------------------------
 
 -- | The interface name, as advertised by @wl_registry@.
@@ -781,7 +804,7 @@ riverSeatV1Interface = "river_seat_v1"
 
 -- | The highest version these bindings were generated against.
 riverSeatV1Version :: Word32
-riverSeatV1Version = 5
+riverSeatV1Version = 6
 
 -- | @river_seat_v1.modifiers.none@
 riverSeatV1ModifiersNone :: Word32
@@ -867,6 +890,26 @@ riverSeatV1PointerWarp conn self x y =
 riverSeatV1PointerWarpSince :: Word32
 riverSeatV1PointerWarpSince = 3
 
+-- | @river_seat_v1.op_start_touch@
+-- Since version 6.
+riverSeatV1OpStartTouch :: Connection -> ObjectId -> Int32 -> IO ()
+riverSeatV1OpStartTouch conn self touchPoint =
+  request conn self 9 (argInt touchPoint)
+
+-- | The version @river_seat_v1.op_start_touch@ arrived in.
+riverSeatV1OpStartTouchSince :: Word32
+riverSeatV1OpStartTouchSince = 6
+
+-- | @river_seat_v1.op_end_touch@
+-- Since version 6.
+riverSeatV1OpEndTouch :: Connection -> ObjectId -> Int32 -> IO ()
+riverSeatV1OpEndTouch conn self touchPoint =
+  request conn self 10 (argInt touchPoint)
+
+-- | The version @river_seat_v1.op_end_touch@ arrived in.
+riverSeatV1OpEndTouchSince :: Word32
+riverSeatV1OpEndTouchSince = 6
+
 -- | Events delivered to a @river_seat_v1@.
 data RiverSeatV1Event
   = RiverSeatV1Removed
@@ -878,6 +921,9 @@ data RiverSeatV1Event
   | RiverSeatV1OpDelta !Int32 !Int32
   | RiverSeatV1OpRelease
   | RiverSeatV1PointerPosition !Int32 !Int32
+  | RiverSeatV1OpDeltaTouch !Int32 !Int32 !Int32
+  | RiverSeatV1OpReleaseTouch !Int32
+  | RiverSeatV1OpCancelTouch !Int32
   | RiverSeatV1Unknown !Word16 !ByteString
     -- ^ An event this build does not know about, from a server speaking
     -- a newer version of the protocol. Ignoring these is what keeps a
@@ -887,6 +933,18 @@ data RiverSeatV1Event
 -- | The version @river_seat_v1.pointer_position@ arrived in.
 riverSeatV1PointerPositionSince :: Word32
 riverSeatV1PointerPositionSince = 2
+
+-- | The version @river_seat_v1.op_delta_touch@ arrived in.
+riverSeatV1OpDeltaTouchSince :: Word32
+riverSeatV1OpDeltaTouchSince = 6
+
+-- | The version @river_seat_v1.op_release_touch@ arrived in.
+riverSeatV1OpReleaseTouchSince :: Word32
+riverSeatV1OpReleaseTouchSince = 6
+
+-- | The version @river_seat_v1.op_cancel_touch@ arrived in.
+riverSeatV1OpCancelTouchSince :: Word32
+riverSeatV1OpCancelTouchSince = 6
 
 -- | Attach an event handler to a @river_seat_v1@ object.
 riverSeatV1Listen :: Connection -> ObjectId -> (RiverSeatV1Event -> IO ()) -> IO ()
@@ -907,10 +965,16 @@ riverSeatV1Listen conn self handler =
     7 -> handler RiverSeatV1OpRelease
     8 ->
       handler =<< decode (RiverSeatV1PointerPosition <$> getInt <*> getInt) body
+    9 ->
+      handler =<< decode (RiverSeatV1OpDeltaTouch <$> getInt <*> getInt <*> getInt) body
+    10 ->
+      handler =<< decode (RiverSeatV1OpReleaseTouch <$> getInt) body
+    11 ->
+      handler =<< decode (RiverSeatV1OpCancelTouch <$> getInt) body
     _ -> handler (RiverSeatV1Unknown opcode body)
 
 --------------------------------------------------------------------------------
--- river_pointer_binding_v1 (version 5)
+-- river_pointer_binding_v1 (version 6)
 --------------------------------------------------------------------------------
 
 -- | The interface name, as advertised by @wl_registry@.
@@ -919,7 +983,7 @@ riverPointerBindingV1Interface = "river_pointer_binding_v1"
 
 -- | The highest version these bindings were generated against.
 riverPointerBindingV1Version :: Word32
-riverPointerBindingV1Version = 5
+riverPointerBindingV1Version = 6
 
 -- | @river_pointer_binding_v1.destroy@
 riverPointerBindingV1Destroy :: Connection -> ObjectId -> IO ()
