@@ -300,7 +300,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm g
     lastRender <- newIORef M.empty
     lastStack  <- newIORef []
     lastOvPos  <- newIORef M.empty
-    lastFocus  <- newIORef M.empty
+    heldFrom   <- newIORef M.empty
     lastGiven  <- newIORef (RenderInput (-1) (-1) [] M.empty)
     pure Runtime
       { rtConn = conn
@@ -343,7 +343,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm g
       , rtLastRender = lastRender
       , rtLastStack = lastStack
       , rtLastOverlayPos = lastOvPos
-      , rtLastFocus = lastFocus
+      , rtHeldFrom = heldFrom
       , rtLastRendered = lastGiven
       }
 
@@ -599,10 +599,7 @@ onManagerEvent rt = \case
     addSeat rt seat
     rtSubmit rt (void (broadcastEvent (SeatAdded seat)))
   RiverWindowManagerV1SessionLocked   -> rtSubmit rt (void (broadcastEvent SessionLocked))
-  -- River clears every seat's focus on unlock.
-  RiverWindowManagerV1SessionUnlocked -> do
-    writeIORef (rtLastFocus rt) M.empty
-    rtSubmit rt (void (broadcastEvent SessionUnlocked))
+  RiverWindowManagerV1SessionUnlocked -> rtSubmit rt (void (broadcastEvent SessionUnlocked))
   RiverWindowManagerV1Unknown{} -> pure ()
   where
     conn = rtConn rt

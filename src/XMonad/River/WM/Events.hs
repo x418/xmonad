@@ -11,7 +11,7 @@ module XMonad.River.WM.Events
   , reapObjects
   ) where
 
-import Control.Concurrent.STM (atomically, writeTVar)
+import Control.Concurrent.STM (atomically, readTVarIO, writeTVar)
 import Control.Monad (forM, forM_, unless, void, when)
 import Control.Monad.Reader (asks)
 import Control.Monad.State (gets)
@@ -25,7 +25,7 @@ import XMonad.Operations (focus, mouseMoveWindow)
 import XMonad.River (mouseResizeWindowEdges)
 import XMonad.River.Connection
 import XMonad.River.Ops (emitOp)
-import XMonad.River.Plan (FocusTarget(..), Op(..))
+import XMonad.River.Plan (Op(..), Plan(..))
 import XMonad.River.Protocol.Core
 import XMonad.River.Protocol.LayerShell
 import XMonad.River.Protocol.WindowManagement
@@ -142,14 +142,14 @@ addSeat rt seat = do
     ls <- riverLayerShellV1GetSeat conn shell seat
     riverLayerShellSeatV1Listen conn ls $ \ev -> do
       let set f = adjust ref seat $ \s -> s { rsLayerFocus = f }
+          held = modifyIORef' (rtHeldFrom rt)
       case ev of
-        RiverLayerShellSeatV1FocusExclusive    -> set LayerFocusExclusive
-        RiverLayerShellSeatV1FocusNonExclusive -> set LayerFocusNonExclusive
-        -- The keyboard is back from the layer surface with whatever focus
-        -- river left it; what was last sent no longer describes it.
-        RiverLayerShellSeatV1FocusNone         -> do
-          set LayerFocusNone
-          modifyIORef' (rtLastFocus rt) (M.delete seat)
+        RiverLayerShellSeatV1FocusExclusive    -> set LayerFocusExclusive >> held (M.delete seat)
+        RiverLayerShellSeatV1FocusNonExclusive -> do
+          set LayerFocusNonExclusive
+          target <- planFocus <$> readTVarIO (shPlan sh)
+          held (M.insert seat target)
+        RiverLayerShellSeatV1FocusNone         -> set LayerFocusNone >> held (M.delete seat)
         RiverLayerShellSeatV1Unknown{} -> pure ()
     pure ls
 
@@ -205,8 +205,11 @@ addSeat rt seat = do
         when (stillThere && isNothing drag && onScreen) (focus win)
     RiverSeatV1PointerLeave -> atomicWriteIORef (shHovered sh) Nothing
     -- A click, or a touch or tablet tool, on a window: X11's ButtonPress on an
-    -- unfocused client.  Focus follows it whatever 'focusFollowsMouse' says.
-    RiverSeatV1WindowInteraction win -> queueAction rt (focus win)
+    -- unfocused client.  Focus follows it whatever 'focusFollowsMouse' says,
+    -- and takes the keyboard back from a non-exclusive layer surface.
+    RiverSeatV1WindowInteraction win -> do
+      modifyIORef' (rtHeldFrom rt) (M.delete seat)
+      queueAction rt (focus win)
     RiverSeatV1PointerPosition x y ->
       adjust ref seat $ \s -> s { rsPointer = (x, y) }
     -- A surface this window manager drew was pressed: X11's ButtonPress on a
@@ -248,7 +251,6 @@ reapObjects rt = do
     modifyIORef' (rtLastManage rt) (M.delete (rwObject w))
     modifyIORef' (rtLastRender rt) (M.delete (rwObject w))
     modifyIORef' (rtLastStack rt) (filter (/= rwNode w))
-    modifyIORef' (rtLastFocus rt) (M.filter (/= FocusWindow (rwObject w)))
     atomicModifyIORef' (shHovered sh) (\h -> (if h == Just (rwObject w) then Nothing else h, ()))
 
   let outRef = shOutputs sh
@@ -268,7 +270,7 @@ reapObjects rt = do
     riverSeatV1Destroy conn (rsObject s)
     modifyIORef' seatRef (M.delete (rsObject s))
     modifyIORef' (rtBoundSeats rt) (S.delete (rsObject s))
-    modifyIORef' (rtLastFocus rt) (M.delete (rsObject s))
+    modifyIORef' (rtHeldFrom rt) (M.delete (rsObject s))
   where
     conn = rtConn rt
     sh = rtShared rt

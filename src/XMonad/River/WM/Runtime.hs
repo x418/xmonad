@@ -146,10 +146,9 @@ data Runtime = Runtime
     -- leaves it, so the next order with a new node in that slot is sent.
   , rtLastOverlayPos :: !(IORef (M.Map ObjectId (Position, Position)))
     -- ^ Where each listed overlay was last put.
-  , rtLastFocus      :: !(IORef (M.Map ObjectId FocusTarget))
-    -- ^ Per seat, the focus last sent.  Forgotten for a seat whose keyboard
-    -- went to a layer surface and came back, for a reaped window's target,
-    -- and for every seat on unlock, so the next sequence restates it.
+  , rtHeldFrom       :: !(IORef (M.Map ObjectId FocusTarget))
+    -- ^ Per seat whose keyboard a non-exclusive layer surface holds, the
+    -- focus the plan had when it took it.  Dropped on a click on a window.
   , rtLastRendered   :: !(IORef RenderInput)
     -- ^ What the last render sequence was given.  A render sequence given
     -- the same again -- river starts one whenever a client changes its own

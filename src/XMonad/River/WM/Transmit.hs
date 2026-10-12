@@ -179,9 +179,11 @@ transmitManage rt plan = do
         pure (win, ManageSent want dims)
     atomicWriteIORef (rtLastManage rt) $! current
 
-    -- Keyboard focus.  A seat whose keyboard has gone to a layer surface is left
-    -- alone: river discards the request under an exclusive grab and, under a
-    -- non-exclusive one, would silently steal the keyboard back.
+    -- Keyboard focus.  A seat under an exclusive layer surface is left alone:
+    -- river ignores the request.  A non-exclusive one keeps the keyboard until
+    -- the plan's focus moves from what it was when the surface took it, or a
+    -- window is clicked ('rtHeldFrom'); the protocol leaves that policy to the
+    -- window manager, and any sooner would take it from a panel being typed in.
     --
     -- A window without dimensions has not mapped.  river would give it the
     -- keyboard at once, and a client that gets @wl_keyboard.enter@ before its
@@ -191,21 +193,24 @@ transmitManage rt plan = do
     -- The keyboard stays where it is; the first dimensions event asks for the
     -- sequence that sends this ('XMonad.River.WM.Events.addWindow').
     --
-    -- Sent when it differs from what this seat was last told: river keeps
-    -- the focus between sequences, and restating it every sequence for
-    -- every seat was the one request that never diffed.
-    lastFocus <- readIORef (rtLastFocus rt)
+    -- Restated every sequence, not diffed: river also moves the keyboard on its
+    -- own (clearing it on unlock and off a closing window, handing it to an
+    -- Xwayland override-redirect surface), and a no-op request costs nothing.
+    holds <- readIORef (rtHeldFrom rt)
     let target = case planFocus plan of
           FocusWindow win | Just rw <- M.lookup win known ->
             if rwDimensions rw /= (0, 0) then Just (FocusWindow win) else Nothing
           _ -> Just ClearFocus
+        wanted s = case rsLayerFocus s of
+          LayerFocusExclusive    -> False
+          LayerFocusNonExclusive -> M.lookup (rsObject s) holds /= Just (planFocus plan)
+          LayerFocusNone         -> True
     forM_ (liveSeats seats) $ \s ->
       forM_ target $ \t ->
-        unless (layerHasFocus (rsLayerFocus s) || M.lookup (rsObject s) lastFocus == Just t) $ do
+        when (wanted s) $
           case t of
             FocusWindow win -> riverSeatV1FocusWindow conn (rsObject s) win
             ClearFocus -> riverSeatV1ClearFocus conn (rsObject s)
-          modifyIORef' (rtLastFocus rt) (M.insert (rsObject s) t)
   where
     conn = rtConn rt
     sh = rtShared rt

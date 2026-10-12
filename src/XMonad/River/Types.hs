@@ -340,11 +340,11 @@ data RiverSeat = RiverSeat
 
 -- | Whether a seat's keyboard currently belongs to a layer surface.
 --
--- This has to be tracked because focus requests must not be made while it
--- does: river discards them outright when focus is exclusive, and in the
--- non-exclusive case re-focusing a window in the same manage sequence silently
--- steals the keyboard back.  That is the difference between a prompt you can
--- type into and one you cannot.
+-- Under exclusive focus river ignores focus requests.  Under non-exclusive
+-- focus the window manager still controls it, but a request in the manage
+-- sequence that announced it keeps the layer surface from getting the
+-- keyboard: the difference between a prompt you can type into and one you
+-- cannot.
 data LayerFocus
   = LayerFocusNone
   | LayerFocusNonExclusive
