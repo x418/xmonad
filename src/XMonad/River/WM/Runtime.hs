@@ -148,8 +148,8 @@ data Runtime = Runtime
     -- ^ Where each listed overlay was last put.
   , rtLastFocus      :: !(IORef (M.Map ObjectId FocusTarget))
     -- ^ Per seat, the focus last sent.  Forgotten for a seat whose keyboard
-    -- went to a layer surface and came back, and for a reaped window's
-    -- target, so the next sequence restates it.
+    -- went to a layer surface and came back, for a reaped window's target,
+    -- and for every seat on unlock, so the next sequence restates it.
   , rtLastRendered   :: !(IORef RenderInput)
     -- ^ What the last render sequence was given.  A render sequence given
     -- the same again -- river starts one whenever a client changes its own

@@ -599,7 +599,10 @@ onManagerEvent rt = \case
     addSeat rt seat
     rtSubmit rt (void (broadcastEvent (SeatAdded seat)))
   RiverWindowManagerV1SessionLocked   -> rtSubmit rt (void (broadcastEvent SessionLocked))
-  RiverWindowManagerV1SessionUnlocked -> rtSubmit rt (void (broadcastEvent SessionUnlocked))
+  -- River clears every seat's focus on unlock.
+  RiverWindowManagerV1SessionUnlocked -> do
+    writeIORef (rtLastFocus rt) M.empty
+    rtSubmit rt (void (broadcastEvent SessionUnlocked))
   RiverWindowManagerV1Unknown{} -> pure ()
   where
     conn = rtConn rt
