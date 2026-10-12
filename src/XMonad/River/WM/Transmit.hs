@@ -195,17 +195,17 @@ transmitManage rt plan = do
     -- the focus between sequences, and restating it every sequence for
     -- every seat was the one request that never diffed.
     lastFocus <- readIORef (rtLastFocus rt)
+    let target = case planFocus plan of
+          FocusWindow win | Just rw <- M.lookup win known ->
+            if rwDimensions rw /= (0, 0) then Just (FocusWindow win) else Nothing
+          _ -> Just ClearFocus
     forM_ (liveSeats seats) $ \s ->
-      unless (layerHasFocus (rsLayerFocus s)) $ do
-        let target = case planFocus plan of
-              FocusWindow win | Just rw <- M.lookup win known, rwDimensions rw /= (0, 0) ->
-                FocusWindow win
-              _ -> ClearFocus
-        unless (M.lookup (rsObject s) lastFocus == Just target) $ do
-          case target of
+      forM_ target $ \t ->
+        unless (layerHasFocus (rsLayerFocus s) || M.lookup (rsObject s) lastFocus == Just t) $ do
+          case t of
             FocusWindow win -> riverSeatV1FocusWindow conn (rsObject s) win
             ClearFocus -> riverSeatV1ClearFocus conn (rsObject s)
-          modifyIORef' (rtLastFocus rt) (M.insert (rsObject s) target)
+          modifyIORef' (rtLastFocus rt) (M.insert (rsObject s) t)
   where
     conn = rtConn rt
     sh = rtShared rt
