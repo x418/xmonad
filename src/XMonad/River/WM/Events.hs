@@ -31,7 +31,7 @@ import XMonad.River.Protocol.Core
 import XMonad.River.Protocol.LayerShell
 import XMonad.River.Protocol.WindowManagement
 import XMonad.River.Protocol.XkbBindings
-import XMonad.River.State (InputCapture(..), Shared(..), riverDragOrigin, riverDragTouch)
+import XMonad.River.State (InputCapture(..), Shared(..), riverDragOrigin, riverDragTouch, riverLogDue)
 import XMonad.River.Types
 import XMonad.River.WM.Input (outputsChanged)
 import XMonad.River.WM.Runtime
@@ -64,7 +64,9 @@ addWindow rt win = do
     RiverWindowV1Title t       -> adjust ref win $ \w -> w { rwTitle = t }
     RiverWindowV1UnreliablePid p -> adjust ref win $ \w -> w { rwPid = Just p }
     RiverWindowV1Identifier i  -> adjust ref win $ \w -> w { rwIdentifier = Just i }
-    RiverWindowV1CaptureSessions n -> adjust ref win $ \w -> w { rwCaptureSessions = n }
+    RiverWindowV1CaptureSessions n -> do
+      adjust ref win $ \w -> w { rwCaptureSessions = n }
+      logHookDue rt
     RiverWindowV1Parent p      -> adjust ref win $ \w ->
       w { rwParent = if isNullObject p then Nothing else Just p }
     -- The first of these is the map (river sends none before it).  Keyboard
@@ -124,7 +126,9 @@ addOutput rt out = do
     RiverOutputV1Position x y -> adjust ref out $ \o -> o { roPosition = (x, y) }
     RiverOutputV1Dimensions width height ->
       adjust ref out $ \o -> o { roSize = (width, height) }
-    RiverOutputV1CaptureSessions n -> adjust ref out $ \o -> o { roCaptureSessions = n }
+    RiverOutputV1CaptureSessions n -> do
+      adjust ref out $ \o -> o { roCaptureSessions = n }
+      logHookDue rt
     -- The wl_output behind this output, for its connector name.  Bound by
     -- registry name; the name event needs version 4.
     RiverOutputV1WlOutput name -> do
@@ -255,6 +259,11 @@ addSeat rt seat = do
     touchEnded = do
       io . (`writeIORef` Nothing) =<< asks (riverDragTouch . riverState)
       gets dragging >>= mapM_ snd
+
+-- | Run the log hook in the coming manage sequence: river changed state a
+-- config reads there (capture sessions) without changing the windowset.
+logHookDue :: Runtime -> IO ()
+logHookDue rt = rtSubmit rt (io . flip writeIORef True =<< asks (riverLogDue . riverState))
 
 -- | Destroy the protocol objects for everything river has closed.
 --
