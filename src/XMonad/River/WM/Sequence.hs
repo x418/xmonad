@@ -363,8 +363,9 @@ applyLayout layerDefault = do
     pure (flt ++ rects, map fst flt)
 
   -- Borders are decided here.  The focused window takes the focused colour
-  -- whatever an override says: X11 repainted it on every 'windows', and a
-  -- colour WindowNavigation had set would otherwise hide the focus forever.
+  -- whatever an override says, unless it is pinned: X11 repainted it on
+  -- every 'windows', and a colour WindowNavigation had set would otherwise
+  -- hide the focus forever.
   bw <- asks (borderWidth . config)
   focusedCol <- asks focusedBorder
   normalCol <- asks normalBorder
@@ -381,7 +382,7 @@ applyLayout layerDefault = do
         , plBorder   =
             let (mWidth, mColor) = M.findWithDefault (Nothing, Nothing) win overrides
                 rgba = case mColor of
-                  Just c | Just win /= mFocus -> c
+                  Just (c, pinned) | pinned || Just win /= mFocus -> c
                   _ -> pixelColor (if Just win == mFocus then focusedCol else normalCol)
             in Border (fromMaybe bw mWidth) rgba
         }

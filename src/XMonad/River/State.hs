@@ -35,7 +35,8 @@ module XMonad.River.State
     -- * One-shot requests
   , queueOp, queueNow, takeOps, takeNowOps, nowOpsPending
     -- * Border overrides
-  , borderOverride, overrideBorderWidth, overrideBorderColor, clearBorderColor, forgetBorderOverride
+  , BorderOverride, borderOverride, overrideBorderWidth, overrideBorderColor, overridePinnedBorderColor
+  , clearBorderColor, forgetBorderOverride
   ) where
 
 import Control.Concurrent.STM (STM, TVar, atomically, check, modifyTVar', readTVar, stateTVar)
@@ -197,7 +198,7 @@ data WorkerState m = WorkerState
       -- X11 ran the log hook on every @windows@; here it runs once, at the end
       -- of the sequence, if anything asked for it or the set changed on its
       -- own.
-    , wsBorders :: !(IORef (M.Map Window (Maybe Dimension, Maybe BorderColor)))
+    , wsBorders :: !(IORef (M.Map Window BorderOverride))
       -- ^ Per-window overrides of border width and colour.  Sticky until the
       -- window goes: river keeps no border state, so the render sequence
       -- restates borders from the plan and an override has to be remembered.
@@ -275,7 +276,7 @@ riverUnsized :: RiverState m -> IORef (S.Set Window)
 riverUnsized = wsUnsized . rsWorker
 riverLogDue :: RiverState m -> IORef Bool
 riverLogDue = wsLogDue . rsWorker
-riverBorders :: RiverState m -> IORef (M.Map Window (Maybe Dimension, Maybe BorderColor))
+riverBorders :: RiverState m -> IORef (M.Map Window BorderOverride)
 riverBorders = wsBorders . rsWorker
 riverSubmapGen :: RiverState m -> IORef Int
 riverSubmapGen = wsSubmapGen . rsWorker
@@ -345,10 +346,13 @@ nowOpsPending rs = readTVar (riverNowOps rs) >>= check . not . null
 --------------------------------------------------------------------------------
 -- Border overrides
 
-type Borders = IORef (M.Map Window (Maybe Dimension, Maybe BorderColor))
+-- | Width, and colour with whether it holds while the window is focused.
+type BorderOverride = (Maybe Dimension, Maybe (BorderColor, Bool))
+
+type Borders = IORef (M.Map Window BorderOverride)
 
 -- | What has been overridden for one window; no override is @(Nothing, Nothing)@.
-borderOverride :: Borders -> Window -> IO (Maybe Dimension, Maybe BorderColor)
+borderOverride :: Borders -> Window -> IO BorderOverride
 borderOverride ref w = M.findWithDefault (Nothing, Nothing) w <$> readIORef ref
 
 overrideBorderWidth :: Borders -> Window -> Dimension -> IO ()
@@ -357,7 +361,12 @@ overrideBorderWidth ref w n = atomicModifyIORef' ref $ \m ->
 
 overrideBorderColor :: Borders -> Window -> BorderColor -> IO ()
 overrideBorderColor ref w c = atomicModifyIORef' ref $ \m ->
-    (M.alter (\o -> Just (maybe Nothing fst o, Just c)) w m, ())
+    (M.alter (\o -> Just (maybe Nothing fst o, Just (c, False))) w m, ())
+
+-- | An override the focused colour does not replace.
+overridePinnedBorderColor :: Borders -> Window -> BorderColor -> IO ()
+overridePinnedBorderColor ref w c = atomicModifyIORef' ref $ \m ->
+    (M.alter (\o -> Just (maybe Nothing fst o, Just (c, True))) w m, ())
 
 -- | Back to the plan's colour, keeping a width override.
 clearBorderColor :: Borders -> Window -> IO ()

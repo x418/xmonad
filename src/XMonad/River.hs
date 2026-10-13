@@ -83,7 +83,7 @@ module XMonad.River (
     -- | Capture is the portal's business, over @ext-image-copy-capture@;
     -- river only reports how many sessions each window and output has, so
     -- a config can mark what is being shared.
-    captureSessions, capturedOutputs, windowIdentifier, resetBorderColor,
+    captureSessions, capturedOutputs, windowIdentifier, pinBorderColor, resetBorderColor,
 
     -- * Counting outputs before there is a window manager
     --
@@ -685,10 +685,18 @@ capturedOutputs = do
     outs <- io . readIORef =<< asks (riverOutputs . riverState)
     pure [ decodeUtf8 n | o <- M.elems outs, roCaptureSessions o > 0, Just n <- [roName o] ]
 
--- | Undo 'XMonad.Core.setWindowBorder': the render sequence colours the
--- window from the plan again.
+-- | Undo 'XMonad.Core.setWindowBorder' or 'pinBorderColor': the render
+-- sequence colours the window from the plan again.
 resetBorderColor :: Window -> X ()
 resetBorderColor w = io . flip clearBorderColor w =<< asks (riverBorders . riverState)
+
+-- | A @#rrggbb@ border colour that holds while the window is focused too,
+-- where 'XMonad.Core.setWindowBorder' yields to the focused colour.
+-- Ignored if it does not parse.
+pinBorderColor :: Window -> String -> X ()
+pinBorderColor w color = forM_ (parseColorMaybe color) $ \p -> do
+    ref <- asks (riverBorders . riverState)
+    io (overridePinnedBorderColor ref w (pixelColor p))
 
 -- | The next layout of the keymap, wrapping, on every keyboard.
 nextKeyboardLayout :: X ()
