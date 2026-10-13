@@ -83,7 +83,7 @@ module XMonad.River (
     -- | Capture is the portal's business, over @ext-image-copy-capture@;
     -- river only reports how many sessions each window and output has, so
     -- a config can mark what is being shared.
-    captureSessions, capturedOutputs, resetBorderColor,
+    captureSessions, capturedOutputs, windowIdentifier, resetBorderColor,
 
     -- * Counting outputs before there is a window manager
     --
@@ -670,6 +670,14 @@ captureSessions :: Window -> X Word32
 captureSessions w = do
     wins <- io . readIORef =<< asks (riverWindows . riverState)
     pure (maybe 0 rwCaptureSessions (M.lookup w wins))
+
+-- | The window's @identifier@: the same string as its
+-- @ext_foreign_toplevel_handle_v1@ identifier, which is how a portal names
+-- the window to capture.  'Nothing' before river sent it.
+windowIdentifier :: Window -> X (Maybe String)
+windowIdentifier w = do
+    wins <- io . readIORef =<< asks (riverWindows . riverState)
+    pure (decodeUtf8 <$> (rwIdentifier =<< M.lookup w wins))
 
 -- | Connector names of the outputs with a capture session open.
 capturedOutputs :: X [String]
