@@ -300,8 +300,8 @@ mouseResizeWindowEdges edges w = do
                 float w)
             (emitOp (OpInformResize w False) >> float w)
 
--- | Where dragging the named edges by an offset puts a window, the
--- opposite edges staying put; none means the bottom-right corner.
+-- | The rectangle after dragging the named edges by an offset; opposite
+-- edges stay, none means the bottom-right corner.
 edgesDragged :: Word32 -> SizeHints -> Rectangle -> Position -> Position -> Rectangle
 edgesDragged edges hints r dx dy = Rectangle x' y' width height
   where
@@ -319,8 +319,8 @@ edgesDragged edges hints r dx dy = Rectangle x' y' width height
     x' | left = rect_x r + w0 - fromIntegral width | otherwise = rect_x r
     y' | top = rect_y r + h0 - fromIntegral height | otherwise = rect_y r
 
--- | A client's touch move (@river_window_v1.touch_move_requested@):
--- 'XMonad.Operations.mouseMoveWindow' driven by that touch point.
+-- | 'XMonad.Operations.mouseMoveWindow' by a touch point
+-- (@touch_move_requested@).
 touchMoveWindow :: ObjectId -> Int32 -> Window -> X ()
 touchMoveWindow sid point w = whenX (isClient w) $ do
     rs <- asks riverState
@@ -331,8 +331,7 @@ touchMoveWindow sid point w = whenX (isClient w) $ do
         (float w)
         (putBack w r wasFloating)
 
--- | A client's touch resize (@river_window_v1.touch_resize_requested@):
--- 'mouseResizeWindowEdges' driven by that touch point.
+-- | 'mouseResizeWindowEdges' by a touch point (@touch_resize_requested@).
 touchResizeWindowEdges :: ObjectId -> Int32 -> Word32 -> Window -> X ()
 touchResizeWindowEdges sid point edges w = do
     known <- io . readIORef =<< asks (riverWindows . riverState)
@@ -345,11 +344,9 @@ touchResizeWindowEdges sid point edges w = do
             (putBack w r wasFloating)
         when started (emitOp (OpInformResize w True))
 
--- | 'XMonad.Operations.mouseDrag' driven by a touch point, river's
--- @op_start_touch@.  River reports no touch position, so the motion
--- callback gets offsets from the origin.  @undo@ runs after @done@ when
--- river cancels the touch (a palm, say), which asks for the drag never to
--- have happened.  'False' if a drag is already running or the seat is gone.
+-- | 'XMonad.Operations.mouseDrag' by a touch point (@op_start_touch@).
+-- Motion gets offsets from (0, 0); @undo@ runs after @done@ if river
+-- cancels the touch.  'False' if already dragging or the seat is gone.
 touchDrag :: ObjectId -> Int32 -> (Position -> Position -> X ()) -> X () -> X () -> X Bool
 touchDrag sid point f done undo = do
     rs <- asks riverState
@@ -364,16 +361,14 @@ touchDrag sid point f done undo = do
         modify $ \st -> st { dragging = Just (f, cleanup rs) }
         pure True
   where
-    -- Still held here when the drag ends before the touch does (its window
-    -- closed): river is driving it until told otherwise.
+    -- Still held: the drag ended before the touch (window closed).
     cleanup rs = do
         held <- io (atomicModifyIORef' (riverDragTouch rs) (Nothing,))
         forM_ held $ \(s, p, _) -> emitOp (OpTouchOpEnd s p)
         modify $ \st -> st { dragging = Nothing }
         done
 
--- | 'XMonad.Operations.mouseMoveWindow''s placement: the position and size
--- sent, and recorded for 'float' to read back.
+-- | Send a rectangle and record it for 'float'.
 placeAt :: Window -> Rectangle -> X ()
 placeAt w r = do
     emitOp (OpSetPosition w (rect_x r) (rect_y r))
@@ -381,7 +376,7 @@ placeAt w r = do
     rs <- asks riverState
     updatePlacement rs w r
 
--- | Undo a drag: a float goes back where it was, a tile back to the layout.
+-- | Undo a drag: floats to their rectangle, tiles to the layout.
 putBack :: Window -> Rectangle -> Bool -> X ()
 putBack w r wasFloating
     | wasFloating = placeAt w r >> float w

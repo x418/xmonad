@@ -182,8 +182,7 @@ data WorkerState m = WorkerState
       -- ^ Where the pointer was when the interactive operation began; river
       -- reports deltas, 'XMonad.Operations.mouseDrag' promises positions.
     , wsDragTouch :: !(IORef (Maybe (ObjectId, Int32, m ())))
-      -- ^ The seat and touch point driving the drag, and what puts things
-      -- back if river cancels the touch; 'Nothing' for a pointer drag.
+      -- ^ Seat, touch point and cancel action of a touch drag.
     , wsAfterLayout :: !(IORef [m ()])
       -- ^ Actions waiting for the layout, newest first; see
       -- 'XMonad.River.afterLayout'.

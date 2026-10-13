@@ -109,10 +109,9 @@ data Op
   | OpPointerOpEnd !ObjectId
     -- ^ @river_seat_v1.op_end@.  Manage-sequence only, like the start.
   | OpTouchOpStart !ObjectId !Int32
-    -- ^ @river_seat_v1.op_start_touch@: a drag driven by that touch point.
+    -- ^ @river_seat_v1.op_start_touch@.
   | OpTouchOpEnd !ObjectId !Int32
-    -- ^ @river_seat_v1.op_end_touch@, for a drag that ends before the touch
-    -- does; river ends it itself on release.
+    -- ^ @river_seat_v1.op_end_touch@; not needed after release.
   | OpUseDecorations !Window !Bool
     -- ^ @use_ssd@ when 'True', @use_csd@ when 'False'.
   | OpSetCapabilities !Window !Word32

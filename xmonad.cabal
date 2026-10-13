@@ -283,7 +283,7 @@ test-suite river-drag
   default-language: Haskell2010
   ghc-options:    -Wall
 
-  -- The edge arithmetic a pointer or touch resize shares.
+  -- Resize-by-edges arithmetic.
 
 executable river-submap-spec
   main-is:        river-submap-spec.hs

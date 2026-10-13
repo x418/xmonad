@@ -95,7 +95,7 @@ addWindow rt win = do
     -- the mod-drag bindings start, from the edges the client named.
     RiverWindowV1PointerMoveRequested _ -> queueAction rt (mouseMoveWindow win)
     RiverWindowV1PointerResizeRequested _ edges -> queueAction rt (mouseResizeWindowEdges edges win)
-    -- The same, dragged by a finger on a touchscreen.
+    -- The same by touch.
     RiverWindowV1TouchMoveRequested seat point -> queueAction rt (touchMoveWindow seat point win)
     RiverWindowV1TouchResizeRequested seat point edges ->
       queueAction rt (touchResizeWindowEdges seat point edges win)
@@ -234,8 +234,8 @@ addSeat rt seat = do
       emitOp (OpPointerOpEnd seat)
       drag <- gets dragging
       whenJust drag snd
-    -- A touch drag's, for its own touch point only; river ends the operation
-    -- itself when the touch goes, so the cleanup must not end it again.
+    -- For the drag's own touch point.  River ends the op on release or
+    -- cancel, so the cleanup must not.
     RiverSeatV1OpDeltaTouch point dx dy -> queueAction rt $ withTouch point $ \_ -> do
       drag <- gets dragging
       whenJust drag $ \(motion, _) -> do

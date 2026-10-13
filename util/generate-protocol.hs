@@ -40,10 +40,9 @@ waylandCommit = "1.26.0"
 -- | The river commit the river protocols are taken from: the head of @main@,
 -- not a release tag, because protocol text is fixed on @main@ between
 -- releases and the tags lag it (v0.4.8 still carries the wording @main@
--- corrected on 2026-09-01).  Today the two agree: v0.5.0, which @main@ has
--- not changed since.  The generator strips descriptions, so a bump that
--- changes only text regenerates identical modules; @tests/check-all.sh@
--- checks that.
+-- corrected on 2026-09-01); now v0.5.0, same as @main@.  The generator
+-- strips descriptions, so a bump that changes only text regenerates
+-- identical modules; @tests/check-all.sh@ checks that.
 riverCommit :: String
 riverCommit = "cc4a291b2b9375fe3d5fe5a64b6f510b463f888b"
 
