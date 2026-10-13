@@ -359,11 +359,15 @@ overrideBorderWidth :: Borders -> Window -> Dimension -> IO ()
 overrideBorderWidth ref w n = atomicModifyIORef' ref $ \m ->
     (M.alter (\o -> Just (Just n, maybe Nothing snd o)) w m, ())
 
+-- | Leaves a pinned colour in place: only 'clearBorderColor' lifts a pin.
 overrideBorderColor :: Borders -> Window -> BorderColor -> IO ()
 overrideBorderColor ref w c = atomicModifyIORef' ref $ \m ->
-    (M.alter (\o -> Just (maybe Nothing fst o, Just (c, False))) w m, ())
+    (M.alter (\o -> Just $ case o of
+        Just (wd, Just (p, True)) -> (wd, Just (p, True))
+        _ -> (maybe Nothing fst o, Just (c, False))) w m, ())
 
--- | An override the focused colour does not replace.
+-- | An override neither the focused colour nor 'overrideBorderColor'
+-- replaces.
 overridePinnedBorderColor :: Borders -> Window -> BorderColor -> IO ()
 overridePinnedBorderColor ref w c = atomicModifyIORef' ref $ \m ->
     (M.alter (\o -> Just (maybe Nothing fst o, Just (c, True))) w m, ())

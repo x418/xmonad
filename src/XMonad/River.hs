@@ -690,9 +690,9 @@ capturedOutputs = do
 resetBorderColor :: Window -> X ()
 resetBorderColor w = io . flip clearBorderColor w =<< asks (riverBorders . riverState)
 
--- | A @#rrggbb@ border colour that holds while the window is focused too,
--- where 'XMonad.Core.setWindowBorder' yields to the focused colour.
--- Ignored if it does not parse.
+-- | A @#rrggbb@ border colour that holds while the window is focused and
+-- over 'XMonad.Core.setWindowBorder' (WindowNavigation repaints neighbours
+-- on every layout), until 'resetBorderColor'.  Ignored if it does not parse.
 pinBorderColor :: Window -> String -> X ()
 pinBorderColor w color = forM_ (parseColorMaybe color) $ \p -> do
     ref <- asks (riverBorders . riverState)
