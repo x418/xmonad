@@ -122,7 +122,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm g
     overlayRef  <- newIORef []
     overlayPos  <- newIORef M.empty
     restartRef  <- newIORef Nothing
-    moved       <- newIORef False
+    moved       <- newIORef Nothing
     pure Shared
       { shManager        = manager
       , shBindings       = bindings

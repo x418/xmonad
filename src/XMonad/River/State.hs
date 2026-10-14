@@ -157,10 +157,10 @@ data Shared m = Shared
     , shRestart  :: !(IORef (Maybe (FilePath, [String])))
       -- ^ program and arguments to exec once river confirms this window
       -- manager has stopped.  Exec'd directly: @sh -c@ would fork and stay.
-    , shLayoutMoved :: !(IORef Bool)
-      -- ^ The last layout pass moved a window.  Worker writes, loop takes;
-      -- the next @pointer_enter@ is then the layout's doing, not the
-      -- pointer's.
+    , shLayoutMoved :: !(IORef (Maybe (Position, Position)))
+      -- ^ Where the pointer was when a layout pass last moved a window.  A
+      -- @pointer_enter@ with the pointer still there is the layout's doing,
+      -- not the pointer's.
     }
 
 -- | The worker's own.  Reached through 'XMonad.Core.riverState' from 'X'

@@ -17,13 +17,13 @@ import Control.Monad.Reader (asks)
 import Control.Monad.State (gets)
 import Data.IORef
 import Data.Int (Int32)
-import Data.Maybe (isNothing)
+import Data.Maybe (isJust, isNothing)
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
 import XMonad.Core
 import XMonad.Operations (focus, mouseMoveWindow)
-import XMonad.River (mouseResizeWindowEdges, touchMoveWindow, touchResizeWindowEdges)
+import XMonad.River (mouseResizeWindowEdges, pointerPosition, touchMoveWindow, touchResizeWindowEdges)
 import XMonad.River.Connection
 import XMonad.River.Ops (emitOp)
 import XMonad.River.Plan (Op(..), Plan(..))
@@ -31,7 +31,7 @@ import XMonad.River.Protocol.Core
 import XMonad.River.Protocol.LayerShell
 import XMonad.River.Protocol.WindowManagement
 import XMonad.River.Protocol.XkbBindings
-import XMonad.River.State (InputCapture(..), Shared(..), riverDragOrigin, riverDragTouch, riverLogDue)
+import XMonad.River.State (InputCapture(..), RiverState(..), Shared(..), riverDragOrigin, riverDragTouch, riverLogDue)
 import XMonad.River.Types
 import XMonad.River.WM.Input (outputsChanged)
 import XMonad.River.WM.Runtime
@@ -196,22 +196,22 @@ addSeat rt seat = do
     RiverSeatV1Removed -> adjust ref seat $ \s -> s { rsRemoved = True }
     -- X11's EnterNotify.  X11 marked the crossings a window's own movement
     -- synthesised; river's carries a window and nothing else, so a crossing
-    -- that follows a layout pass which moved something is taken as that
-    -- layout's doing -- Magnifier enlarging the focused window would
-    -- otherwise refocus its displaced neighbour, forever.
+    -- with the pointer where it was when a layout pass last moved something
+    -- is taken as that layout's doing -- Magnifier enlarging the focused
+    -- window would otherwise refocus its displaced neighbour, forever.
     RiverSeatV1PointerEnter win -> do
       atomicWriteIORef (shHovered sh) (Just win)
-      byLayout <- atomicModifyIORef' (shLayoutMoved sh) (\m -> (False, m))
-      when (rtFollowsMouse rt && not byLayout) $ queueAction rt $ do
-        -- Runs a sequence later: the pointer may have moved on, a drag owns
-        -- the focus, and a window on a hidden workspace cannot really be
-        -- entered (a restart shows every window until the successor's first
-        -- sequence hides them).
+      when (rtFollowsMouse rt) $ queueAction rt $ do
+        -- Runs a sequence later, once the batch's pointer_position is in:
+        -- the pointer may have moved on, a drag owns the focus, and a window
+        -- on a hidden workspace cannot really be entered (a restart shows
+        -- every window until the successor's first sequence hides them).
         stillThere <- io ((== Just win) <$> readIORef (shHovered sh))
         drag <- gets dragging
         onScreen <- gets (elem win . concatMap (W.integrate' . W.stack . W.workspace)
                             . screensOf . windowset)
-        when (stillThere && isNothing drag && onScreen) (focus win)
+        byLayout <- crossedByLayout
+        when (stillThere && isNothing drag && onScreen && not byLayout) (focus win)
     RiverSeatV1PointerLeave -> atomicWriteIORef (shHovered sh) Nothing
     -- A click, or a touch or tablet tool, on a window: X11's ButtonPress on an
     -- unfocused client.  Focus follows it whatever 'focusFollowsMouse' says,
@@ -259,6 +259,16 @@ addSeat rt seat = do
     touchEnded = do
       io . (`writeIORef` Nothing) =<< asks (riverDragTouch . riverState)
       gets dragging >>= mapM_ snd
+
+-- | Whether the pointer is where it was when a layout pass last moved a
+-- window.  A crossing anywhere else is the pointer's and clears the record,
+-- so coming back to that spot later is not taken for the layout.
+crossedByLayout :: X Bool
+crossedByLayout = do
+  pos <- pointerPosition
+  ref <- asks (shLayoutMoved . rsShared . riverState)
+  io $ atomicModifyIORef' ref $ \at ->
+    if isJust pos && at == pos then (at, True) else (Nothing, False)
 
 -- | Run the log hook in the coming manage sequence: river changed state a
 -- config reads there (capture sessions) without changing the windowset.

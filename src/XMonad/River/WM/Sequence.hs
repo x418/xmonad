@@ -30,6 +30,7 @@ import System.IO (hPutStrLn, stderr)
 
 import XMonad.Core
 import XMonad.Operations (floatLocation, getCleanedScreenInfo, isFixedSizeOrTransient, readStateFile, scaleRationalRect)
+import XMonad.River (pointerPosition)
 import XMonad.River.Ops (emitOp)
 import XMonad.River.Plan
 import XMonad.River.Protocol.WindowManagement (riverWindowV1CapabilitiesFullscreen)
@@ -403,10 +404,13 @@ applyLayout layerDefault = do
   -- a map left as a thunk keeps the previous pass alive until somebody
   -- reads it.  "Moved" compares rectangles only: a focus change alters
   -- borders, not positions, and must not make the next pointer_enter look
-  -- like the layout's doing (focus-follows-mouse would stop following).
+  -- like the layout's doing (focus-follows-mouse would stop following).  A
+  -- pass that moves nothing keeps the last record: the crossing an earlier
+  -- move caused can arrive after it.
   let placedRef = riverPlaced rs
   old <- io (readIORef placedRef)
-  io (atomicWriteIORef (shLayoutMoved (rsShared rs)) (pdMap old /= rects))
+  when (pdMap old /= rects) $
+    io . atomicWriteIORef (shLayoutMoved (rsShared rs)) =<< pointerPosition
   io (atomicWriteIORef placedRef $! Placed order rects)
 
   io $ atomically $ modifyTVar' (shPlan (rsShared rs)) $ \p -> p
