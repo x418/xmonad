@@ -15,6 +15,7 @@ module XMonad.River.WM.Runtime
   , RenderInput(..)
   , queueAction
   , queueActions
+  , queueActionFirst
   , claimCapture
   , liveSeats
   , adjust
@@ -195,6 +196,11 @@ queueAction rt act = queueActions rt [act]
 queueActions :: Runtime -> [X ()] -> IO ()
 queueActions _ [] = pure ()
 queueActions rt acts = modifyIORef' (rtPending rt) (reverse acts ++)
+
+-- | Queue an action ahead of everything already queued for the next manage
+-- sequence.  Loop thread only.
+queueActionFirst :: Runtime -> X () -> IO ()
+queueActionFirst rt act = modifyIORef' (rtPending rt) (++ [act])
 
 -- | Take the open capture if it is the one of the given generation, leaving
 -- it otherwise.  Whoever takes it owns its teardown.  Loop thread only.

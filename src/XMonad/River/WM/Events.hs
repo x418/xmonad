@@ -22,7 +22,7 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
 import XMonad.Core
-import XMonad.Operations (focus, mouseMoveWindow)
+import XMonad.Operations (focus, mouseMoveWindow, pointScreen, windows)
 import XMonad.River (mouseResizeWindowEdges, pointerPosition, touchMoveWindow, touchResizeWindowEdges)
 import XMonad.River.Connection
 import XMonad.River.Ops (emitOp)
@@ -219,8 +219,15 @@ addSeat rt seat = do
     RiverSeatV1WindowInteraction win -> do
       modifyIORef' (rtHeldFrom rt) (M.delete seat)
       queueAction rt (focus win)
-    RiverSeatV1PointerPosition x y ->
+    -- X11's EnterNotify on another screen's root window, which river has no
+    -- crossing for: an empty output, a gap, the wallpaper.  Motion alone
+    -- starts no manage sequence, so this can arrive in the batch of the key
+    -- press that follows it, and goes first so that press acts on the
+    -- screen the pointer is on.
+    RiverSeatV1PointerPosition x y -> do
+      from <- maybe (x, y) rsPointer . M.lookup seat <$> readIORef ref
       adjust ref seat $ \s -> s { rsPointer = (x, y) }
+      when (rtFollowsMouse rt) $ queueActionFirst rt (followPointerScreen from (x, y))
     -- A surface this window manager drew was pressed: X11's ButtonPress on a
     -- decoration.  The position is the one river sent for this sequence.
     RiverSeatV1ShellSurfaceInteraction surf -> do
@@ -269,6 +276,20 @@ crossedByLayout = do
   ref <- asks (shLayoutMoved . rsShared . riverState)
   io $ atomicModifyIORef' ref $ \at ->
     if isJust pos && at == pos then (at, True) else (Nothing, False)
+
+-- | The pointer moved from one screen to another: that screen becomes the
+-- current one.  Only a move between screens counts, so a screen chosen from
+-- the keyboard stays current while the pointer wanders about another; and
+-- not during a drag, whose grab kept X11's crossings from xmonad.
+followPointerScreen :: (Position, Position) -> (Position, Position) -> X ()
+followPointerScreen (fx, fy) (x, y) = do
+  drag <- gets dragging
+  from <- fmap W.screen <$> pointScreen fx fy
+  to <- pointScreen x y
+  cur <- gets (W.screen . W.current . windowset)
+  whenJust to $ \s ->
+    when (isNothing drag && from /= Just (W.screen s) && cur /= W.screen s) $
+      windows (W.view (W.tag (W.workspace s)))
 
 -- | Run the log hook in the coming manage sequence: river changed state a
 -- config reads there (capture sessions) without changing the windowset.
