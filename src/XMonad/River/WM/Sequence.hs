@@ -19,7 +19,7 @@ import Control.Monad (forM, forM_, unless, void, when)
 import Control.Monad.Reader (ask, asks)
 import Control.Monad.State (get, gets, modify, put)
 import Data.IORef
-import Data.List (find, sortOn)
+import Data.List (find, partition, sortOn)
 import Data.Maybe (fromMaybe)
 import Data.Monoid (appEndo)
 import qualified Data.Map.Strict as M
@@ -194,9 +194,7 @@ syncScreens = do
     -- Compared in screen-id order: current-first order changes on every view.
     before <- gets (map (screenRect . W.screenDetail)
                     . sortOn W.screen . screensOf . windowset)
-    -- Only when the outputs changed.  'rescreen' re-seats the current
-    -- workspace as screen 0; run on every sequence it pinned focus, and
-    -- everything that follows W.current, to the leftmost output.
+    -- Only when the outputs changed, so ScreenLayoutChanged means that.
     ws <- gets windowset
     let updated = rescreen screens ws
         applied = map (screenRect . W.screenDetail)
@@ -206,29 +204,28 @@ syncScreens = do
       void (broadcastEvent ScreenLayoutChanged)
 
 -- | Lay the given screen rectangles over the current workspaces, keeping
--- each workspace on its screen where possible.  A screen with no workspace of
--- its own takes a distinct one from the hidden pool.
+-- each workspace on its screen and the focused one focused.  Only a change
+-- in the number of outputs moves anything: fewer, and the focused workspace
+-- stays while the highest-numbered others go hidden; more, and each new
+-- screen takes a distinct one from the hidden pool.  A change of size
+-- alone -- the first sequence after a restart knows the outputs but not yet
+-- their bars' usable areas -- must not shuffle workspaces between screens.
 rescreen :: [Rectangle] -> WindowSet -> WindowSet
-rescreen rects ws = ws
-    { W.current = (W.current ws) { W.screen = 0, W.screenDetail = SD firstRect }
-    , W.visible = zipWith3 reseat [1 :: Int ..] restRects available
-    , W.hidden = newHidden
-    }
+rescreen [] ws = ws
+rescreen rects ws = ws { W.current = cur, W.visible = vis, W.hidden = newHidden }
   where
-    (firstRect, restRects) = case rects of
-      (r:rs) -> (r, rs)
-      []     -> (Rectangle 0 0 0 0, [])
-    oldVisible = W.visible ws
-    requested = length restRects
-    keptVisible = take requested oldVisible
-    surplus = drop requested oldVisible
+    (kept, surplus) = splitAt (length rects) (W.current ws : sortOn W.screen (W.visible ws))
     pool = map W.workspace surplus ++ W.hidden ws
-    extras = take (requested - length keptVisible) pool
-    available = map Left keptVisible ++ map Right extras
-    reseat i r = \case
-      Left s  -> s { W.screen = fromIntegral i, W.screenDetail = SD r }
-      Right h -> W.Screen h (fromIntegral i) (SD r)
+    extras = take (length rects - length kept) pool
     newHidden = drop (length extras) pool
+    seated = zipWith3 seat [0 ..] rects (map Left (sortOn W.screen kept) ++ map Right extras)
+    seat i r = \case
+      Left s  -> s { W.screen = i, W.screenDetail = SD r }
+      Right h -> W.Screen h i (SD r)
+    focused = W.tag (W.workspace (W.current ws))
+    (cur, vis) = case partition ((== focused) . W.tag . W.workspace) seated of
+      (c:_, rest) -> (c, rest)
+      ([], _)     -> error "unreachable: the focused workspace is always kept"
 
 -- | Run the manage hook for windows river has told us about since the last
 -- sequence, and insert them.  Before the window has been rendered, which is
