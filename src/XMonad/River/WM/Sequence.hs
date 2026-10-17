@@ -29,7 +29,7 @@ import System.Environment (lookupEnv)
 import System.IO (hPutStrLn, stderr)
 
 import XMonad.Core
-import XMonad.Operations (floatLocation, getCleanedScreenInfo, isFixedSizeOrTransient, readStateFile, scaleRationalRect)
+import XMonad.Operations (broadcastMessage, floatLocation, getCleanedScreenInfo, isFixedSizeOrTransient, readStateFile, scaleRationalRect)
 import XMonad.River (pointerPosition)
 import XMonad.River.Ops (emitOp)
 import XMonad.River.Plan
@@ -131,12 +131,21 @@ restoreState = do
 
 -- | Drop what river has closed from the 'WindowSet', and tell the config.
 -- The objects are destroyed by 'reapObjects' on the loop, afterwards.
+--
+-- 'DestroyWindowEvent' goes where upstream's @handle@ sends it: the event
+-- hook while the window is still managed, then the layouts once it is not.
+-- Once per window: a sequence the loop did not wait for leaves the entry for
+-- the next one to see again, and only the first finds it adopted.
 reapClosed :: X ()
 reapClosed = do
   rs <- asks riverState
   ws <- io (readIORef (riverWindows rs))
+  adopted <- io (readIORef (wsAdopted (rsWorker rs)))
   forM_ [ w | w <- M.elems ws, rwClosed w ] $ \w -> do
+    let announce = S.member (rwObject w) adopted
+    when announce $ void (broadcastEvent (DestroyWindowEvent (rwObject w)))
     modify $ \st -> st { windowset = W.delete (rwObject w) (windowset st) }
+    when announce $ broadcastMessage (DestroyWindowEvent (rwObject w))
     io $ modifyIORef' (wsAdopted (rsWorker rs)) (S.delete (rwObject w))
     io $ modifyIORef' (riverUnsized rs) (S.delete (rwObject w))
     -- river recycles ids; an override left behind would land on an
