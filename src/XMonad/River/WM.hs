@@ -168,6 +168,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm g
     adopted     <- newIORef S.empty
     restored    <- newIORef False
     floatSizes  <- newIORef M.empty
+    fullscreen  <- newIORef S.empty
     pure WorkerState
       { wsInManageSeq = manageRef
       , wsPlaced      = placed
@@ -182,6 +183,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm g
       , wsAdopted     = adopted
       , wsRestored    = restored
       , wsFloatSizes  = floatSizes
+      , wsFullscreen  = fullscreen
       }
   let rs = RiverState sh wstate
 
@@ -301,6 +303,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm g
     lastManage <- newIORef M.empty
     lastRender <- newIORef M.empty
     lastStack  <- newIORef []
+    lastFull   <- newIORef M.empty
     lastOvPos  <- newIORef M.empty
     heldFrom   <- newIORef M.empty
     lastGiven  <- newIORef (RenderInput (-1) (-1) [] M.empty)
@@ -344,6 +347,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm g
       , rtLastManage = lastManage
       , rtLastRender = lastRender
       , rtLastStack = lastStack
+      , rtLastFullscreen = lastFull
       , rtLastOverlayPos = lastOvPos
       , rtHeldFrom = heldFrom
       , rtLastRendered = lastGiven

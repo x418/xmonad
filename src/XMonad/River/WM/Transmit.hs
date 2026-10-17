@@ -11,6 +11,7 @@
 module XMonad.River.WM.Transmit
   ( transmitManage
   , transmitRender
+  , stackOrder
   ) where
 
 import Control.Concurrent.STM (readTVarIO, registerDelay)
@@ -159,9 +160,30 @@ transmitManage rt plan = do
   -- No plan yet -- a sequence before the usable areas were known -- places
   -- nothing: river keeps what the windows have.
   when (planSerial plan > 0) $ do
+    -- Fullscreen is told on change.  river sizes a fullscreen window to its
+    -- output and ignores proposals meanwhile, so the dimensions below skip
+    -- it, which also drops its 'rtLastManage' entry: leaving, it is proposed
+    -- its size afresh, and given its position here, in the sequence of the
+    -- @exit_fullscreen@, which river leaves undefined until both arrive.
+    outs <- readIORef (shOutputs sh)
+    lastF <- readIORef (rtLastFullscreen rt)
+    let live o = maybe False (not . roRemoved) (M.lookup o outs)
+        ours = (`M.restrictKeys` M.keysSet known)
+        (enter, leave, nowF) = fullscreenChanges live (ours lastF) (ours (planFullscreen plan))
+    forM_ (M.toList enter) $ \(win, out) -> do
+      riverWindowV1Fullscreen conn win out
+      unless (M.member win lastF) $ riverWindowV1InformFullscreen conn win
+    forM_ leave $ \win -> do
+      riverWindowV1ExitFullscreen conn win
+      riverWindowV1InformNotFullscreen conn win
+      forM_ ((,) <$> M.lookup win known <*> M.lookup win (planPlaced plan)) $ \(rw, pl) ->
+        riverNodeV1SetPosition conn (rwNode rw) (rect_x (plRect pl)) (rect_y (plRect pl))
+    atomicWriteIORef (rtLastFullscreen rt) $! nowF
+
     lastM <- readIORef (rtLastManage rt)
     current <- fmap M.fromList $ forM
-      [ (win, pl, rw) | win <- planOrder plan, Just pl <- [M.lookup win (planPlaced plan)]
+      [ (win, pl, rw) | win <- planOrder plan, M.notMember win nowF
+                      , Just pl <- [M.lookup win (planPlaced plan)]
                       , Just rw <- [M.lookup win known] ] $
       \(win, pl, rw) -> do
         let tiled = not (plFloating pl)
@@ -273,17 +295,9 @@ renderPlan rt plan known overlays positions = do
   unless (null toHide) $ modifyIORef' winRef $ \m ->
     foldr (\w -> M.adjust (\x -> x { rwHidden = True }) (rwObject w)) m toHide
 
-  -- Stacking, bottom to top, restated whenever the order differs from the
-  -- last one sent -- a new node's position in the render list is undefined.
-  -- The placement list is topmost-first (upstream's convention, and what
-  -- 'windowUnderPointer' relies on), hence the reverse; Magnifier is the
-  -- layout that can tell.  The window manager's own surfaces (decorations,
-  -- overlays), which contrib records, go above the windows.
-  let nodeOf win = rwNode <$> M.lookup win known
-      order = concat
-        [ [ n | win <- reverse (planOrder plan), Just n <- [nodeOf win] ]
-        , [ n | win <- planRaised plan, Just n <- [nodeOf win] ]
-        , overlays ]
+  -- Stacking, restated whenever the order differs from the last one sent --
+  -- a new node's position in the render list is undefined.
+  let order = stackOrder plan (fmap rwNode . (`M.lookup` known)) overlays
   lastOrder <- readIORef (rtLastStack rt)
   lastPos <- readIORef (rtLastOverlayPos rt)
   forM_ overlays $ \n -> forM_ (M.lookup n positions) $ \p ->
@@ -294,3 +308,22 @@ renderPlan rt plan known overlays positions = do
   where
     conn = rtConn rt
     winRef = shWindows (rtShared rt)
+
+-- | The render order, bottom to top.  The placement list is topmost-first
+-- (upstream's convention, and what 'windowUnderPointer' relies on), hence
+-- the reverse; Magnifier is the layout that can tell.  The window manager's
+-- own surfaces (decorations, overlays), which contrib records, go above the
+-- windows, and fullscreen windows above those: river moves every shell
+-- surface listed after a fullscreen window into its fullscreen layer, on
+-- every output (@WindowManager.zig@, @renderFinish@), which would draw a
+-- tab bar over the video.
+stackOrder :: Plan -> (Window -> Maybe ObjectId) -> [ObjectId] -> [ObjectId]
+stackOrder plan nodeOf overlays = concat
+  [ nodes (not . full) (reverse (planOrder plan))
+  , nodes (not . full) (planRaised plan)
+  , overlays
+  , nodes full (reverse (planOrder plan))
+  , nodes full (planRaised plan) ]
+  where
+    full = (`M.member` planFullscreen plan)
+    nodes keep ws = [ n | w <- ws, keep w, Just n <- [nodeOf w] ]

@@ -145,6 +145,9 @@ data Runtime = Runtime
   , rtLastStack      :: !(IORef [ObjectId])
     -- ^ The node order last placed, bottom to top.  A reaped window's node
     -- leaves it, so the next order with a new node in that slot is sent.
+  , rtLastFullscreen :: !(IORef (M.Map Window ObjectId))
+    -- ^ The windows river was told are fullscreen, and on which output.
+    -- Pruned when the window is reaped or the output removed.
   , rtLastOverlayPos :: !(IORef (M.Map ObjectId (Position, Position)))
     -- ^ Where each listed overlay was last put.
   , rtHeldFrom       :: !(IORef (M.Map ObjectId FocusTarget))

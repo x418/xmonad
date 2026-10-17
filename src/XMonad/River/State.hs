@@ -29,7 +29,7 @@ module XMonad.River.State
   , riverExtraKeys, riverOverlays, riverOverlayPos, riverCapture, riverOps, riverNowOps
   , riverKeyboardLayout
   , inManageSeq, riverPlaced, riverRestack, riverDragOrigin, riverDragTouch, riverAfterLayout
-  , riverUnsized, riverLogDue, riverBorders, riverSubmapGen
+  , riverUnsized, riverLogDue, riverBorders, riverSubmapGen, riverFullscreen
     -- * Where the last layout put things
   , Placed(..), rectOf, placedRects, placedOrder, updatePlacement
     -- * One-shot requests
@@ -212,6 +212,9 @@ data WorkerState m = WorkerState
     , wsFloatSizes :: !(IORef (M.Map Window (Int32, Int32)))
       -- ^ Each float's size as last seen, so a size the client changed itself
       -- can be told from one this side proposed and is waiting on.
+    , wsFullscreen :: !(IORef (S.Set Window))
+      -- ^ Windows handed to river's fullscreen by 'XMonad.River.setFullscreen'.
+      -- Dropped as they close: river recycles ids.
     }
 
 -- | What @XConf@ carries: the two halves.  The names below are the ones
@@ -280,6 +283,8 @@ riverBorders :: RiverState m -> IORef (M.Map Window BorderOverride)
 riverBorders = wsBorders . rsWorker
 riverSubmapGen :: RiverState m -> IORef Int
 riverSubmapGen = wsSubmapGen . rsWorker
+riverFullscreen :: RiverState m -> IORef (S.Set Window)
+riverFullscreen = wsFullscreen . rsWorker
 {-# INLINE riverManager #-}
 {-# INLINE riverBindings #-}
 {-# INLINE riverXkbVersion #-}
@@ -310,6 +315,7 @@ riverSubmapGen = wsSubmapGen . rsWorker
 {-# INLINE riverLogDue #-}
 {-# INLINE riverBorders #-}
 {-# INLINE riverSubmapGen #-}
+{-# INLINE riverFullscreen #-}
 
 -- | What 'XMonad.Core.withDisplay' hands out.  X11's was the server
 -- connection; the queries contrib makes on it -- 'XMonad.Core.getWindowAttributes',

@@ -55,7 +55,8 @@ addWindow rt win = do
     , rwIdentifier = Nothing, rwParent = Nothing
     , rwDimensions = (0, 0)
     , rwSizeHints = noSizeHints
-    , rwClosed = False, rwFullscreen = False, rwHidden = False
+    , rwClosed = False, rwFullscreen = False, rwFullscreenHint = Nothing
+    , rwHidden = False
     , rwCaptureSessions = 0
     }
   riverWindowV1Listen conn win $ \case
@@ -87,11 +88,13 @@ addWindow rt win = do
         } }
     -- The flag is set before the event is queued, so a hook reading
     -- 'XMonad.Hooks.ManageHelpers.isFullscreen' sees the answer it is told.
-    RiverWindowV1FullscreenRequested _ -> do
-      adjust ref win $ \w -> w { rwFullscreen = True }
+    RiverWindowV1FullscreenRequested out -> do
+      adjust ref win $ \w -> w
+        { rwFullscreen = True
+        , rwFullscreenHint = if isNullObject out then Nothing else Just out }
       queueAction rt $ void $ broadcastEvent (WindowFullscreenChanged win True)
     RiverWindowV1ExitFullscreenRequested -> do
-      adjust ref win $ \w -> w { rwFullscreen = False }
+      adjust ref win $ \w -> w { rwFullscreen = False, rwFullscreenHint = Nothing }
       queueAction rt $ void $ broadcastEvent (WindowFullscreenChanged win False)
     -- A client-side title bar being dragged: the same interactive operation
     -- the mod-drag bindings start, from the edges the client named.
@@ -313,6 +316,7 @@ reapObjects rt = do
     modifyIORef' (rtLastManage rt) (M.delete (rwObject w))
     modifyIORef' (rtLastRender rt) (M.delete (rwObject w))
     modifyIORef' (rtLastStack rt) (filter (/= rwNode w))
+    modifyIORef' (rtLastFullscreen rt) (M.delete (rwObject w))
     atomicModifyIORef' (shHovered sh) (\h -> (if h == Just (rwObject w) then Nothing else h, ()))
 
   let outRef = shOutputs sh
@@ -322,6 +326,9 @@ reapObjects rt = do
     forM_ (roWlOutput o) (wlOutputRelease conn)
     riverOutputV1Destroy conn (roObject o)
     modifyIORef' outRef (M.delete (roObject o))
+    -- river has taken its windows out of fullscreen already, and the id may
+    -- come back as another output.
+    modifyIORef' (rtLastFullscreen rt) (M.filter (/= roObject o))
   unless (null [ () | o <- M.elems outs, roRemoved o ]) $ outputsChanged (rtInput rt)
 
   let seatRef = shSeats sh

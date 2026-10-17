@@ -11,8 +11,11 @@ module XMonad.River.WM.Sequence
   , runStartupHook
   , rescreen
   , sameWindows
+  , outputAt
+  , fullscreenOutputs
   ) where
 
+import Control.Applicative ((<|>))
 import Control.Concurrent.STM
 import Control.Exception (finally)
 import Control.Monad (forM, forM_, unless, void, when)
@@ -151,6 +154,7 @@ reapClosed = do
     -- river recycles ids; an override left behind would land on an
     -- unrelated window.
     io $ forgetBorderOverride (riverBorders rs) (rwObject w)
+    io $ modifyIORef' (riverFullscreen rs) (S.delete (rwObject w))
 
   outs <- io (readIORef (riverOutputs rs))
   forM_ [ o | o <- M.elems outs, roRemoved o ] $ \o ->
@@ -163,14 +167,22 @@ reapClosed = do
   -- or every later drag is ignored.
   unless (null gone) $ gets dragging >>= mapM_ snd
 
+-- | The output under a screen: the one whose area contains the screen's
+-- origin, position being the only link between a 'W.Screen' and its output.
+-- Containment rather than equality, because the screen rectangle is the
+-- layer shell's usable area when there is one, and a bar on the left or top
+-- edge moves its origin off the output's.
+outputAt :: [RiverOutput] -> Rectangle -> Maybe RiverOutput
+outputAt outs r = find holds outs
+  where
+    holds o = let (x, y) = roPosition o
+                  (w, h) = roSize o
+              in x <= rect_x r && rect_x r < x + fromIntegral w
+              && y <= rect_y r && rect_y r < y + fromIntegral h
+
 -- | Nominate the output layer surfaces that name none go to: the one under
--- the current screen, so a launcher opens where the work is.  Matched by
--- position, the only link between a 'W.Screen' and its output: the output
--- whose area contains the screen's origin.  Containment rather than
--- equality, because the screen rectangle is the layer shell's usable area
--- when there is one, and a bar on the left or top edge moves its origin off
--- the output's.  Returns the choice; 'applyLayout' publishes it with the
--- rest of the plan.
+-- the current screen, so a launcher opens where the work is.  Returns the
+-- choice; 'applyLayout' publishes it with the rest of the plan.
 nominateLayerOutput :: X (Maybe (ObjectId, Maybe ObjectId))
 nominateLayerOutput = asks (rsShared . riverState) >>= \sh -> case shLayerShell sh of
  Nothing -> pure Nothing
@@ -179,15 +191,9 @@ nominateLayerOutput = asks (rsShared . riverState) >>= \sh -> case shLayerShell 
   ws <- gets windowset
   let SD current = W.screenDetail (W.current ws)
       live = filter (not . roRemoved) (M.elems outs)
-      onScreen o = let (x, y) = roPosition o
-                       (w, h) = roSize o
-                       cx = rect_x current
-                       cy = rect_y current
-                   in x <= cx && cx < x + fromIntegral w
-                   && y <= cy && cy < y + fromIntegral h
-      chosen = case filter onScreen live of
-        (o:_) -> Just o
-        []    -> case sortOn roPosition live of
+      chosen = case outputAt live current of
+        Just o -> Just o
+        Nothing -> case sortOn roPosition live of
           (o:_) -> Just o
           []    -> Nothing
   pure ((\o -> (roObject o, roLayerObject o)) <$> chosen)
@@ -299,7 +305,11 @@ settleFloats = do
   let sizesRef = wsFloatSizes (rsWorker rs)
   pending <- io (readIORef (riverUnsized rs))
   known <- io (readIORef (riverWindows rs))
-  forM_ (S.toList pending) $ \w -> forM_ (M.lookup w known) $ \rw ->
+  -- A fullscreen window's size is river's, the output's, and not the
+  -- client's choice.  Its size is still recorded as seen, so the report that
+  -- follows leaving is not taken for one either.
+  full <- io (readIORef (riverFullscreen rs))
+  forM_ (S.toList (pending `S.difference` full)) $ \w -> forM_ (M.lookup w known) $ \rw ->
     case rwDimensions rw of
       (0, 0) -> pure ()
       (dw, dh) -> do
@@ -319,7 +329,7 @@ settleFloats = do
   let sized = [ (w, rwDimensions rw) | w <- floats, Just rw <- [M.lookup w known]
               , rwDimensions rw /= (0, 0), not (S.member w pending) ]
   forM_ sized $ \(w, (dw, dh)) ->
-    when (M.lookup w seen /= Just (dw, dh)) $
+    when (S.notMember w full && M.lookup w seen /= Just (dw, dh)) $
       forM_ (M.lookup w geometry) $ \r ->
         when ((rect_width r, rect_height r) /= (fromIntegral dw, fromIntegral dh)) $ do
           scr <- screenOf w
@@ -419,6 +429,12 @@ applyLayout layerDefault = do
     io . atomicWriteIORef (shLayoutMoved (rsShared rs)) =<< pointerPosition
   io (atomicWriteIORef placedRef $! Placed order rects)
 
+  granted <- io (readIORef (riverFullscreen rs))
+  outs <- io (readIORef (riverOutputs rs))
+  known <- io (readIORef (riverWindows rs))
+  let live = filter (not . roRemoved) (M.elems outs)
+      hint w = M.lookup w known >>= rwFullscreenHint
+
   io $ atomically $ modifyTVar' (shPlan (rsShared rs)) $ \p -> p
     { planSerial     = planSerial p + 1
     , planLayerDefault = layerDefault
@@ -426,6 +442,7 @@ applyLayout layerDefault = do
     , planPlaced     = placedMap
     , planRaised     = stillUp
     , planFocus      = maybe ClearFocus FocusWindow mFocus
+    , planFullscreen = fullscreenOutputs live ws hint (planFullscreen p) granted
     }
 
   -- Last, so 'XMonad.River.afterLayout' sees everything above.  Drained once:
@@ -433,6 +450,26 @@ applyLayout layerDefault = do
   ref <- asks (riverAfterLayout . riverState)
   queued <- io (atomicModifyIORef' ref (\as -> ([], reverse as)))
   mapM_ userCode queued
+
+-- | Where each window handed to river's fullscreen goes: the output under
+-- the screen its workspace is on, whatever the client's hint says, since a
+-- window drawn on another output would cover a workspace it is not on.  One
+-- whose workspace is off screen is put somewhere river will not draw it --
+-- the client's hint, else where it already was, else the current screen --
+-- so coming back costs a configure only if the output differs.  Live
+-- outputs only, and windows the 'WindowSet' still has.
+fullscreenOutputs :: [RiverOutput] -> WindowSet -> (Window -> Maybe ObjectId)
+                  -> M.Map Window ObjectId -> S.Set Window -> M.Map Window ObjectId
+fullscreenOutputs live ws hint previous granted =
+  M.fromList [ (w, o) | w <- S.toList granted, W.member w ws, Just o <- [pick w] ]
+  where
+    alive o = if any ((== o) . roObject) live then Just o else Nothing
+    outputOf scr = roObject <$> outputAt live (screenRect (W.screenDetail scr))
+    shown = M.fromList [ (W.tag (W.workspace s), s) | s <- screensOf ws ]
+    pick w = (W.findTag w ws >>= (`M.lookup` shown) >>= outputOf)
+         <|> (hint w >>= alive)
+         <|> (M.lookup w previous >>= alive)
+         <|> outputOf (W.current ws)
 
 updateLayout :: WorkspaceId -> Layout Window -> WindowSet -> WindowSet
 updateLayout i l = W.mapWorkspace $ \wsp ->

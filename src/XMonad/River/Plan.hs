@@ -9,6 +9,7 @@ module XMonad.River.Plan
   , Border(..)
   , planVisible
   , emptyPlan
+  , fullscreenChanges
   , FocusTarget(..)
   , Op(..)
   , KeyboardLayoutRequest(..)
@@ -80,6 +81,11 @@ data Plan = Plan
     -- @river_layer_shell_output_v1@.  Held as the choice rather than as a
     -- request because the request is only reissued when the choice changes,
     -- and what has been sent is the transmitting side's business.
+  , planFullscreen :: !(M.Map Window ObjectId)
+    -- ^ The windows river draws fullscreen, and on which output.  State, like
+    -- the placements, so a workspace switch is a restatement: river does not
+    -- draw a hidden fullscreen window, and one shown again is fullscreen with
+    -- no new configure.
   }
 
 -- | The plan of a window manager that has decided nothing yet.
@@ -95,7 +101,22 @@ emptyPlan = Plan
   , planRaised     = []
   , planFocus      = ClearFocus
   , planLayerDefault = Nothing
+  , planFullscreen = M.empty
   }
+
+-- | What to tell river about fullscreen, from which outputs are live, what it
+-- was last told and what the plan wants: the windows to put on an output
+-- (entering, or moving between outputs), the windows to take back, and what
+-- river will then have.  A window wanted on an output that has gone neither
+-- enters nor leaves; river let it go with the output, and a later plan names
+-- another.
+fullscreenChanges :: (ObjectId -> Bool) -> M.Map Window ObjectId -> M.Map Window ObjectId
+                  -> (M.Map Window ObjectId, S.Set Window, M.Map Window ObjectId)
+fullscreenChanges live sent want =
+  (enter, leave, M.union enter (M.restrictKeys sent (M.keysSet want)))
+  where
+    enter = M.filterWithKey (\w o -> live o && M.lookup w sent /= Just o) want
+    leave = M.keysSet sent `S.difference` M.keysSet want
 
 -- | Effects that happen once and are then forgotten.  Drained as they are
 -- transmitted: @close@ twice kills a second window.

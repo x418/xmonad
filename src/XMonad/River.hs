@@ -107,8 +107,10 @@ module XMonad.River (
 
     -- * Fullscreen
     --
-    -- | Geometry stays the layout's; this tells the client what it is.
-    informFullscreen,
+    -- | 'setFullscreen' hands a window to river, which draws it over its
+    -- output; 'informFullscreen' only tells the client, and the geometry
+    -- stays the layout's.
+    setFullscreen, informFullscreen,
 
     -- * Outputs
     --
@@ -195,6 +197,7 @@ import Control.Monad.Reader (ask, asks)
 import Control.Monad.State (gets, modify)
 import qualified Data.ByteString.Char8 as BC
 import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 
 import XMonad.Core
 import Data.List (find, sortOn)
@@ -504,6 +507,22 @@ useClientDecorations w = emitOp (OpUseDecorations w False)
 -- from its event hook.  Only legal during a manage sequence.
 informFullscreen :: Window -> Bool -> X ()
 informFullscreen w full = emitOp (OpInformFullscreen w full)
+
+-- | Make a window fullscreen, or stop it being.
+--
+-- river sizes it to the output of the screen its workspace is on and draws
+-- it above the layout and the bar, without borders; the client is told.
+-- Leaving puts it back where the layout has it.  What the 'WindowSet' does
+-- with the window meanwhile is the caller's: "XMonad.Hooks.EwmhDesktops"
+-- floats it, so that leaving has somewhere to restore to.  A workspace
+-- switch keeps it fullscreen, and a restart does not: river drops the state
+-- with the window manager.
+setFullscreen :: Window -> Bool -> X ()
+setFullscreen w full = do
+  ref <- asks (riverFullscreen . riverState)
+  io (modifyIORef' ref (if full then S.insert w else S.delete w))
+  inSeq <- io . readIORef =<< asks (inManageSeq . riverState)
+  unless inSeq manageDirty
 
 -- | The connector name of a screen (@eDP-1@, @DP-3@), if the compositor
 -- offers @wl_output@ version 4.  Screen ids follow the outputs sorted by

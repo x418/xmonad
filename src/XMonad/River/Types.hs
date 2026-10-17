@@ -288,6 +288,10 @@ data RiverWindow = RiverWindow
     -- read whenever it liked.  river reports it as a pair of events instead,
     -- so the answer has to be accumulated -- and each arrives before the
     -- manage sequence it triggers, which is what lets a manage hook ask.
+  , rwFullscreenHint :: !(Maybe ObjectId)
+    -- ^ The output the request named, if it named one: the client's
+    -- preference, which 'XMonad.River.setFullscreen' weighs against the
+    -- screen the window's workspace is on.
   , rwHidden     :: !Bool
   , rwCaptureSessions :: !Word32
     -- ^ Screen-capture sessions open on the window, from

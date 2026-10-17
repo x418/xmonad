@@ -168,6 +168,9 @@ placements, borders, visibility, stacking, focus.  A few requests are
 one-shot effects -- `close`, `pointer_warp`, `set_capabilities` -- and are
 `Op`s, drained as they are sent.  Re-sending a plan is free; re-sending an op
 is a bug.
+Fullscreen is plan state: `planFullscreen` names the windows river draws
+fullscreen and their outputs, and the manage sequence sends what differs from
+what river was last told, so a workspace switch costs nothing.
 
 An `Op` is strict, first-order data.  User functions are evaluated only by the
 worker and must never be stored in an op or in loop-owned state.  Input-device
@@ -212,8 +215,6 @@ keyboard with nobody reading it is a session with no keyboard.
   restart to the last committed state (`restartGraceMicros`).  The loop could
   write it from the last published plan, at the cost of `ReleaseResources`
   becoming best-effort.
-- **Compositor-side fullscreen.**  `river_window_v1.fullscreen` is not used;
-  fullscreen is the layout's, with `inform_fullscreen` telling the client.
 - **Decorations are shell surfaces.**  Contrib draws tab bars and overlays
   on `river_shell_surface_v1` and the render sequence positions and
   `place_top`s them every frame.  `river_decoration_v1`
@@ -238,3 +239,10 @@ always arrives in the batch before a `manage_start` and with river already
 in the manage state (`XkbBinding.zig` schedules, `Seat.manageStart` sends).
 Two things rest on it: a queued action needs no `manage_dirty`, and the
 panic chord's teardown lands in the sequence its press precedes.
+
+A window river draws fullscreen sits in its own layer, above the `top` layer
+the bar is in.  River does not draw a hidden fullscreen window, and draws it
+fullscreen again when it is shown, with no configure.  Every shell surface
+listed after a fullscreen window in the render order joins that layer, on
+every output, which is why fullscreen windows are listed last.  River clears
+fullscreen when the window manager disconnects and when the output goes.
