@@ -274,6 +274,19 @@ test-suite river-screen
   -- Screen reconciliation is pure and must preserve StackSet's uniqueness
   -- invariant even when there are more outputs than workspaces.
 
+test-suite river-fullscreen
+  type:           exitcode-stdio-1.0
+  main-is:        river-fullscreen-spec.hs
+  hs-source-dirs: tests
+  build-depends:  base
+                , containers
+                , xmonad
+  default-language: Haskell2010
+  ghc-options:    -Wall
+
+  -- Which output a fullscreen window goes to, what river is told when that
+  -- changes, and where fullscreen windows sit in the render order.
+
 test-suite river-drag
   type:           exitcode-stdio-1.0
   main-is:        river-drag-spec.hs
@@ -300,6 +313,18 @@ executable river-submap-spec
   -- only the window manager has any.  So it links the library and calls
   -- 'launch' with a config of its own, the way somebody's xmonad.hs does.
   -- tests/headless-submap.sh runs it inside a headless river and reads its log.
+
+executable river-fullscreen-wm
+  main-is:        river-fullscreen-wm.hs
+  hs-source-dirs: tests
+  build-depends:  base
+                , containers
+                , xmonad
+  default-language: Haskell2010
+  ghc-options:    -Wall -threaded
+
+  -- A window manager granting fullscreen on a schedule; see
+  -- tests/headless-fullscreen.sh, which runs it inside a headless river.
 
 executable river-prompt-spec
   main-is:        river-prompt-spec.hs
