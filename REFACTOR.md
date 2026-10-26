@@ -1,6 +1,6 @@
 # Review and refactor
 
-A review of the backend as taken from mgsloan (2026-09-02), and what was done
+A review of the backend as forked at dec3b72d (2026-09-02), and what was done
 about it.  Findings first, then the checklist.  `DESIGN.md` describes the
 result; this records the path.
 
