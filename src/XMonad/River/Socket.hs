@@ -20,6 +20,7 @@ module XMonad.River.Socket
   ( sendWithFds
   , recvWithFds
   , recvWithFdsInto
+  , closeOnExecAll
   ) where
 
 import Control.Monad (when)
@@ -43,6 +44,11 @@ foreign import ccall unsafe "hs_wl_sendmsg_fds"
 foreign import ccall unsafe "hs_wl_recvmsg_fds"
   c_recvmsg_fds :: CInt -> Ptr Word8 -> CSize -> Ptr CInt -> CSize -> Ptr CSize
                 -> IO CInt
+
+foreign import ccall unsafe "hs_wl_cloexec_all"
+  closeOnExecAll :: IO ()
+  -- ^ Every descriptor above stderr becomes close-on-exec; called before the
+  -- exec that is a restart.
 
 -- | The most descriptors one message may carry.  Kept in step with the array
 -- sizes in @src\/cbits\/wl-fd.c@, which rejects more.

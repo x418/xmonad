@@ -179,3 +179,39 @@ hs_wl_munmap(void *addr, size_t size)
 {
     return munmap(addr, size);
 }
+
+/* --- restart ---------------------------------------------------------------
+ *
+ * Mark every descriptor above stderr close-on-exec, for the exec that is a
+ * restart.  The compositor sockets are created that way; this is for what
+ * was not: GHC's ticker pipe, and anything a config opened and forgot.
+ */
+
+#include <dirent.h>
+#include <stdlib.h>
+#include <linux/close_range.h>
+
+void
+hs_wl_cloexec_all(void)
+{
+    DIR *dir;
+    struct dirent *entry;
+
+#ifdef CLOSE_RANGE_CLOEXEC
+    if (close_range(3, ~0U, CLOSE_RANGE_CLOEXEC) == 0)
+        return;
+#endif
+    dir = opendir("/proc/self/fd");
+    if (dir == NULL)
+        return;
+    while ((entry = readdir(dir)) != NULL) {
+        int fd = atoi(entry->d_name);
+        int flags;
+        if (fd <= 2)
+            continue;
+        flags = fcntl(fd, F_GETFD);
+        if (flags >= 0)
+            fcntl(fd, F_SETFD, flags | FD_CLOEXEC);
+    }
+    closedir(dir);
+}

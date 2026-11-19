@@ -58,7 +58,7 @@ import Data.ByteString (ByteString)
 import Data.IORef
 import Data.Word (Word16, Word32, Word8)
 import Foreign.ForeignPtr (ForeignPtr, mallocForeignPtrBytes)
-import System.Environment (lookupEnv)
+import System.Environment (lookupEnv, unsetEnv)
 import qualified Data.ByteString as BS
 import qualified Data.IntMap.Strict as IM
 import qualified Network.Socket as N
@@ -155,6 +155,10 @@ connect = do
   case mSock >>= readMaybeInt of
     Just fd -> do
       sock <- N.mkSocket (fromIntegral (fd :: Int))
+      closeOnExec sock
+      -- As libwayland: the descriptor is this connection's alone, and a
+      -- prompt's second 'connect' or a spawned client must not take it.
+      unsetEnv "WAYLAND_SOCKET"
       newConnection sock
     Nothing -> do
       disp <- maybe "wayland-0" id <$> lookupEnv "WAYLAND_DISPLAY"
@@ -174,8 +178,15 @@ connect = do
 connectTo :: FilePath -> IO Connection
 connectTo path = do
   sock <- N.socket N.AF_UNIX N.Stream N.defaultProtocol
+  closeOnExec sock
   N.connect sock (N.SockAddrUnix path)
   newConnection sock
+
+-- | A restart is an exec, and a connection that outlived it would stay open
+-- in the successor: river keeps the client and whatever it left mapped, a
+-- prompt's keyboard grab included, with nobody left who can close it.
+closeOnExec :: N.Socket -> IO ()
+closeOnExec sock = N.withFdSocket sock N.setCloseOnExecIfNeeded
 
 -- | Over a connected socket: a test's socketpair.
 connectSocket :: N.Socket -> IO Connection

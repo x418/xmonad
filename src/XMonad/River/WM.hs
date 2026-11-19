@@ -54,6 +54,7 @@ import XMonad.River.Protocol.LayerShell
 import XMonad.River.Protocol.WindowManagement
 import XMonad.River.Protocol.XkbBindings
 import XMonad.River.Runtime (RestartRequested(..), exitLoopWith, sendRestart, setMainThread)
+import XMonad.River.Socket (closeOnExecAll)
 import XMonad.River.State
 import XMonad.River.Types
 import XMonad.River.WM.Events
@@ -565,7 +566,7 @@ onManagerEvent rt = \case
   -- in place, with no shell in between, which is what makes M-q a restart.
   RiverWindowManagerV1Finished -> readIORef (shRestart sh) >>= \case
     Nothing  -> exitSuccess
-    Just (prog, as) -> executeFile prog True as Nothing
+    Just (prog, as) -> closeOnExecAll >> executeFile prog True as Nothing
   RiverWindowManagerV1ManageStart -> do
     writeIORef (rtDirtySent rt) False
     n <- atomicModifyIORef' (rtSeqNo rt) (\k -> (k + 1, k + 1))

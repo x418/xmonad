@@ -74,6 +74,7 @@ chmod 700 "$RT"
 LOG=$RT/river.log
 WMLOG=$RT/wm.log
 PSLOG=$RT/ps.log
+FDLOG=$RT/fd.log
 trap 'rm -rf "$RT"' EXIT
 
 # A data directory of our own, so the state file and the pid file cannot touch
@@ -85,11 +86,13 @@ mkdir -p "$DATA"
 cat > "$RT/init.sh" <<EOF
 #!/bin/sh
 "$WM" > "$WMLOG" 2>&1 &
+wm=\$!
 sleep 3
 $CLIENT >> "$WMLOG" 2>&1 &
 sleep 2
 $CLIENT >> "$WMLOG" 2>&1 &
 sleep 4
+ls /proc/\$wm/fd | wc -l > "$FDLOG"
 # The restart, sent the way a separate process has to send it.  Going through
 # the pid file rather than pkill is deliberate: it exercises the path that
 # 'xmonad --restart' takes, which was calling sendRestart in the wrong process
@@ -102,6 +105,7 @@ sleep 6
 # four windows instead of two -- and the counts below catch it.
 "$WM" --restart >> "$WMLOG" 2>&1
 sleep 6
+ls /proc/\$wm/fd | wc -l >> "$FDLOG"
 # What the window manager's process tree looks like once the dust settles.
 # A restart that goes through a shell leaves one behind -- sh -c execs only in
 # the narrowest cases and otherwise forks and waits -- and each restart
@@ -182,6 +186,14 @@ leaked=$(grep -F -- "$WM" "$PSLOG" 2>/dev/null | grep -cF -- "sh -c")
 [ "${leaked:-0}" -eq 0 ] \
     && report "no shell left behind by the restarts" ok \
     || report "no shell left behind by the restarts (found ${leaked})" no
+
+# A restart is an exec: a descriptor that is not close-on-exec is the
+# successor's too.  The compositor socket was one, and river kept the
+# predecessor's connection, and everything left on it, for the session.
+mapfile -t fds < "$FDLOG"
+[ "${#fds[@]}" -eq 2 ] && [ "${fds[1]}" -le "${fds[0]}" ] \
+    && report "two restarts leaked no descriptor (${fds[0]} before, ${fds[1]} after)" ok \
+    || report "two restarts leaked no descriptor (${fds[0]:-?} before, ${fds[1]:-?} after)" no
 
 backend_trouble=$(grep -nE '^xmonad-river:|protocol error|invalid object' "$WMLOG" 2>/dev/null \
                   | grep -v '^[0-9]*:xmonad-river: note:')
