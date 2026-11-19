@@ -24,7 +24,7 @@ import Control.Monad.State (get, gets, modify, put)
 import Data.IORef
 import Data.List (find, partition, sortOn)
 import Data.Maybe (fromMaybe)
-import Data.Monoid (appEndo)
+import Data.Monoid (All(..), appEndo)
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import System.Directory (doesFileExist)
@@ -39,7 +39,7 @@ import XMonad.River.Plan
 import XMonad.River.Protocol.WindowManagement (riverWindowV1CapabilitiesFullscreen)
 import XMonad.River.State
 import XMonad.River.Types
-import XMonad.River.WM.Runtime (broadcastEvent, screensOf)
+import XMonad.River.WM.Runtime (broadcastEvent, dispatchEvent, screensOf)
 import XMonad.River.Wire (ObjectId)
 import qualified XMonad.StackSet as W
 
@@ -146,9 +146,10 @@ reapClosed = do
   adopted <- io (readIORef (wsAdopted (rsWorker rs)))
   forM_ [ w | w <- M.elems ws, rwClosed w ] $ \w -> do
     let announce = S.member (rwObject w) adopted
-    when announce $ void (broadcastEvent (DestroyWindowEvent (rwObject w)))
+    All pass <- if announce then broadcastEvent (DestroyWindowEvent (rwObject w))
+                            else pure (All False)
     modify $ \st -> st { windowset = W.delete (rwObject w) (windowset st) }
-    when announce $ broadcastMessage (DestroyWindowEvent (rwObject w))
+    when pass $ broadcastMessage (DestroyWindowEvent (rwObject w))
     io $ modifyIORef' (wsAdopted (rsWorker rs)) (S.delete (rwObject w))
     io $ modifyIORef' (riverUnsized rs) (S.delete (rwObject w))
     -- river recycles ids; an override left behind would land on an
@@ -158,11 +159,11 @@ reapClosed = do
 
   outs <- io (readIORef (riverOutputs rs))
   forM_ [ o | o <- M.elems outs, roRemoved o ] $ \o ->
-    void (broadcastEvent (OutputRemoved (roObject o)))
+    dispatchEvent (OutputRemoved (roObject o))
 
   seats <- io (readIORef (riverSeats rs))
   let gone = [ s | s <- M.elems seats, rsRemoved s ]
-  forM_ gone $ \s -> void (broadcastEvent (SeatRemoved (rsObject s)))
+  forM_ gone $ \s -> dispatchEvent (SeatRemoved (rsObject s))
   -- A drag's @op_release@ never arrives once its seat is gone; end it here
   -- or every later drag is ignored.
   unless (null gone) $ gets dragging >>= mapM_ snd
@@ -216,7 +217,7 @@ syncScreens = do
                 . sortOn W.screen . screensOf $ updated
     when (before /= applied) $ do
       modify $ \st -> st { windowset = updated }
-      void (broadcastEvent ScreenLayoutChanged)
+      dispatchEvent ScreenLayoutChanged
 
 -- | Lay the given screen rectangles over the current workspaces, keeping
 -- each workspace on its screen and the focused one focused.  Only a change
@@ -292,7 +293,7 @@ adoptNewWindows = do
               Nothing -> False
       when unsized $ io $ modifyIORef' (riverUnsized rs) (S.insert (rwObject w))
       modify $ \st -> st { windowset = final }
-      void (broadcastEvent (WindowAdded (rwObject w)))
+      dispatchEvent (WindowAdded (rwObject w))
 
 -- | Give a float adopted before river had sized it the size the client chose:
 -- centred on its screen at the dimensions river has now reported.  Once per

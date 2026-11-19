@@ -42,6 +42,9 @@ module XMonad.River (
     -- gets an action run: it is queued and executed at the start of the next
     -- manage sequence, which the loop requests as soon as it wakes.
     postAction, postLoop,
+    -- | An event of the window manager's own making, to the config's hook
+    -- and the layouts as river's are: what a timer posts when it fires.
+    dispatchEvent,
 
     -- * Driving the manage sequence
     --
@@ -213,6 +216,7 @@ import XMonad.River.Protocol.XkbBindings
 import XMonad.River.Ops (emitNow, emitOp)
 import XMonad.River.Plan (KeyboardLayoutRequest(..), Op(..))
 import XMonad.River.Runtime (RestartRequested(..), warnUnimplemented)
+import XMonad.River.WM.Runtime (dispatchEvent)
 import XMonad.River.Types
 import XMonad.River.State
 import XMonad.River.Wire (ObjectId, decodeUtf8, encodeUtf8)

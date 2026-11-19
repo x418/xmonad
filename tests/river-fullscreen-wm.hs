@@ -1,7 +1,12 @@
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 -- | A window manager that grants fullscreen with 'setFullscreen', the way
 -- "XMonad.Hooks.EwmhDesktops" does, and then on a timer takes it back, gives
--- it again and closes the window while it is fullscreen.
+-- it again and closes the window while it is fullscreen.  It also notes a
+-- title change once in the event hook and once in the layout, which is where
+-- a tab bar redraws a retitled window.
 --
 -- A window manager rather than a client, for the reason
 -- @tests\/river-submap-spec.hs@ gives: the code under test is the window
@@ -12,6 +17,7 @@ module Main (main) where
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Monad (void)
 import Data.IORef (readIORef)
+import Data.List (isPrefixOf)
 import Data.Monoid (All (..))
 import System.Environment (lookupEnv)
 import System.Exit (exitFailure)
@@ -41,9 +47,10 @@ main = do
   dirs <- getDirectories
   launch (testConfig path) dirs
 
-testConfig :: FilePath -> XConfig (Choose Tall (Choose (Mirror Tall) Full))
+testConfig :: FilePath -> XConfig (Witness (Choose Tall (Choose (Mirror Tall) Full)))
 testConfig path = def
   { handleEventHook = events path
+  , layoutHook = Witness path (layoutHook def)
   , startupHook = ask >>= io . void . forkIO . drive path
   }
 
@@ -56,7 +63,30 @@ events path = \case
   DestroyWindowEvent _ -> do
     note path "destroyed"
     pure (All True)
+  WindowTitleChanged{} -> do
+    noteOnce path "hook heard a title"
+    pure (All True)
   _ -> pure (All True)
+
+noteOnce :: FilePath -> String -> X ()
+noteOnce path msg = do
+  seen <- io (lines <$> readFile' path)
+  if any (msg `isPrefixOf`) seen then pure () else note path msg
+
+-- | The config's layout, noting the first title change it is sent.
+data Witness l a = Witness FilePath (l a)
+  deriving (Show, Read)
+
+instance LayoutClass l Window => LayoutClass (Witness l) Window where
+  runLayout (W.Workspace t (Witness p l) ms) r = do
+    (rs, ml) <- runLayout (W.Workspace t l ms) r
+    pure (rs, Witness p <$> ml)
+  handleMessage (Witness p l) m = do
+    case fromMessage m of
+      Just WindowTitleChanged{} -> noteOnce p "layout heard a title"
+      _ -> pure ()
+    fmap (Witness p) <$> handleMessage l m
+  description (Witness _ l) = description l
 
 -- | Leaving floats the window over the middle quarter, so that its size out
 -- of fullscreen cannot be mistaken for the output's.

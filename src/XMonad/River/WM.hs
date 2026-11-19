@@ -603,12 +603,12 @@ onManagerEvent rt = \case
   RiverWindowManagerV1Window win -> addWindow rt win
   RiverWindowManagerV1Output out -> do
     addOutput rt out
-    rtSubmit rt (void (broadcastEvent (OutputAdded out)))
+    rtSubmit rt (dispatchEvent (OutputAdded out))
   RiverWindowManagerV1Seat seat  -> do
     addSeat rt seat
-    rtSubmit rt (void (broadcastEvent (SeatAdded seat)))
-  RiverWindowManagerV1SessionLocked   -> rtSubmit rt (void (broadcastEvent SessionLocked))
-  RiverWindowManagerV1SessionUnlocked -> rtSubmit rt (void (broadcastEvent SessionUnlocked))
+    rtSubmit rt (dispatchEvent (SeatAdded seat))
+  RiverWindowManagerV1SessionLocked   -> rtSubmit rt (dispatchEvent SessionLocked)
+  RiverWindowManagerV1SessionUnlocked -> rtSubmit rt (dispatchEvent SessionUnlocked)
   RiverWindowManagerV1Unknown{} -> pure ()
   where
     conn = rtConn rt

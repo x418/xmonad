@@ -20,6 +20,7 @@ module XMonad.River.WM.Runtime
   , liveSeats
   , adjust
   , broadcastEvent
+  , dispatchEvent
   , screensOf
   , allEdges
   , sizeBound
@@ -27,7 +28,8 @@ module XMonad.River.WM.Runtime
   ) where
 
 import Control.Concurrent.STM (TVar)
-import Control.Monad.Reader (asks)
+import Control.Monad (when)
+import Control.Monad.Reader (asks, local)
 import Data.IORef
 import Data.Int (Int32)
 import Data.Monoid (All(..))
@@ -36,6 +38,7 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
 import XMonad.Core
+import XMonad.Operations (broadcastMessage)
 import XMonad.River.Connection (Connection, Global)
 import qualified XMonad.River.Mailbox as MB
 import XMonad.River.Plan (Border, FocusTarget)
@@ -220,10 +223,20 @@ liveSeats = filter (not . rsRemoved) . M.elems
 adjust :: IORef (M.Map ObjectId a) -> ObjectId -> (a -> a) -> IO ()
 adjust ref k f = modifyIORef' ref (M.adjust f k)
 
+-- | The config's event hook alone, for the one event whose layouts hear of
+-- it later: see 'XMonad.River.WM.Sequence.reapClosed'.
 broadcastEvent :: Event -> X All
 broadcastEvent ev = do
   hook <- asks (handleEventHook . config)
-  userCodeDef (All True) (hook ev)
+  local (\c -> c { currentEvent = Just ev }) (userCodeDef (All True) (hook ev))
+
+-- | An event as upstream's loop delivered one: the config's hook, then every
+-- layout, unless the hook answered @All False@.  The layouts are where a
+-- press on a decoration, a title change or a timer is acted on.
+dispatchEvent :: Event -> X ()
+dispatchEvent ev = do
+  All pass <- broadcastEvent ev
+  when pass (broadcastMessage ev)
 
 -- | The screens a 'WindowSet' currently has, current first.
 screensOf :: WindowSet -> [W.Screen WorkspaceId (Layout Window) Window ScreenId ScreenDetail]

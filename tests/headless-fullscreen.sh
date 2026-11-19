@@ -105,6 +105,15 @@ if ! grep -qx 'requested True' "$ACTIONS" 2>/dev/null; then
 fi
 pass "the client asked for fullscreen and the event hook heard it"
 
+# upstream's loop sent every event to the event hook and then to every
+# layout; a tab bar redraws a retitled window from the layout's half.
+grep -qx 'hook heard a title' "$ACTIONS" \
+    && pass "a title change reached the event hook" \
+    || fail "a title change reached the event hook"
+grep -qx 'layout heard a title' "$ACTIONS" \
+    && pass "a title change reached the layout" \
+    || fail "a title change reached the layout"
+
 # The window the client opened: the one river forwarded the request for.
 win=$(grep -oE 'river_window_v1#[0-9]+\.fullscreen_requested' "$LOG" | head -1 | cut -d. -f1)
 node=$(grep -oE "${win}\.get_node\(new id river_node_v1#[0-9]+\)" "$LOG" | head -1 | grep -oE 'river_node_v1#[0-9]+')
@@ -162,7 +171,7 @@ grep -qx 'granted 0' "$ACTIONS" \
     || fail "a window closed while fullscreen was let go ($(grep '^granted' "$ACTIONS"))"
 
 trouble=$(grep -nE '^river-fullscreen-wm:|protocol error|invalid object|no such interface' "$WMLOG" 2>/dev/null \
-          | grep -vE 'river-fullscreen-wm: (requested|leave|enter|close|destroyed|granted)')
+          | grep -vE 'river-fullscreen-wm: (requested|leave|enter|close|destroyed|granted|hook heard|layout heard)')
 if [ -n "$trouble" ]; then
     fail "the window manager reported no errors"
     echo "$trouble" | head -10 | sed 's/^/    /' >&2

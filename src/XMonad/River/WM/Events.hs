@@ -61,8 +61,17 @@ addWindow rt win = do
     }
   riverWindowV1Listen conn win $ \case
     RiverWindowV1Closed        -> adjust ref win $ \w -> w { rwClosed = True }
-    RiverWindowV1AppId a       -> adjust ref win $ \w -> w { rwAppId = a }
-    RiverWindowV1Title t       -> adjust ref win $ \w -> w { rwTitle = t }
+    RiverWindowV1AppId a -> do
+      changed <- differs ref rwAppId a
+      adjust ref win $ \w -> w { rwAppId = a }
+      when changed $ queueAction rt (dispatchEvent (WindowAppIdChanged win a))
+    -- X11's PropertyNotify on WM_NAME, which also ran the log hook.
+    RiverWindowV1Title t -> do
+      changed <- differs ref rwTitle t
+      adjust ref win $ \w -> w { rwTitle = t }
+      when changed $ queueAction rt $ do
+        dispatchEvent (WindowTitleChanged win t)
+        io . flip writeIORef True =<< asks (riverLogDue . riverState)
     RiverWindowV1UnreliablePid p -> adjust ref win $ \w -> w { rwPid = Just p }
     RiverWindowV1Identifier i  -> adjust ref win $ \w -> w { rwIdentifier = Just i }
     RiverWindowV1CaptureSessions n -> do
@@ -92,10 +101,10 @@ addWindow rt win = do
       adjust ref win $ \w -> w
         { rwFullscreen = True
         , rwFullscreenHint = if isNullObject out then Nothing else Just out }
-      queueAction rt $ void $ broadcastEvent (WindowFullscreenChanged win True)
+      queueAction rt $ dispatchEvent (WindowFullscreenChanged win True)
     RiverWindowV1ExitFullscreenRequested -> do
       adjust ref win $ \w -> w { rwFullscreen = False, rwFullscreenHint = Nothing }
-      queueAction rt $ void $ broadcastEvent (WindowFullscreenChanged win False)
+      queueAction rt $ dispatchEvent (WindowFullscreenChanged win False)
     -- A client-side title bar being dragged: the same interactive operation
     -- the mod-drag bindings start, from the edges the client named.
     RiverWindowV1PointerMoveRequested _ -> queueAction rt (mouseMoveWindow win)
@@ -105,7 +114,9 @@ addWindow rt win = do
     RiverWindowV1TouchResizeRequested seat point edges ->
       queueAction rt (touchResizeWindowEdges seat point edges win)
     _ -> pure ()
-  where conn = rtConn rt
+  where
+    conn = rtConn rt
+    differs ref field new = maybe False ((/= new) . field) . M.lookup win <$> readIORef ref
 
 addOutput :: Runtime -> ObjectId -> IO ()
 addOutput rt out = do
@@ -236,7 +247,7 @@ addSeat rt seat = do
     RiverSeatV1ShellSurfaceInteraction surf -> do
       seats <- readIORef ref
       let (px, py) = maybe (0, 0) rsPointer (M.lookup seat seats)
-      queueAction rt $ void $ broadcastEvent (SurfaceClicked surf px py)
+      queueAction rt $ dispatchEvent (SurfaceClicked surf px py)
     -- An interactive operation reports the total offset since it began;
     -- 'XMonad.Operations.mouseDrag' promised its caller an absolute position.
     RiverSeatV1OpDelta dx dy -> queueAction rt $ do
