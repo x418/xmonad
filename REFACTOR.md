@@ -129,7 +129,7 @@ rendering state legal in either sequence.  What did not:
 | S2 | versions: manager ≥ 4 for `identifier`; river 0.4.6 advertises 5; xkb `get_seat` ≥ 2, `modifiers_watch` ≥ 3 | ✅ after D4 |
 | S3 | `pointer_resize_requested` edges ignored: always bottom-right | open, low |
 | S4 | a client resizing itself (a render sequence with no manage) leaves a float's recorded rectangle behind | open, low |
-| S5 | `river_decoration_v1`, `sync_next_commit`, `set_clip_box`, `set_dimension_bounds` unused | DESIGN.md open questions |
+| S5 | `river_decoration_v1`, `set_clip_box`, `set_dimension_bounds` unused; `sync_next_commit` used for shell surfaces | DESIGN.md open questions |
 
 ### Checklist
 

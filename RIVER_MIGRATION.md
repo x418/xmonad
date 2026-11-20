@@ -164,7 +164,8 @@ window managers without restarting itself or any client.
 `handleEventHook :: Event -> X All` keeps its type, but `Event` is a different
 type. It is no longer an Xlib event union; river delivers window management as
 a protocol with a manage/render sequence rather than a stream of events to
-interpret. The constructors are:
+interpret. As upstream, an event goes to the hook and then to every layout as
+a message, unless the hook returns `All False`. The constructors are:
 
 ```haskell
 DestroyWindowEvent{ev_window}   WindowAdded{ev_window}
@@ -175,6 +176,8 @@ ScreenLayoutChanged
 SessionLocked   SessionUnlocked
 KeyPressed{ev_state, ev_keysym}
 TimerFired !Int
+WindowFullscreenChanged{ev_window, ev_fullscreen}
+SurfaceClicked{ev_window, ev_x, ev_y}
 ```
 
 Two of these are worth knowing about:

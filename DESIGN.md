@@ -216,18 +216,26 @@ keyboard with nobody reading it is a session with no keyboard.
   write it from the last published plan, at the cost of `ReleaseResources`
   becoming best-effort.
 - **Decorations are shell surfaces.**  Contrib draws tab bars and overlays
-  on `river_shell_surface_v1` and the render sequence positions and
-  `place_top`s them every frame.  `river_decoration_v1`
-  (`get_decoration_above` + `set_offset`) would have river move, hide and
-  order them with their window, and `sync_next_commit` would make a
-  decoration's frame atomic with the layout's; `set_clip_box` would let
-  Magnifier keep off its neighbours' borders.  A contrib-scale change.
+  on `river_shell_surface_v1`; the worker queues what it drew and the loop
+  presents it with `sync_next_commit`, so a tab bar changes at the same
+  `render_finish` as its windows, and positions and `place_top`s them in the
+  render sequence.  `river_decoration_v1` (`get_decoration_above` +
+  `set_offset`) would have river move, hide and order them with their window;
+  `set_clip_box` would let Magnifier keep off its neighbours' borders.  A
+  contrib-scale change.
 - **`riverPlacements` is an assoc list**, kept for the stacking order
   `windowUnderPointer` needs; every lookup by window goes to `riverGeometry`.
 - **Render can postpone manage work.**  river gives a dirty render sequence
   priority over a dirty manage sequence, and configure acknowledgements can
   hold the render transition for up to 100 ms.  The protocol provides no
-  fairness guarantee if a client continually schedules rendering.
+  fairness guarantee if a client continually schedules rendering.  A render
+  start held back that long logs which windows the sequence configured.
+- **A layout runs only when something it reads changed.**  `windows`,
+  `manageDirty` and `afterLayout` ask for one; otherwise the visible stacks,
+  screens, floats, border overrides, raised, fullscreen and unsized windows,
+  outputs and a count of window hints are compared with what the last pass
+  read.  A layout that reads anything else -- a title, the clock -- is told
+  by an event or has to call `refresh`.
 
 ## Assumptions about river
 
