@@ -53,7 +53,7 @@ import XMonad.River.Protocol.Core
 import XMonad.River.Protocol.LayerShell
 import XMonad.River.Protocol.WindowManagement
 import XMonad.River.Protocol.XkbBindings
-import XMonad.River.Runtime (RestartRequested(..), exitLoopWith, sendRestart, setMainThread)
+import XMonad.River.Runtime (RestartRequested(..), exitLoopWith, restartPending, sendRestart, setMainThread, takeRestart)
 import XMonad.River.Socket (closeOnExecAll)
 import XMonad.River.State
 import XMonad.River.Types
@@ -390,7 +390,11 @@ run conn registry named manager managerVer bindings bindingsVer layerShell compo
         `orElse` nowOpsPending rs
         `orElse` (readTVar (shPlan sh) >>= \p -> check (planSerial p > max sent asked))
         `orElse` maybe retry (\(_, expired) -> readTVar expired >>= check) deadline
+        `orElse` restartPending
       loop = do
+        -- Between passes, so the handler finds no batch half dispatched.
+        restart <- takeRestart
+        when restart (throwIO RestartRequested)
         MB.drain mailbox >>= queueActions rt
         MB.drain (shLoopJobs sh) >>= sequence_
         expireCapture rt
@@ -426,8 +430,9 @@ run conn registry named manager managerVer bindings bindingsVer layerShell compo
           Left ()  -> dispatch conn
           Right () -> pure ()
         loop
-  -- A restart request is an async exception into this thread.  Ask river to
-  -- release us and keep dispatching: the @finished@ event does the exec.
+  -- A restart request is thrown here by the loop itself, or by
+  -- 'sendRestart' into a loop too wedged to take it.  Ask river to release
+  -- us and keep dispatching: the @finished@ event does the exec.
   let restartGraceMicros = 2 * 1000 * 1000
   -- Tell river before exiting: @stop@ is what releases this window manager,
   -- and river exits with it.

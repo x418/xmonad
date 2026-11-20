@@ -10,13 +10,16 @@
 module XMonad.River.Runtime
   ( RestartRequested(..)
   , sendRestart
+  , restartPending
+  , takeRestart
   , exitLoopWith
   , setMainThread
   , warnUnimplemented
   ) where
 
-import Control.Concurrent (ThreadId, myThreadId)
-import Control.Monad (unless)
+import Control.Concurrent (ThreadId, forkIO, myThreadId, threadDelay)
+import Control.Concurrent.STM (STM, TVar, atomically, check, newTVarIO, readTVar, swapTVar, writeTVar)
+import Control.Monad (unless, void, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.IORef
 import System.Exit (ExitCode)
@@ -49,14 +52,35 @@ exitLoopWith code = readIORef mainThreadRef >>= \case
 
 -- | Ask the window manager to restart itself, from any thread.
 --
--- An asynchronous exception into the loop's thread: under the threaded
--- runtime it interrupts the blocking socket read, so this takes effect at
--- once rather than at the next event.
+-- A flag the loop waits on and takes between passes, where no batch is half
+-- dispatched and no request half written.  A loop that has not taken it
+-- within 'restartGraceMicros' is wedged, and gets 'RestartRequested' as an
+-- asynchronous exception instead, which is what @xmonad --restart@ is for.
 sendRestart :: IO ()
 sendRestart = readIORef mainThreadRef >>= \case
-  Just tid -> E.throwTo tid RestartRequested
+  Just tid -> do
+    atomically (writeTVar restartWanted True)
+    void . forkIO $ do
+      threadDelay restartGraceMicros
+      stuck <- atomically (swapTVar restartWanted False)
+      when stuck (E.throwTo tid RestartRequested)
   Nothing -> hPutStrLn stderr
     "xmonad-river: sendRestart called before the event loop started"
+
+{-# NOINLINE restartWanted #-}
+restartWanted :: TVar Bool
+restartWanted = unsafePerformIO (newTVarIO False)
+
+-- | Retries until a restart has been asked for; for the loop's wait.
+restartPending :: STM ()
+restartPending = readTVar restartWanted >>= check
+
+-- | Whether a restart has been asked for, clearing the request.
+takeRestart :: IO Bool
+takeRestart = atomically (swapTVar restartWanted False)
+
+restartGraceMicros :: Int
+restartGraceMicros = 2 * 1000 * 1000
 
 -- | Complain, once per process, that something is doing less than it says.
 --
