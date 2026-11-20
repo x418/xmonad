@@ -26,7 +26,7 @@ module XMonad.River (
     -- globals are what such a surface is created against.  This is the whole
     -- contract; "XMonad.River.State" is the backend's own.
     riverWindows, riverOverlays, riverOverlayPos,
-    riverShm, riverCompositor, riverManager,
+    riverShm, riverCompositor, riverManager, riverPresents,
     BorderColor,
     -- | @\"#rrggbb\"@ to the RGBA form river wants.  X11 resolved a colour
     -- name against the server's colormap and could fail for reasons a config

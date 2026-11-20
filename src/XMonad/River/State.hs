@@ -30,7 +30,7 @@ module XMonad.River.State
   , riverKeyboardLayout
   , inManageSeq, riverPlaced, riverRestack, riverDragOrigin, riverDragTouch, riverAfterLayout
   , riverUnsized, riverLogDue, riverBorders, riverSubmapGen, riverFullscreen
-  , riverLayoutDue, riverLaidOut, riverHintsGen
+  , riverLayoutDue, riverLaidOut, riverHintsGen, riverPresents
     -- * What a layout pass reads
   , LayoutInputs(..)
     -- * Where the last layout put things
@@ -53,6 +53,7 @@ import qualified Data.Set as S
 import XMonad.River.Connection (Connection)
 import XMonad.River.Mailbox (Mailbox)
 import XMonad.River.Plan (Op, Plan)
+import XMonad.River.Surface (Presents)
 import XMonad.River.Types (BorderColor, Dimension, KeyMask, KeySym, Position, Rectangle, RiverOutput, RiverSeat, RiverWindow, Window)
 import XMonad.River.Wire (ObjectId)
 import qualified XMonad.StackSet as W
@@ -168,6 +169,9 @@ data Shared m = Shared
       -- ^ Where the pointer was when a layout pass last moved a window.  A
       -- @pointer_enter@ with the pointer still there is the layout's doing,
       -- not the pointer's.
+    , shPresents :: !Presents
+      -- ^ Window-manager surfaces the worker has drawn, for the loop to
+      -- present in step with the frame; see "XMonad.River.Surface".
     , shHintsGen :: !(IORef Int)
       -- ^ Counts what the loop records that a layout may read and the
       -- 'WindowSet' does not show: size hints, fullscreen hints.  Loop-written.
@@ -326,6 +330,8 @@ riverLaidOut :: RiverState m -> IORef (Maybe LayoutInputs)
 riverLaidOut = wsLaidOut . rsWorker
 riverHintsGen :: RiverState m -> IORef Int
 riverHintsGen = shHintsGen . rsShared
+riverPresents :: RiverState m -> Presents
+riverPresents = shPresents . rsShared
 {-# INLINE riverManager #-}
 {-# INLINE riverBindings #-}
 {-# INLINE riverManagerVersion #-}
@@ -361,6 +367,7 @@ riverHintsGen = shHintsGen . rsShared
 {-# INLINE riverLayoutDue #-}
 {-# INLINE riverLaidOut #-}
 {-# INLINE riverHintsGen #-}
+{-# INLINE riverPresents #-}
 
 -- | What 'XMonad.Core.withDisplay' hands out.  X11's was the server
 -- connection; the queries contrib makes on it -- 'XMonad.Core.getWindowAttributes',

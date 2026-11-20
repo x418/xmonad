@@ -35,6 +35,7 @@ import XMonad.River.Protocol.LayerShell
 import XMonad.River.Protocol.WindowManagement
 import XMonad.River.Protocol.XkbBindings
 import XMonad.River.State (InputCapture(..), Shared(..))
+import XMonad.River.Surface (presentPending)
 import XMonad.River.Types
 import XMonad.River.WM.Bindings (armCapture, bindGrabbedSeat, bindSeat, isCapture, reconcileAddedSeat)
 import XMonad.River.WM.Input (installInputConfig, setKeyboardLayout, setKeymap)
@@ -82,6 +83,8 @@ transmitManage rt plan = do
         riverXkbBindingsSeatV1CancelEnsureNextKeyEaten conn
     writeIORef (rtEatGenerations rt) M.empty
     writeIORef (rtDisarm rt) False
+
+  presentPending conn (shPresents sh)
 
   -- river remembers the layer-surface default; reissued only when it moves.
   forM_ (planLayerDefault plan) $ \(out, mLayerObj) -> do
@@ -314,6 +317,7 @@ transmitRender rt = do
   let given = RenderInput (planSerial plan) windowsGen overlays
                 (M.restrictKeys positions (S.fromList overlays))
   lastGiven <- readIORef (rtLastRendered rt)
+  presentPending (rtConn rt) (shPresents sh)
   when (planSerial plan > 0) $ unless (given == lastGiven) $ do
     atomicWriteIORef (rtLastRendered rt) $! given
     renderPlan rt plan known overlays positions

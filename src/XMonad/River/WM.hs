@@ -56,6 +56,7 @@ import XMonad.River.Protocol.WindowManagement
 import XMonad.River.Protocol.XkbBindings
 import XMonad.River.Runtime (RestartRequested(..), exitLoopWith, restartPending, sendRestart, setMainThread, takeRestart)
 import XMonad.River.Socket (closeOnExecAll)
+import XMonad.River.Surface (newPresents)
 import XMonad.River.State
 import XMonad.River.Types
 import XMonad.River.WM.Events
@@ -106,6 +107,7 @@ run :: Connection -> ObjectId -> M.Map Word32 Global -> ObjectId -> Word32 -> Ob
     -> Maybe ObjectId -> Maybe ObjectId -> Maybe ObjectId -> [Global] -> XConfig Layout
     -> Directories -> IO ()
 run conn registry named manager managerVer bindings bindingsVer layerShell compositor shm globals userConfig dirs = do
+  manageRef <- newIORef False
   sh <- do
     windowsRef  <- newIORef M.empty
     outputsRef  <- newIORef M.empty
@@ -126,6 +128,10 @@ run conn registry named manager managerVer bindings bindingsVer layerShell compo
     restartRef  <- newIORef Nothing
     moved       <- newIORef Nothing
     hintsGen    <- newIORef 0
+    -- Only the worker draws: outside a manage sequence it has to ask for one.
+    presents    <- newPresents $ do
+      inSeq <- readIORef manageRef
+      unless inSeq $ atomically (writeTVar dirtyVar True)
     pure Shared
       { shManager        = manager
       , shManagerVersion = managerVer
@@ -154,9 +160,9 @@ run conn registry named manager managerVer bindings bindingsVer layerShell compo
       , shRestart        = restartRef
       , shLayoutMoved    = moved
       , shHintsGen       = hintsGen
+      , shPresents       = presents
       }
   wstate <- do
-    manageRef   <- newIORef False
     placed      <- newIORef (Placed [] M.empty)
     restackRef  <- newIORef []
     dragOrigin  <- newIORef (0, 0)
