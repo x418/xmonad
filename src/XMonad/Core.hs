@@ -879,11 +879,13 @@ compile dirs method =
     -- @-threaded@: the river backend's loop and worker are two OS-level
     -- threads (safe FFI in "XMonad.River.Xkb", 'throwTo' for restart and
     -- panic, 'xfork'); the non-threaded runtime serialises them behind one
-    -- blocking foreign call.
+    -- blocking foreign call.  @-Iw30@ as in xmonad.cabal: one idle GC per
+    -- 30 s rather than one after every burst of events.
     ghcArgs :: [String]
     ghcArgs = [ "--make"
               , "xmonad.hs"
               , "-threaded"
+              , "-with-rtsopts=-Iw30"
               , "-i" -- only look in @lib@
               , "-ilib"
               , "-fforce-recomp"
