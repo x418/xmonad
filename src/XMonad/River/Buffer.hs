@@ -20,6 +20,8 @@ module XMonad.River.Buffer
   , newBuffer
   , destroyBuffer
   , bufferSize
+  , scaledSize
+  , newScaledBuffer
   ) where
 
 import Control.Exception (bracketOnError)
@@ -81,6 +83,12 @@ data Buffer = Buffer
   , bufStride :: !Int
     -- ^ Bytes per row.  Four times the width for the 32-bit formats, but kept
     -- explicit because cairo picks its own stride and the two must agree.
+  , bufScale  :: !Int
+    -- ^ Pixels per logical pixel, in 120ths as @wp_fractional_scale_v1@
+    -- reports it; 120 is unscaled.
+  , bufLogical :: !(Int, Int)
+    -- ^ The size the buffer is shown at, in logical pixels.  What is drawn
+    -- is drawn at this size, scaled by 'bufScale'.
   }
 
 -- | Bytes the mapping occupies.
@@ -124,7 +132,22 @@ newBuffer conn shm width height = do
     , bufWidth  = width
     , bufHeight = height
     , bufStride = stride
+    , bufScale  = 120
+    , bufLogical = (width, height)
     }
+
+-- | A logical size at a scale in 120ths, in buffer pixels: rounded half up,
+-- as @wp_fractional_scale_v1@ asks.
+scaledSize :: Int -> (Int, Int) -> (Int, Int)
+scaledSize scale (w, h) = (px w, px h)
+  where px n = max 1 ((n * scale + 60) `div` 120)
+
+-- | A buffer to show at a logical size, at a scale in 120ths.
+newScaledBuffer :: Connection -> ObjectId -> Int -> (Int, Int) -> IO Buffer
+newScaledBuffer conn shm scale logical = do
+  let (w, h) = scaledSize scale logical
+  b <- newBuffer conn shm w h
+  pure b { bufScale = scale, bufLogical = logical }
 
 -- | Release a buffer and unmap its pixels.
 --

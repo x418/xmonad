@@ -51,6 +51,8 @@ import qualified XMonad.River.Control as Ctl
 import qualified XMonad.River.Mailbox as MB
 import XMonad.River.Plan
 import XMonad.River.Protocol.Core
+import XMonad.River.Protocol.FractionalScale (wpFractionalScaleManagerV1Interface, wpFractionalScaleManagerV1Version)
+import XMonad.River.Protocol.Viewporter (wpViewporterInterface, wpViewporterVersion)
 import XMonad.River.Protocol.LayerShell
 import XMonad.River.Protocol.WindowManagement
 import XMonad.River.Protocol.XkbBindings
@@ -84,6 +86,12 @@ riverMain userConfig dirs = do
   mCompositor <- bindGlobal conn registry globals
                    wlCompositorInterface 4 wlCompositorVersion
   mShm <- bindGlobal conn registry globals wlShmInterface 1 wlShmVersion
+  -- Optional: without both, the window manager's own surfaces are drawn at
+  -- scale 1 and river scales them.
+  mViewporter <- bindGlobal conn registry globals wpViewporterInterface 1 wpViewporterVersion
+  mFractional <- bindGlobal conn registry globals
+                   wpFractionalScaleManagerV1Interface 1 wpFractionalScaleManagerV1Version
+  let scaling = (,) <$> fmap fst mViewporter <*> fmap fst mFractional
   case (mManager, mBindings) of
     (Just (manager, managerVer), Just (bindings, bindingsVer)) -> do
       when (isNothing mLayerShell) $ hPutStrLn stderr
@@ -96,7 +104,7 @@ riverMain userConfig dirs = do
         "xmonad-river: river_xkb_bindings_v1 is version 1; submaps cannot \
         \detect an unbound key and will wait for one of their own"
       run conn registry named manager managerVer bindings bindingsVer (fmap fst mLayerShell)
-          (fmap fst mCompositor) (fmap fst mShm) globals userConfig dirs
+          (fmap fst mCompositor) (fmap fst mShm) scaling globals userConfig dirs
     _ -> do
       hPutStrLn stderr
         "xmonad-river: river_window_manager_v1 (>= 4) or \
@@ -104,9 +112,9 @@ riverMain userConfig dirs = do
       exitFailure
 
 run :: Connection -> ObjectId -> M.Map Word32 Global -> ObjectId -> Word32 -> ObjectId -> Word32
-    -> Maybe ObjectId -> Maybe ObjectId -> Maybe ObjectId -> [Global] -> XConfig Layout
-    -> Directories -> IO ()
-run conn registry named manager managerVer bindings bindingsVer layerShell compositor shm globals userConfig dirs = do
+    -> Maybe ObjectId -> Maybe ObjectId -> Maybe ObjectId -> Maybe (ObjectId, ObjectId)
+    -> [Global] -> XConfig Layout -> Directories -> IO ()
+run conn registry named manager managerVer bindings bindingsVer layerShell compositor shm scaling globals userConfig dirs = do
   manageRef <- newIORef False
   sh <- do
     windowsRef  <- newIORef M.empty
@@ -129,9 +137,12 @@ run conn registry named manager managerVer bindings bindingsVer layerShell compo
     moved       <- newIORef Nothing
     hintsGen    <- newIORef 0
     -- Only the worker draws: outside a manage sequence it has to ask for one.
-    presents    <- newPresents $ do
-      inSeq <- readIORef manageRef
-      unless inSeq $ atomically (writeTVar dirtyVar True)
+    -- A new scale is the layout's to redraw for, as a size hint is.
+    presents    <- newPresents scaling
+      (do inSeq <- readIORef manageRef
+          unless inSeq $ atomically (writeTVar dirtyVar True))
+      (do modifyIORef' hintsGen (+ 1)
+          atomically (writeTVar dirtyVar True))
     pure Shared
       { shManager        = manager
       , shManagerVersion = managerVer

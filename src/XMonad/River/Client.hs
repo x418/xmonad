@@ -92,7 +92,7 @@ module XMonad.River.Client
 
 import Control.Concurrent (ThreadId, forkIO, killThread, myThreadId)
 import Control.Concurrent.STM (STM, TVar, atomically, check, newTVarIO, orElse, readTVar, readTVarIO, registerDelay, retry, writeTVar)
-import Control.Monad (forM_, unless, void, when)
+import Control.Monad (forM, forM_, unless, void, when)
 import Data.Bits ((.&.), (.|.))
 import Data.IORef
 import Data.List (intercalate)
@@ -107,7 +107,9 @@ import XMonad.River.Connection
 import XMonad.River.Mailbox (Mailbox)
 import qualified XMonad.River.Mailbox as MB
 import XMonad.River.Protocol.Core
+import XMonad.River.Protocol.FractionalScale
 import XMonad.River.Protocol.LayerShellClient
+import XMonad.River.Protocol.Viewporter
 import XMonad.River.Types (KeyMask, shiftMask, controlMask, mod1Mask, mod3Mask, mod4Mask, mod5Mask)
 import XMonad.River.Wire (ObjectId, nullObject)
 import qualified Data.Map.Strict as M
@@ -248,6 +250,13 @@ data Client = Client
   , clRunning :: !(IORef Bool)
   , clWatch   :: !(TVar Watch)
     -- ^ The startup watchdog's state; the loop waits on it with the inbox.
+  , clScale :: !(IORef Int)
+    -- ^ The scale the compositor prefers for the surface, in 120ths.
+  , clViewport :: !(Maybe ObjectId)
+  , clFractional :: !(Maybe ObjectId)
+    -- ^ Present when the compositor offers @wp_viewporter@ and
+    -- @wp_fractional_scale_manager_v1@; without them the prompt is drawn at
+    -- scale 1.
   , clConfigured :: !(IORef Bool)
     -- ^ Whether the compositor has sent a @configure@ and it has been acked.
     --
@@ -269,6 +278,8 @@ clientMain spec inbox = do
   mShm   <- bind wlShmInterface wlShmVersion
   mSeat  <- bind wlSeatInterface wlSeatVersion
   mShell <- bind zwlrLayerShellV1Interface zwlrLayerShellV1Version
+  mViewporter <- bind wpViewporterInterface wpViewporterVersion
+  mFractional <- bind wpFractionalScaleManagerV1Interface wpFractionalScaleManagerV1Version
 
   case (mComp, mShm, mShell) of
     (Just (comp, _), Just (shm, _), Just (shell, _)) -> do
@@ -302,8 +313,17 @@ clientMain spec inbox = do
       running <- newIORef True
       watch <- newTVarIO WatchDone
       configured <- newIORef False
+      scaleRef <- newIORef 120
+      let scaling = (,) <$> fmap fst mViewporter <*> fmap fst mFractional
+      viewport <- forM scaling $ \(viewporter, _) -> wpViewporterGetViewport conn viewporter surface
+      fractional <- forM scaling $ \(_, manager) -> wpFractionalScaleManagerV1GetFractionalScale conn manager surface
       let cl = Client conn shm surface layer bufRef sizeRef xkbRef kbRef
-                      focusRef running watch configured
+                      focusRef running watch scaleRef viewport fractional configured
+      forM_ fractional $ \fs -> wpFractionalScaleV1Listen conn fs $ \case
+        WpFractionalScaleV1PreferredScale n -> do
+          old <- atomicModifyIORef' scaleRef (\o -> (fromIntegral n, o))
+          when (old /= fromIntegral n) (redraw spec cl)
+        WpFractionalScaleV1Unknown{} -> pure ()
 
       when (csKeyboard spec) $
         forM_ mSeat $ \(seat, _) -> setupKeyboard spec cl seat
@@ -578,22 +598,22 @@ redraw spec cl = do
   ready <- readIORef (clConfigured cl)
   when (alive && ready) $ do
     (w, h) <- readIORef (clSize cl)
+    scale <- maybe (pure 120) (const (readIORef (clScale cl))) (clViewport cl)
     existing <- readIORef (clBuffer cl)
+    let fresh = do
+          b <- newScaledBuffer (clConn cl) (clShm cl) scale (w, h)
+          writeIORef (clBuffer cl) (Just b)
+          pure b
     buf <- case existing of
-      Just b | bufWidth b == w && bufHeight b == h -> pure b
-      Just b -> do
-        destroyBuffer (clConn cl) b
-        fresh <- newBuffer (clConn cl) (clShm cl) w h
-        writeIORef (clBuffer cl) (Just fresh)
-        pure fresh
-      Nothing -> do
-        fresh <- newBuffer (clConn cl) (clShm cl) w h
-        writeIORef (clBuffer cl) (Just fresh)
-        pure fresh
+      Just b | bufLogical b == (w, h) && bufScale b == scale -> pure b
+      Just b -> destroyBuffer (clConn cl) b >> fresh
+      Nothing -> fresh
     guarded "draw" (csDraw spec buf)
     wlSurfaceAttach (clConn cl) (clSurface cl) (bufObject buf) 0 0
     wlSurfaceDamageBuffer (clConn cl) (clSurface cl) 0 0
-      (fromIntegral w) (fromIntegral h)
+      (fromIntegral (bufWidth buf)) (fromIntegral (bufHeight buf))
+    forM_ (clViewport cl) $ \v ->
+      wpViewportSetDestination (clConn cl) v (fromIntegral w) (fromIntegral h)
     wlSurfaceCommit (clConn cl) (clSurface cl)
     flush (clConn cl)
 
@@ -620,6 +640,8 @@ shutdown spec cl = do
     step "buffer"  (readIORef (clBuffer cl) >>= mapM_ (destroyBuffer (clConn cl)))
     step "keymap"  (readIORef (clXkb cl) >>= mapM_ freeXkbState)
     step "surface" $ do
+      forM_ (clViewport cl) (wpViewportDestroy (clConn cl))
+      forM_ (clFractional cl) (wpFractionalScaleV1Destroy (clConn cl))
       zwlrLayerSurfaceV1Destroy (clConn cl) (clLayer cl)
       wlSurfaceDestroy (clConn cl) (clSurface cl)
       flush (clConn cl)

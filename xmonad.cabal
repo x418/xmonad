@@ -118,6 +118,8 @@ library
                    XMonad.River.Protocol.LayerShellClient
                    XMonad.River.Protocol.LibinputConfig
                    XMonad.River.Protocol.VirtualKeyboard
+                   XMonad.River.Protocol.Viewporter
+                   XMonad.River.Protocol.FractionalScale
                    XMonad.River.Protocol.WindowManagement
                    XMonad.River.Protocol.XkbBindings
                    XMonad.River.Protocol.XkbConfig

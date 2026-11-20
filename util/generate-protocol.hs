@@ -37,6 +37,10 @@ import qualified Text.XML as X
 waylandCommit :: String
 waylandCommit = "1.26.0"
 
+-- | The wayland-protocols release the scaling protocols are taken from.
+protocolsRelease :: String
+protocolsRelease = "1.48"
+
 -- | The river commit the river protocols are taken from: the head of @main@,
 -- not a release tag, because protocol text is fixed on @main@ between
 -- releases and the tags lag it (v0.4.8 still carries the wording @main@
@@ -71,8 +75,14 @@ sources =
     , river "protocol/upstream/wlr-layer-shell-unstable-v1.xml" )
   , ( "virtual-keyboard-unstable-v1.xml"
     , river "protocol/upstream/virtual-keyboard-unstable-v1.xml" )
+  , ( "viewporter.xml"
+    , protocols "stable/viewporter/viewporter.xml" )
+  , ( "fractional-scale-v1.xml"
+    , protocols "staging/fractional-scale/fractional-scale-v1.xml" )
   ]
   where
+    protocols p =
+      "https://gitlab.freedesktop.org/wayland/wayland-protocols/-/raw/" ++ protocolsRelease ++ "/" ++ p
     wayland p =
       "https://gitlab.freedesktop.org/wayland/wayland/-/raw/" ++ waylandCommit ++ "/" ++ p
     river p =
@@ -111,6 +121,10 @@ targets =
   -- wants to press a key has to give the seat one.  Generated here rather than
   -- hand-written for the same reason as everything else in Protocol/.
   , ("virtual-keyboard-unstable-v1.xml", "XMonad.River.Protocol.VirtualKeyboard", Nothing)
+  -- Window-manager surfaces at the output's scale: the buffer is drawn at
+  -- the preferred fractional scale and the viewport maps it back.
+  , ("viewporter.xml",                 "XMonad.River.Protocol.Viewporter", Nothing)
+  , ("fractional-scale-v1.xml",        "XMonad.River.Protocol.FractionalScale", Nothing)
   ]
 
 --------------------------------------------------------------------------------
@@ -519,7 +533,7 @@ fetchSources = do
   -- until somebody deleted the directory by hand, and the modules were
   -- regenerated from the old text.
   let stamp = protocolDir </> "PIN"
-      pin = unlines [riverCommit, waylandCommit]
+      pin = unlines [riverCommit, waylandCommit, protocolsRelease]
   havePin <- doesFileExist stamp
   current <- if havePin then (== pin) <$> readFile stamp else pure False
   unless current $ do
