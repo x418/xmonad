@@ -24,7 +24,7 @@ module XMonad.River.State
   , InputCapture(..)
   , Display'(..)
     -- * The names the rest of xmonad reads the state by
-  , riverManager, riverBindings, riverXkbVersion, riverBorderWidth, riverCompositor, riverShm
+  , riverManager, riverManagerVersion, riverBindings, riverXkbVersion, riverBorderWidth, riverCompositor, riverShm
   , riverWindows, riverOutputs, riverSeats, riverDirty, riverRestart, riverMailbox, riverLoopJobs
   , riverExtraKeys, riverOverlays, riverOverlayPos, riverCapture, riverOps, riverNowOps
   , riverKeyboardLayout
@@ -85,6 +85,9 @@ data InputCapture m = InputCapture
 data Shared m = Shared
     { -- * Fixed for the connection's life
       shManager  :: !ObjectId               -- ^ the @river_window_manager_v1@ global
+    , shManagerVersion :: !Word32
+      -- ^ Its negotiated version: the touch operations arrived in 6, and the
+      -- minimum is 4.
     , shBindings :: !ObjectId               -- ^ the @river_xkb_bindings_v1@ global
     , shXkbVersion :: !Word32
       -- ^ The @river_xkb_bindings_v1@ version negotiated.  @modifiers_watch@
@@ -227,6 +230,8 @@ data RiverState m = RiverState
 riverManager, riverBindings :: RiverState m -> ObjectId
 riverManager = shManager . rsShared
 riverBindings = shBindings . rsShared
+riverManagerVersion :: RiverState m -> Word32
+riverManagerVersion = shManagerVersion . rsShared
 riverXkbVersion :: RiverState m -> Word32
 riverXkbVersion = shXkbVersion . rsShared
 riverBorderWidth :: RiverState m -> Dimension
@@ -287,6 +292,7 @@ riverFullscreen :: RiverState m -> IORef (S.Set Window)
 riverFullscreen = wsFullscreen . rsWorker
 {-# INLINE riverManager #-}
 {-# INLINE riverBindings #-}
+{-# INLINE riverManagerVersion #-}
 {-# INLINE riverXkbVersion #-}
 {-# INLINE riverBorderWidth #-}
 {-# INLINE riverCompositor #-}

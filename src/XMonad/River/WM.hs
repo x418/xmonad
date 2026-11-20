@@ -83,7 +83,7 @@ riverMain userConfig dirs = do
                    wlCompositorInterface 4 wlCompositorVersion
   mShm <- bindGlobal conn registry globals wlShmInterface 1 wlShmVersion
   case (mManager, mBindings) of
-    (Just (manager, _), Just (bindings, bindingsVer)) -> do
+    (Just (manager, managerVer), Just (bindings, bindingsVer)) -> do
       when (isNothing mLayerShell) $ hPutStrLn stderr
         "xmonad-river: river_layer_shell_v1 is unavailable; layer surfaces \
         \(launchers, notifications, wallpaper, bars) will not be shown"
@@ -93,7 +93,7 @@ riverMain userConfig dirs = do
       when (bindingsVer < 2) $ hPutStrLn stderr
         "xmonad-river: river_xkb_bindings_v1 is version 1; submaps cannot \
         \detect an unbound key and will wait for one of their own"
-      run conn registry named manager bindings bindingsVer (fmap fst mLayerShell)
+      run conn registry named manager managerVer bindings bindingsVer (fmap fst mLayerShell)
           (fmap fst mCompositor) (fmap fst mShm) globals userConfig dirs
     _ -> do
       hPutStrLn stderr
@@ -101,10 +101,10 @@ riverMain userConfig dirs = do
         \river_xkb_bindings_v1 not supported by the compositor"
       exitFailure
 
-run :: Connection -> ObjectId -> M.Map Word32 Global -> ObjectId -> ObjectId -> Word32
+run :: Connection -> ObjectId -> M.Map Word32 Global -> ObjectId -> Word32 -> ObjectId -> Word32
     -> Maybe ObjectId -> Maybe ObjectId -> Maybe ObjectId -> [Global] -> XConfig Layout
     -> Directories -> IO ()
-run conn registry named manager bindings bindingsVer layerShell compositor shm globals userConfig dirs = do
+run conn registry named manager managerVer bindings bindingsVer layerShell compositor shm globals userConfig dirs = do
   sh <- do
     windowsRef  <- newIORef M.empty
     outputsRef  <- newIORef M.empty
@@ -126,6 +126,7 @@ run conn registry named manager bindings bindingsVer layerShell compositor shm g
     moved       <- newIORef Nothing
     pure Shared
       { shManager        = manager
+      , shManagerVersion = managerVer
       , shBindings       = bindings
       , shXkbVersion     = bindingsVer
       , shBorderWidth    = borderWidth userConfig

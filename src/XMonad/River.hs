@@ -359,7 +359,10 @@ touchDrag sid point f done undo = do
     rs <- asks riverState
     drag <- gets dragging
     seats <- io (readIORef (riverSeats rs))
+    -- An op river cannot start would leave the drag held forever: nothing
+    -- would release it.
     if isJust drag || maybe True rsRemoved (M.lookup sid seats)
+       || riverManagerVersion rs < riverSeatV1OpStartTouchSince
       then pure False
       else do
         io (writeIORef (riverDragOrigin rs) (0, 0))
