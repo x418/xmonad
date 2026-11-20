@@ -87,7 +87,8 @@ addWindow rt win = do
       adjust ref win $ \w -> w { rwDimensions = (width, height) }
       when first $ atomically (writeTVar (shDirty (rtShared rt)) True)
     -- A bound of zero or less means the window did not state one.
-    RiverWindowV1DimensionsHint minW minH maxW maxH ->
+    RiverWindowV1DimensionsHint minW minH maxW maxH -> do
+      hintsChanged
       adjust ref win $ \w -> w { rwSizeHints = SizeHints
         { sh_min_size   = sizeBound minW minH
         , sh_max_size   = sizeBound maxW maxH
@@ -98,11 +99,13 @@ addWindow rt win = do
     -- The flag is set before the event is queued, so a hook reading
     -- 'XMonad.Hooks.ManageHelpers.isFullscreen' sees the answer it is told.
     RiverWindowV1FullscreenRequested out -> do
+      hintsChanged
       adjust ref win $ \w -> w
         { rwFullscreen = True
         , rwFullscreenHint = if isNullObject out then Nothing else Just out }
       queueAction rt $ dispatchEvent (WindowFullscreenChanged win True)
     RiverWindowV1ExitFullscreenRequested -> do
+      hintsChanged
       adjust ref win $ \w -> w { rwFullscreen = False, rwFullscreenHint = Nothing }
       queueAction rt $ dispatchEvent (WindowFullscreenChanged win False)
     -- A client-side title bar being dragged: the same interactive operation
@@ -116,6 +119,7 @@ addWindow rt win = do
     _ -> pure ()
   where
     conn = rtConn rt
+    hintsChanged = modifyIORef' (shHintsGen (rtShared rt)) (+ 1)
     differs ref field new = maybe False ((/= new) . field) . M.lookup win <$> readIORef ref
 
 addOutput :: Runtime -> ObjectId -> IO ()

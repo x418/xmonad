@@ -125,6 +125,7 @@ run conn registry named manager managerVer bindings bindingsVer layerShell compo
     overlayPos  <- newIORef M.empty
     restartRef  <- newIORef Nothing
     moved       <- newIORef Nothing
+    hintsGen    <- newIORef 0
     pure Shared
       { shManager        = manager
       , shManagerVersion = managerVer
@@ -152,6 +153,7 @@ run conn registry named manager managerVer bindings bindingsVer layerShell compo
       , shOverlayPos     = overlayPos
       , shRestart        = restartRef
       , shLayoutMoved    = moved
+      , shHintsGen       = hintsGen
       }
   wstate <- do
     manageRef   <- newIORef False
@@ -172,6 +174,8 @@ run conn registry named manager managerVer bindings bindingsVer layerShell compo
     restored    <- newIORef False
     floatSizes  <- newIORef M.empty
     fullscreen  <- newIORef S.empty
+    layoutDue   <- newIORef True
+    laidOut     <- newIORef Nothing
     pure WorkerState
       { wsInManageSeq = manageRef
       , wsPlaced      = placed
@@ -187,6 +191,8 @@ run conn registry named manager managerVer bindings bindingsVer layerShell compo
       , wsRestored    = restored
       , wsFloatSizes  = floatSizes
       , wsFullscreen  = fullscreen
+      , wsLayoutDue   = layoutDue
+      , wsLaidOut     = laidOut
       }
   let rs = RiverState sh wstate
 

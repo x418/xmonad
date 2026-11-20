@@ -30,6 +30,9 @@ module XMonad.River.State
   , riverKeyboardLayout
   , inManageSeq, riverPlaced, riverRestack, riverDragOrigin, riverDragTouch, riverAfterLayout
   , riverUnsized, riverLogDue, riverBorders, riverSubmapGen, riverFullscreen
+  , riverLayoutDue, riverLaidOut, riverHintsGen
+    -- * What a layout pass reads
+  , LayoutInputs(..)
     -- * Where the last layout put things
   , Placed(..), rectOf, placedRects, placedOrder, updatePlacement
     -- * One-shot requests
@@ -52,6 +55,7 @@ import XMonad.River.Mailbox (Mailbox)
 import XMonad.River.Plan (Op, Plan)
 import XMonad.River.Types (BorderColor, Dimension, KeyMask, KeySym, Position, Rectangle, RiverOutput, RiverSeat, RiverWindow, Window)
 import XMonad.River.Wire (ObjectId)
+import qualified XMonad.StackSet as W
 
 -- | An interaction that has taken the keyboard: a submap or a hold-to-cycle.
 -- Both disable the config's bindings and install their own; they differ in
@@ -164,6 +168,9 @@ data Shared m = Shared
       -- ^ Where the pointer was when a layout pass last moved a window.  A
       -- @pointer_enter@ with the pointer still there is the layout's doing,
       -- not the pointer's.
+    , shHintsGen :: !(IORef Int)
+      -- ^ Counts what the loop records that a layout may read and the
+      -- 'WindowSet' does not show: size hints, fullscreen hints.  Loop-written.
     }
 
 -- | The worker's own.  Reached through 'XMonad.Core.riverState' from 'X'
@@ -218,7 +225,30 @@ data WorkerState m = WorkerState
     , wsFullscreen :: !(IORef (S.Set Window))
       -- ^ Windows handed to river's fullscreen by 'XMonad.River.setFullscreen'.
       -- Dropped as they close: river recycles ids.
+    , wsLayoutDue :: !(IORef Bool)
+      -- ^ Something asked for the layout to run -- 'XMonad.Operations.windows',
+      -- 'XMonad.River.manageDirty', 'XMonad.River.afterLayout' -- since the
+      -- last pass began.
+    , wsLaidOut :: !(IORef (Maybe LayoutInputs))
+      -- ^ What the last pass read, as it stood when the pass ended.  A
+      -- sequence that finds the same and nothing asking runs no layout.
     }
+
+-- | What a layout pass reads besides the layouts' own state: the visible
+-- workspaces with their screens and stacks, the floats, the border
+-- overrides, what is raised, fullscreen or unsized, the live outputs, and a
+-- count of the window hints the loop has recorded.  A layout reading more
+-- than this -- a title, say -- is told of a change by an event.
+data LayoutInputs = LayoutInputs
+    { liScreens    :: ![(String, Rectangle, Maybe (W.Stack Window))]
+    , liFloating   :: !(M.Map Window W.RationalRect)
+    , liBorders    :: !(M.Map Window BorderOverride)
+    , liRaised     :: ![Window]
+    , liFullscreen :: !(S.Set Window)
+    , liUnsized    :: !(S.Set Window)
+    , liOutputs    :: ![(ObjectId, (Int32, Int32), (Int32, Int32))]
+    , liHints      :: !Int
+    } deriving (Eq, Show)
 
 -- | What @XConf@ carries: the two halves.  The names below are the ones
 -- "XMonad.Core", "XMonad.Operations" and contrib read them by.
@@ -290,6 +320,12 @@ riverSubmapGen :: RiverState m -> IORef Int
 riverSubmapGen = wsSubmapGen . rsWorker
 riverFullscreen :: RiverState m -> IORef (S.Set Window)
 riverFullscreen = wsFullscreen . rsWorker
+riverLayoutDue :: RiverState m -> IORef Bool
+riverLayoutDue = wsLayoutDue . rsWorker
+riverLaidOut :: RiverState m -> IORef (Maybe LayoutInputs)
+riverLaidOut = wsLaidOut . rsWorker
+riverHintsGen :: RiverState m -> IORef Int
+riverHintsGen = shHintsGen . rsShared
 {-# INLINE riverManager #-}
 {-# INLINE riverBindings #-}
 {-# INLINE riverManagerVersion #-}
@@ -322,6 +358,9 @@ riverFullscreen = wsFullscreen . rsWorker
 {-# INLINE riverBorders #-}
 {-# INLINE riverSubmapGen #-}
 {-# INLINE riverFullscreen #-}
+{-# INLINE riverLayoutDue #-}
+{-# INLINE riverLaidOut #-}
+{-# INLINE riverHintsGen #-}
 
 -- | What 'XMonad.Core.withDisplay' hands out.  X11's was the server
 -- connection; the queries contrib makes on it -- 'XMonad.Core.getWindowAttributes',

@@ -13,6 +13,8 @@ module XMonad.River.WM.Sequence
   , sameWindows
   , outputAt
   , fullscreenOutputs
+  , layoutInputs
+  , layoutNeeded
   ) where
 
 import Control.Applicative ((<|>))
@@ -78,7 +80,20 @@ manageSequence n acts = do
       -- written once either way.
       ready <- areasKnown
       if ready
-        then applyLayout layerDefault
+        then do
+          -- Cleared first: a 'windows' from the layout or an afterLayout
+          -- action is owed the next pass.
+          due <- io (atomicModifyIORef' (riverLayoutDue rs) (\d -> (False, d)))
+          laidOut <- io (readIORef (riverLaidOut rs))
+          now <- currentInputs
+          if layoutNeeded due laidOut now
+            then do
+              applyLayout layerDefault
+              io . writeIORef (riverLaidOut rs) . Just =<< currentInputs
+            -- The plan as it was, under a new serial: what waits for a
+            -- sequence's plan (a held prefix, a stranded serial) sees one.
+            else io $ atomically $ modifyTVar' (shPlan (rsShared rs)) $ \p ->
+                   p { planSerial = planSerial p + 1, planLayerDefault = layerDefault }
         else io $ atomically $ modifyTVar' (shPlan (rsShared rs)) $ \p ->
                p { planLayerDefault = layerDefault }
       -- The log hook, once: for every 'windows' the actions ran, which X11
@@ -90,6 +105,37 @@ manageSequence n acts = do
       io (writeIORef logDue False)
       when (due || not (sameWindows before after)) $
         asks (logHook . config) >>= userCodeDef ()
+
+-- | Whether a layout pass has to run: something asked, there has been none,
+-- or what it reads is not what the last one read.
+layoutNeeded :: Bool -> Maybe LayoutInputs -> LayoutInputs -> Bool
+layoutNeeded due laidOut now = due || laidOut /= Just now
+
+layoutInputs :: WindowSet -> M.Map Window BorderOverride -> [Window] -> S.Set Window
+             -> S.Set Window -> [RiverOutput] -> Int -> LayoutInputs
+layoutInputs ws borders raised full unsized outs hints = LayoutInputs
+  { liScreens    = [ (W.tag (W.workspace s), screenRect (W.screenDetail s), W.stack (W.workspace s))
+                   | s <- screensOf ws ]
+  , liFloating   = W.floating ws
+  , liBorders    = borders
+  , liRaised     = raised
+  , liFullscreen = full
+  , liUnsized    = unsized
+  , liOutputs    = [ (roObject o, roPosition o, roSize o) | o <- outs, not (roRemoved o) ]
+  , liHints      = hints
+  }
+
+currentInputs :: X LayoutInputs
+currentInputs = do
+  rs <- asks riverState
+  ws <- gets windowset
+  io $ layoutInputs ws
+    <$> readIORef (riverBorders rs)
+    <*> readIORef (riverRestack rs)
+    <*> readIORef (riverFullscreen rs)
+    <*> readIORef (riverUnsized rs)
+    <*> (M.elems <$> readIORef (riverOutputs rs))
+    <*> readIORef (riverHintsGen rs)
 
 -- | Every live output has reported its @non_exclusive_area@, or there is no
 -- layer shell to report one.

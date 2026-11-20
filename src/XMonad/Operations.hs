@@ -151,6 +151,7 @@ windows f = do
     -- The log hook runs once, at the end of the sequence, rather than here
     -- and there both; see 'XMonad.River.WM.Sequence.manageSequence'.
     io . flip writeIORef True =<< asks (riverLogDue . riverState)
+    io . flip writeIORef True =<< asks (riverLayoutDue . riverState)
 
 -- | Ask river for a manage sequence.  A flag the loop drains, because the
 -- loop owns the connection and this runs wherever an 'X' action does; the

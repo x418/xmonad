@@ -242,6 +242,7 @@ manageDirty :: X ()
 manageDirty = do
   ref <- asks (riverDirty . riverState)
   io (atomically (writeTVar ref True))
+  io . flip writeIORef True =<< asks (riverLayoutDue . riverState)
 
 -- | Run an action once the layout has been applied, rather than now.
 --
@@ -256,6 +257,7 @@ afterLayout :: X () -> X ()
 afterLayout act = do
   ref <- asks (riverAfterLayout . riverState)
   io (modifyIORef' ref (act :))
+  io . flip writeIORef True =<< asks (riverLayoutDue . riverState)
   inSeq <- io . readIORef =<< asks (inManageSeq . riverState)
   unless inSeq manageDirty
 
