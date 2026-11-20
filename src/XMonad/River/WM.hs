@@ -34,6 +34,7 @@ import Data.IORef
 import Data.List (isSuffixOf)
 import Data.Maybe (isNothing, listToMaybe)
 import Data.Word (Word32)
+import GHC.Clock (getMonotonicTimeNSec)
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import System.Directory (doesFileExist, findExecutable)
@@ -61,7 +62,7 @@ import XMonad.River.WM.Events
 import XMonad.River.WM.Input (InputRuntime, bindInput, installInputConfig, setKeyboardLayout, setKeymap)
 import XMonad.River.WM.Runtime
 import XMonad.River.WM.Sequence (manageSequence, runStartupHook)
-import XMonad.River.WM.Transmit (transmitManage, transmitRender)
+import XMonad.River.WM.Transmit (noteSlowRender, transmitManage, transmitRender)
 import XMonad.River.Wire (ObjectId)
 import qualified XMonad.StackSet as W
 
@@ -309,6 +310,11 @@ run conn registry named manager managerVer bindings bindingsVer layerShell compo
     lastOvPos  <- newIORef M.empty
     heldFrom   <- newIORef M.empty
     lastGiven  <- newIORef (RenderInput (-1) (-1) [] M.empty)
+    configuredRef <- newIORef []
+    lastConfigured <- newIORef []
+    focusSent  <- newIORef Nothing
+    finishedAt <- newIORef Nothing
+    slowNoted  <- newIORef (0, 0)
     pure Runtime
       { rtConn = conn
       , rtRegistry = registry
@@ -353,6 +359,11 @@ run conn registry named manager managerVer bindings bindingsVer layerShell compo
       , rtLastOverlayPos = lastOvPos
       , rtHeldFrom = heldFrom
       , rtLastRendered = lastGiven
+      , rtConfigured = configuredRef
+      , rtLastConfigured = lastConfigured
+      , rtFocusSent = focusSent
+      , rtManageFinished = finishedAt
+      , rtSlowNoted = slowNoted
       }
 
   riverWindowManagerV1Listen conn manager (onManagerEvent rt)
@@ -594,15 +605,18 @@ onManagerEvent rt = \case
     -- window would be dropped from the map while the WindowSet still holds it.
     when landed (reapObjects rt)
     plan <- readTVarIO (shPlan (rtShared rt))
+    writeIORef (rtConfigured rt) []
     transmitManage rt plan
     writeIORef (rtSent rt) (planSerial plan)
     riverWindowManagerV1ManageFinish conn (rtManager rt)
     -- Delivered before anything slow: the startup hook spawns enough to trip
     -- river's watchdog otherwise.
     flush conn
+    writeIORef (rtManageFinished rt) . Just =<< getMonotonicTimeNSec
     first <- atomicModifyIORef' (rtStartupSent rt) (\d -> (True, not d))
     when first $ rtSubmit rt runStartupHook
   RiverWindowManagerV1RenderStart -> do
+    noteSlowRender rt
     transmitRender rt
     riverWindowManagerV1RenderFinish conn (rtManager rt)
   -- Bookkeeping on the loop; only the config's hook goes to the worker.

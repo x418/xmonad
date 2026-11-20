@@ -25,6 +25,7 @@ module XMonad.River.WM.Runtime
   , allEdges
   , sizeBound
   , linuxButton
+  , configured
   ) where
 
 import Control.Concurrent.STM (TVar)
@@ -33,7 +34,7 @@ import Control.Monad.Reader (asks, local)
 import Data.IORef
 import Data.Int (Int32)
 import Data.Monoid (All(..))
-import Data.Word (Word32)
+import Data.Word (Word32, Word64)
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
@@ -160,6 +161,20 @@ data Runtime = Runtime
     -- ^ What the last render sequence was given.  A render sequence given
     -- the same again -- river starts one whenever a client changes its own
     -- size -- sends nothing.
+    -- why river waited, for the one line a slow render start gets
+  , rtConfigured     :: !(IORef [(Window, String)])
+    -- ^ What this manage sequence asked of each window that river turns
+    -- into a configure, newest first.
+  , rtLastConfigured :: !(IORef [(Window, String)])
+    -- ^ The same for the last sequence that asked anything: river re-tracks
+    -- a configure nobody answered on every sequence after it.
+  , rtFocusSent      :: !(IORef (Maybe Window))
+    -- ^ The window last given the keyboard, whose activation river configures.
+  , rtManageFinished :: !(IORef (Maybe Word64))
+    -- ^ When the last @manage_finish@ went out, monotonic nanoseconds.
+  , rtSlowNoted      :: !(IORef (Word64, Int))
+    -- ^ When a slow render start was last reported, and how many since were
+    -- not.
   }
 
 -- | What the last manage sequence proposed to one window.
@@ -251,6 +266,11 @@ sizeBound :: Int32 -> Int32 -> Maybe (Dimension, Dimension)
 sizeBound w h
   | w > 0 && h > 0 = Just (fromIntegral w, fromIntegral h)
   | otherwise      = Nothing
+
+-- | Record a request this sequence made that river configures the window
+-- for.  Loop thread only.
+configured :: Runtime -> Window -> String -> IO ()
+configured rt w what = modifyIORef' (rtConfigured rt) ((w, what) :)
 
 -- | X11 button numbers to Linux input event codes.
 linuxButton :: Button -> Word32

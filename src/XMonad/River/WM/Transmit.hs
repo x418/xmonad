@@ -12,13 +12,16 @@ module XMonad.River.WM.Transmit
   ( transmitManage
   , transmitRender
   , stackOrder
+  , noteSlowRender
   ) where
 
 import Control.Concurrent.STM (readTVarIO, registerDelay)
 import Control.Monad (forM, forM_, unless, void, when)
 import Data.Bits ((.&.), (.|.))
 import Data.IORef
+import Data.List (intercalate)
 import Data.Word (Word32)
+import GHC.Clock (getMonotonicTimeNSec)
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import System.IO (hPutStrLn, stderr)
@@ -36,7 +39,7 @@ import XMonad.River.Types
 import XMonad.River.WM.Bindings (armCapture, bindGrabbedSeat, bindSeat, isCapture, reconcileAddedSeat)
 import XMonad.River.WM.Input (installInputConfig, setKeyboardLayout, setKeymap)
 import XMonad.River.WM.Runtime
-import XMonad.River.Wire (ObjectId)
+import XMonad.River.Wire (ObjectId, decodeUtf8)
 
 -- | Send the window management half of a plan.
 --
@@ -96,18 +99,23 @@ transmitManage rt plan = do
     OpPointerOpEnd s -> when (M.member s seats) $ riverSeatV1OpEnd conn s
     OpTouchOpStart s p -> when (M.member s seats && touchOps) $ riverSeatV1OpStartTouch conn s p
     OpTouchOpEnd s p -> when (M.member s seats && touchOps) $ riverSeatV1OpEndTouch conn s p
-    OpUseDecorations w ssd -> when (M.member w known) $
+    OpUseDecorations w ssd -> when (M.member w known) $ do
       (if ssd then riverWindowV1UseSsd else riverWindowV1UseCsd) conn w
-    OpSetCapabilities w caps -> when (M.member w known) $
+      configured rt w (if ssd then "ssd" else "csd")
+    OpSetCapabilities w caps -> when (M.member w known) $ do
       riverWindowV1SetCapabilities conn w caps
-    OpInformFullscreen w full -> when (M.member w known) $
+      configured rt w "capabilities"
+    OpInformFullscreen w full -> when (M.member w known) $ do
       (if full then riverWindowV1InformFullscreen else riverWindowV1InformNotFullscreen) conn w
-    OpInformResize w start -> when (M.member w known) $
+      configured rt w (if full then "inform fullscreen" else "inform not fullscreen")
+    OpInformResize w start -> when (M.member w known) $ do
       (if start then riverWindowV1InformResizeStart else riverWindowV1InformResizeEnd) conn w
+      configured rt w (if start then "resize start" else "resize end")
     OpSetPosition w x y -> forM_ (M.lookup w known) $ \rw ->
       riverNodeV1SetPosition conn (rwNode rw) x y
-    OpProposeDimensions w dw dh -> when (M.member w known) $
+    OpProposeDimensions w dw dh -> when (M.member w known) $ do
       riverWindowV1ProposeDimensions conn w (fromIntegral dw) (fromIntegral dh)
+      configured rt w ("dimensions " ++ show dw ++ "x" ++ show dh)
     OpCaptureInput ks mods oneShot gen -> armCapture rt seats ks mods oneShot gen
     OpUngrabKeys -> do
       writeIORef (rtGrabbedKeys rt) Nothing
@@ -172,9 +180,11 @@ transmitManage rt plan = do
         (enter, leave, nowF) = fullscreenChanges live (ours lastF) (ours (planFullscreen plan))
     forM_ (M.toList enter) $ \(win, out) -> do
       riverWindowV1Fullscreen conn win out
+      configured rt win "fullscreen"
       unless (M.member win lastF) $ riverWindowV1InformFullscreen conn win
     forM_ leave $ \win -> do
       riverWindowV1ExitFullscreen conn win
+      configured rt win "exit fullscreen"
       riverWindowV1InformNotFullscreen conn win
       forM_ ((,) <$> M.lookup win known <*> M.lookup win (planPlaced plan)) $ \(rw, pl) ->
         riverNodeV1SetPosition conn (rwNode rw) (rect_x (plRect pl)) (rect_y (plRect pl))
@@ -200,6 +210,9 @@ transmitManage rt plan = do
         when resend $ do
           riverWindowV1ProposeDimensions conn win (fromIntegral pw) (fromIntegral ph)
           riverWindowV1SetTiled conn win (if tiled then allEdges else 0)
+          configured rt win $ "dimensions " ++ show pw ++ "x" ++ show ph
+            ++ (if tiled then " tiled" else " floating")
+            ++ " (client at " ++ show (fst dims) ++ "x" ++ show (snd dims) ++ ")"
         pure (win, ManageSent want dims)
     atomicWriteIORef (rtLastManage rt) $! current
 
@@ -235,10 +248,53 @@ transmitManage rt plan = do
           case t of
             FocusWindow win -> riverSeatV1FocusWindow conn (rsObject s) win
             ClearFocus -> riverSeatV1ClearFocus conn (rsObject s)
+    -- Activation is configured; note the windows whose activation moved.
+    forM_ target $ \t -> do
+      let now = case t of
+            FocusWindow win -> Just win
+            ClearFocus -> Nothing
+      before <- atomicModifyIORef' (rtFocusSent rt) (\b -> (now, b))
+      when (before /= now) $ do
+        forM_ before $ \w -> when (M.member w known) $ configured rt w "deactivated"
+        forM_ now $ \w -> configured rt w "activated"
   where
     conn = rtConn rt
     sh = rtShared rt
     touchOps = shManagerVersion sh >= riverSeatV1OpStartTouchSince
+
+-- | Report a render start that river held back for configures: its 100 ms
+-- timeout, which every sequence pays while one client leaves a configure
+-- unanswered.  Names what the last sequence asked, or, if it asked nothing,
+-- the last one that did: river re-tracks the unanswered configure.  One
+-- line a second at most.
+noteSlowRender :: Runtime -> IO ()
+noteSlowRender rt = do
+  finished <- atomicModifyIORef' (rtManageFinished rt) (\m -> (Nothing, m))
+  asked <- readIORef (rtConfigured rt)
+  unless (null asked) $ writeIORef (rtLastConfigured rt) asked
+  forM_ finished $ \t0 -> do
+    now <- getMonotonicTimeNSec
+    let waited = (now - t0) `div` 1000000
+    when (waited >= slowRenderMs) $ do
+      (lastAt, quiet) <- readIORef (rtSlowNoted rt)
+      if now - lastAt < 1000000000
+        then writeIORef (rtSlowNoted rt) (lastAt, quiet + 1)
+        else do
+          writeIORef (rtSlowNoted rt) (now, 0)
+          known <- readIORef (shWindows (rtShared rt))
+          earlier <- readIORef (rtLastConfigured rt)
+          let name w = show w ++ maybe "" (\a -> " (" ++ decodeUtf8 a ++ ")")
+                         (rwAppId =<< M.lookup w known)
+              describe = intercalate "; " . map (\(w, what) -> name w ++ " " ++ what) . reverse
+              why | not (null asked) = "after asking " ++ describe asked
+                  | null earlier = "with nothing asked of any window yet"
+                  | otherwise = "with nothing asked; last asked " ++ describe earlier
+              more | quiet > 0 = " (" ++ show quiet ++ " more since the last report)"
+                   | otherwise = ""
+          hPutStrLn stderr $ "xmonad-river: river held render for " ++ show waited
+            ++ " ms " ++ why ++ more
+  where
+    slowRenderMs = 95
 
 -- | Send the rendering half of a plan: positions, borders, visibility and
 -- stacking, then the window manager's own surfaces above the windows.
